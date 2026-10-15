@@ -86,3 +86,27 @@ world (`src/render/magic.js`, recipes in `src/render/spellfx.js`, element palett
 - Settings → "Spell effects": Enhanced (shaders) / Classic pixel. Falls back to classic if WebGL2
   is missing; context loss is handled (rebuilds on restore).
 - The terrain worker is inlined (`?worker&inline`); `npm run build:single` still makes a one-file build.
+
+## Pass 7: spammy combat, weapon loadout, lens camera, audio, UI, characters
+- Combat: hold left click to keep attacking (no charge attacks); combo finisher on every third
+  swing. Bows auto-loose at full draw, crossbows auto-reload, tomes in hand fire bolts. Ability
+  cooldowns and costs cut roughly in half; holding Q/E/R repeats the ability as soon as it's ready.
+- Weapon loadout (`src/systems/loadout.js`): four slots on keys 1-4 holding weapons or tomes. The
+  weapon in hand decides the Q/E/R kit (sword, mace, greatsword, dagger, spear, halberd, bow,
+  crossbow, staff, wand, fists, shield variants); a tome in hand gives its spells.
+- Grind loop: bigger, denser packs that aggro together, kill streaks (XP bonus, shouts from
+  KILLING SPREE to LEGEND OF THE ASH), richer drops with loot beams for rare and above.
+- Fast travel from the map to any discovered waypoint, including from inside dungeons (not in combat).
+- Camera lens (`src/render/post.js`): the finished frame is re-presented through WebGL with a
+  perspective tilt, tilt-shift depth of field, bloom, colour grade, sun shafts, and roll / zoom
+  punch / chromatic split on big moments; boss intros get a letterbox and slow-mo. Aiming maps
+  through the lens. Settings → Camera (Cinematic / Flat 2D) and Depth of field. Falls back to
+  flat on slow machines.
+- Audio (`src/audio/sfxEngine.js`, `sfxBank.js`, `sfxEvents.js`): procedural sound bank baked at
+  load, pooled voices with per-category rate limits, compressor/limiter and ducking, layered hits,
+  crits, finishers, spells, streak stingers.
+- UI: Moonlighter-style windows (inventory with paper doll + weapon row + bag + detail, skills by
+  weapon with Q/E/R and signature, map with fast travel), new HUD bar (weapons 1-4, Q/E/R, X,
+  potions Z/V). Windows reuse their DOM node so clicks no longer flash the UI.
+- Characters: reworked human sprite (hair, faces, gear shading), better run and swing poses, and
+  directional cast shadows (`src/px/shadow.js`) that follow the sun and fade at night and indoors.

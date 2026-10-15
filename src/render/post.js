@@ -169,6 +169,7 @@ export function presentPost(src, dt) {
 }
 // called when the player changes the camera setting
 export function resetPostGuard() { post.autoOff = false; post.slowFrames = 0; post.cost = 0; }
+bus.on('settingsChanged', (k) => { if (k === 'camera') resetPostGuard(); });
 
 // screen CSS px -> source-frame CSS px (what the game sees under the cursor)
 export function lensToSource(x, y) {
