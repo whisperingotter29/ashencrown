@@ -20,6 +20,9 @@ import { initClassMechanics, updateClassMech, useSignature } from './systems/cla
 import { useAbility } from './systems/abilities.js';
 import { ensureLoadout, switchSlot, currentKit, ABILITY_KEYS, LOADOUT_SIZE } from './systems/loadout.js';
 import { initStreak, updateStreak } from './systems/streak.js';
+import { ambientFx } from './render/spellfx.js';
+import { post } from './render/post.js';
+import { sunElevation } from './world/atmosphere.js';
 import { queryColliders } from './systems/collision.js';
 import { initProgression, gainXp } from './systems/progression.js';
 import { initQuests, updateQuests, startQuest, learnSkill, questDef, isActive } from './systems/quests.js';
@@ -72,6 +75,14 @@ initProgression();
 initQuests();
 initFactions();
 initStreak();
+// drifting motes in the air around the camera (dust, fireflies, spores, embers)
+ambientFx(() => {
+  if (G.mode !== 'play') return null;
+  if (G.realm === 'deep') return { kind: 'spores', rate: 6 };
+  if (G.realm === 'dungeon') return { kind: /fire|ember|forge|lava/.test(G.dungeon?.theme?.id || '') ? 'embers' : 'dust', rate: 3, alpha: 0.3 };
+  if (isNight()) return { kind: 'fireflies', rate: 3 };
+  return { kind: 'dust', rate: 4 };
+}).persistent = true;
 
 const params = new URLSearchParams(location.search);
 window.__G = G;
@@ -664,6 +675,15 @@ function playFrame(dt, rawDt) {
   atmo.indoorCfg = G.realm === 'deep' ? deepCfg : indoor ? atmo.indoorCfg : null;
   if (G.realm === 'dungeon' && G.dungeon) atmo.indoorCfg = { fog: G.dungeon.theme.fog, ambient: '#c8b4a4', light: G.dungeon.theme.light };
   updateWeather(rawDt, p.pos, G.realm !== 'surface');
+  // sun shafts through the lens on clear surface days, warmer near dawn and dusk
+  {
+    const el = G.realm === 'surface' ? sunElevation() : -1;
+    const wet = G.weather?.def?.wet || G.weather?.def?.fog;
+    const goal = el > 0.02 ? Math.min(1, el * 2) * (wet ? 0.25 : 1) : 0;
+    post.rays += (goal - post.rays) * Math.min(1, rawDt * 2);
+    const warm = 1 - Math.min(1, el * 2.5);
+    post.rayCol = [1, 0.93 - warm * 0.15, 0.78 - warm * 0.35];
+  }
   updateAtmosphere(dt, p.pos, cam.dist, G.weather);
   if (G.realm === 'surface') for (const L of terrain.glowLights) if ((L.x - p.pos.x) ** 2 + (L.z - p.pos.z) ** 2 < 2500) requestLight(L.x, L.y, L.z, L.color, 5, 9);
   updateVfx(rawDt, G.menuOpen && G.menuOpen !== 'dialogue' ? rawDt : dt);

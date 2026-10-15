@@ -850,3 +850,27 @@ export function lootBeamFx(pk, colorHex, rarityIndex) {
 }
 let G_pickupAlive = () => true;
 export function setPickupProbe(fn) { G_pickupAlive = fn; }
+
+// ================================================================== ambience
+// Life in the air around the camera: warm dust motes in daylight, blinking fireflies at night,
+// drifting cyan spores in the Deep, slow dust and embers in dungeons.
+export function ambientFx(getMode) {
+  let acc = 0;
+  return addMagic({
+    update(f, dt) {
+      const m = getMode();
+      if (!m) return true;
+      acc += dt * m.rate;
+      const view = magic.view;
+      while (acc > 1) {
+        acc -= 1;
+        const x = view.cx + rnd(-16, 16), z = view.cz + rnd(-10, 11), gy = ground(x, z);
+        if (m.kind === 'fireflies') gpart({ x, y: gy + rnd(0.3, 2.2), z, gy, vx: rnd(-0.4, 0.4), vy: rnd(-0.1, 0.2), vz: rnd(-0.4, 0.4), life: rnd(2.5, 4.5), size: 0.09, size1: 0.07, color: '#f4ffb0', color2: '#9ad040', kind: 'ember', hot: 1, drag: 0.2, wobble: 2, fadeIn: 0.25, floor: false });
+        else if (m.kind === 'spores') gpart({ x, y: gy + rnd(0.2, 3), z, gy, vx: rnd(-0.2, 0.2), vy: rnd(0.1, 0.4), vz: rnd(-0.2, 0.2), life: rnd(3, 5), size: 0.08, size1: 0.05, color: '#c0fff4', color2: '#40b0c0', kind: 'glow', hot: 0.6, drag: 0.1, wobble: 1, fadeIn: 0.3, floor: false });
+        else if (m.kind === 'embers') gpart({ x, y: gy + rnd(0, 1), z, gy, vx: rnd(-0.3, 0.3), vy: rnd(0.3, 0.8), vz: rnd(-0.3, 0.3), life: rnd(2, 3.5), size: 0.06, size1: 0.03, color: '#ffd090', color2: '#ff6020', kind: 'ember', hot: 1, drag: 0.1, wobble: 0.8, fadeIn: 0.2, floor: false });
+        else gpart({ x, y: gy + rnd(0.5, 3.5), z, gy, vx: rnd(0.1, 0.5), vy: rnd(-0.05, 0.1), vz: rnd(-0.1, 0.1), life: rnd(3, 5), size: 0.05, size1: 0.04, color: '#fff4d8', color2: '#ffd890', kind: 'glow', hot: 0.3, alpha: m.alpha ?? 0.5, drag: 0.1, wobble: 0.4, fadeIn: 0.35, floor: false });
+      }
+      return true;
+    },
+  });
+}

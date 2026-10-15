@@ -18,7 +18,8 @@ in vec2 uv;
 out vec4 o;
 uniform sampler2D src;
 uniform vec2 res;          // screen size in px
-uniform float tilt, zoom, roll, dof, bloom, aberr, grade;
+uniform float tilt, zoom, roll, dof, bloom, aberr, grade, rays, time;
+uniform vec3 rayCol;
 vec2 lens(vec2 u) {
   vec2 p = (u - .5) * res;                       // centred pixels
   float c = cos(roll), s = sin(roll);
@@ -42,6 +43,15 @@ void main() {
   vec3 b1 = tap(s, 3.5), b2 = tap(s, 5.);
   vec3 br = max(b1 - .74, 0.) * 1.6 + max(b2 - .62, 0.) * 1.1;
   col += br * bloom;
+  // sun shafts slanting in from the top left, slowly breathing
+  if (rays > .001) {
+    vec2 r = uv * vec2(res.x / res.y, 1.);
+    float a = dot(r, vec2(.78, -.62));
+    float band = .5 + .5 * sin(a * 11. + sin(a * 2.7 + time * .23) * 2.2 + time * .11);
+    band *= .5 + .5 * sin(a * 23. - time * .17);
+    float m = pow(band, 5.) * smoothstep(1.25, .05, uv.y + uv.x * .45);
+    col += rayCol * m * rays * .2;
+  }
   // grade: a touch more contrast and colour, cool shadows, warm highlights
   float l = dot(col, vec3(.299, .587, .114));
   col = mix(vec3(l), col, 1. + .1 * grade);
@@ -54,6 +64,7 @@ export const post = {
   ok: false, on: false, cv: null, gl: null, prog: null, tex: null, u: {},
   tilt: 0.16, dof: 1, bloom: 0.5, grade: 1,
   roll: 0, rollV: 0, punch: 0, aberr: 0,
+  rays: 0, rayCol: [1, 0.92, 0.75], time: 0,
 };
 
 export function initPost(container) {
@@ -81,7 +92,7 @@ export function initPost(container) {
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     const u = {};
-    for (const n of ['src', 'res', 'tilt', 'zoom', 'roll', 'dof', 'bloom', 'aberr', 'grade']) u[n] = gl.getUniformLocation(prog, n);
+    for (const n of ['src', 'res', 'tilt', 'zoom', 'roll', 'dof', 'bloom', 'aberr', 'grade', 'rays', 'time', 'rayCol']) u[n] = gl.getUniformLocation(prog, n);
     Object.assign(post, { ok: true, cv, gl, prog, vao, tex, u });
     cv.addEventListener('webglcontextlost', (e) => { e.preventDefault(); post.ok = false; });
     return true;
@@ -141,6 +152,10 @@ export function presentPost(src, dt) {
   gl.uniform1f(u.bloom, post.bloom);
   gl.uniform1f(u.aberr, post.aberr);
   gl.uniform1f(u.grade, post.grade);
+  post.time += dt;
+  gl.uniform1f(u.rays, post.rays);
+  gl.uniform1f(u.time, post.time);
+  gl.uniform3f(u.rayCol, ...post.rayCol);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
 }
 

@@ -324,7 +324,7 @@ const FL = 20, CAP = 6000;
 const M = {
   ok: false, on: false, cv: null, gl: null, prog: null, vao: null, ibuf: null, uRes: null,
   add: { d: new Float32Array(CAP * FL), n: 0 }, max: { d: new Float32Array(CAP * FL), n: 0 }, dark: { d: new Float32Array(1500 * FL), n: 0, cap: 1500 }, solid: { d: new Float32Array(1500 * FL), n: 0, cap: 1500 },
-  time: 0, fx: [], parts: [], W: 0, H: 0, target: null,   // target: the player (soul motes fly to it)
+  time: 0, fx: [], parts: [], W: 0, H: 0, target: null, view,   // target: the player (soul motes fly to it)
 };
 export const magic = M;
 
@@ -514,7 +514,7 @@ export function updateMagic(dt) {
     if (!f.update(f, dt)) M.fx.splice(i, 1);
   }
 }
-export function clearMagic() { M.fx.length = 0; M.parts.length = 0; }
+export function clearMagic() { M.fx = M.fx.filter((f) => f.persistent); M.parts.length = 0; }
 
 // ------------------------------------------------------------------ frame
 // Called by the renderer after the glow pass. ox, oy: device-pixel offset of the low-res buffer.
