@@ -4,7 +4,7 @@ import { G } from '../game.js';
 import { S } from '../data/items.js';
 import { ELEMENTS } from '../data/tomes.js';
 import { magicOn } from '../render/magic.js';
-import { explosionFx } from '../render/spellfx.js';
+import { explosionFx, hitFx } from '../render/spellfx.js';
 import { burst, floatText, elemBurst, projectileDrawable, removeDrawable, zoneDrawable, removeZone, ring, flash, particle, ELEM_COLORS, lightning, hitSpark } from '../render/vfx.js';
 import { addShake } from '../world/cameraRig.js';
 import { bus } from '../core/events.js';
@@ -120,8 +120,10 @@ export function dealDamage(src, tgt, amount, o = {}) {
     if (el === 'physical') burst(hx, hy, hz, { count: crit ? 14 : 8, speed: crit ? 9 : 6, color: tgt.bloodColor || '#ffe0c0', color2: cols[1], life: 0.35, size: 0.22, gravity: -14, additive: false });
     else elemBurst(el, hx, hy, hz, crit ? 0.8 : 0.45);
     if (src?.isPlayer) {
-      G.hitstop = Math.max(G.hitstop, crit || o.heavy ? 0.085 : 0.045);
-      addShake((crit || o.heavy ? 0.22 : 0.08) * G.settings.screenShake);
+      // short hitstop on ordinary hits so hold-to-attack spam stays fluid; crits and heavies still bite
+      G.hitstop = Math.max(G.hitstop, crit || o.heavy ? 0.075 : 0.028);
+      addShake((crit || o.heavy ? 0.24 : 0.07) * G.settings.screenShake);
+      if (magicOn() && (o.kind === 'melee' || o.kind === 'ranged')) hitFx(hx, hy, hz, hx - src.pos.x, hz - src.pos.z, el === 'physical' ? (crit ? '#ffd040' : '#ffe0a0') : cols[1], crit);
     }
     if (tgt.isPlayer) { addShake(0.28 * G.settings.screenShake); bus.emit('playerHit', { amount: dmg, src }); }
     bus.emit('hit', { src, tgt, dmg, crit, element: el, kind: o.kind, heavy: !!o.heavy });

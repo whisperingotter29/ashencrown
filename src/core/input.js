@@ -68,9 +68,10 @@ export const keyPressed = (k) => input.enabled && input.pressed.has(k);
 // ------------------------------------------------------------------ gamepad
 // Standard-layout controllers drive the same key/mouse state the game already reads, so every
 // system (and the rumble in core/feel.js) works with a pad. Left stick moves, right stick aims,
-// RT attacks, LT blocks, A dodges, B interacts, X/Y/RB + d-pad left/right are skills 1-5,
-// LB is the class signature, d-pad up/down are potions, L3 sprints, Start pauses, Back opens the map.
-const PAD_KEYS = { 0: 'space', 1: 'e', 2: '1', 3: '2', 5: '3', 14: '4', 15: '5', 4: 'q', 12: 'f', 13: 'g', 10: 'shift', 11: 'i', 9: 'escape', 8: 'm' };
+// RT attacks (hold to keep attacking), LT blocks, A dodges, B interacts, X/Y/RB are the weapon's
+// Q/E/R abilities, LB is the class signature, d-pad left/right cycle weapon slots, d-pad up/down are
+// potions, L3 sprints, R3 inventory, Start pauses, Back opens the map.
+const PAD_KEYS = { 0: 'space', 1: 'f', 2: 'q', 3: 'e', 5: 'r', 4: 'x', 14: 'padprev', 15: 'padnext', 12: 'z', 13: 'v', 10: 'shift', 11: 'i', 9: 'escape', 8: 'm' };
 const padHeld = new Set();
 let padMouse = { left: false, right: false };
 export function pollGamepad(origin) {

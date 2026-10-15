@@ -84,9 +84,9 @@ export function dropFromEnemy(e) {
   const spread = () => [e.pos.x + rand(-1.2, 1.2), e.pos.z + rand(-1.2, 1.2)];
   // gold
   const gold = Math.round((3 + lvl * 1.6) * (e.boss ? 15 : e.elite ? 3 : 1) * rand(0.6, 1.4) * (1 + gf / 100));
-  if (chance(e.boss || e.elite ? 1 : 0.55)) spawnPickup('gold', ...spread(), { amount: gold });
+  if (chance(e.boss || e.elite ? 1 : 0.75)) spawnPickup('gold', ...spread(), { amount: gold });
   // items
-  const nItems = e.boss ? (e.world ? 4 : 2 + (e.tpl.final ? 3 : 0)) : e.elite ? (chance(0.6) ? 1 : 0) + (chance(0.25) ? 1 : 0) : chance(0.1) ? 1 : 0;
+  const nItems = e.boss ? (e.world ? 4 : 2 + (e.tpl.final ? 3 : 0)) : e.elite ? 1 + (chance(0.45) ? 1 : 0) : chance(0.15) ? 1 : 0;
   for (let i = 0; i < nItems; i++) {
     const it = rollLoot(lvl, lootRng, { magicFind: mf, minRarity: e.boss ? 2 : e.elite ? 1 : 0, boost: e.boss ? 0.8 : e.elite ? 0.3 : 0, prefer: chance(0.5) ? classPrefer() : null });
     spawnPickup('item', ...spread(), it);
@@ -109,7 +109,8 @@ export function dropFromEnemy(e) {
   if (e.tpl.undead && chance(0.3)) spawnPickup('mat', ...spread(), { id: 'bone', n: 1 });
   if (e.tpl.construct && chance(0.3)) spawnPickup('mat', ...spread(), { id: 'ore', n: 1 });
   if (chance(0.05)) spawnPickup('mat', ...spread(), { id: 'dust', n: 1 });
-  if (chance(0.06)) spawnPickup('cons', ...spread(), { id: 'hp_potion', n: 1 });
+  if (chance(0.09)) spawnPickup('cons', ...spread(), { id: 'hp_potion', n: 1 });
+  if (chance(0.06)) spawnPickup('cons', ...spread(), { id: 'mana_potion', n: 1 });
 }
 
 export function openChest(chest) {

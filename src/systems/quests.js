@@ -172,7 +172,6 @@ export function learnSkill(id) {
   if (c.skills.includes(id)) return false;
   c.skills.push(id);
   const sk = SKILLS[id];
-  if (sk.type !== 'passive') { const free = c.skillBar.indexOf(null); if (free >= 0) c.skillBar[free] = id; }
   G.player?.refreshStats();
   bus.emit('skillLearned', id);
   return true;

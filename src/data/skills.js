@@ -56,3 +56,9 @@ export function combosAvailable(knownSkills, tomeId) {
   if (!tomeId) return [];
   return COMBOS.filter((c) => c.tome === tomeId && c.skill.some((s) => knownSkills.includes(s)));
 }
+
+// Grindy pacing: abilities come back fast and cost little, so you're always pressing something.
+for (const sk of [...Object.values(SKILLS), ...COMBOS]) {
+  if (sk.cd) sk.cd = Math.max(0.6, +(sk.cd * (sk.type === 'buff' || sk.type === 'stealth' || sk.type === 'wall' || sk.type === 'totem' ? 0.6 : 0.45)).toFixed(2));
+  if (sk.stamina) sk.stamina = Math.round(sk.stamina * 0.55);
+}

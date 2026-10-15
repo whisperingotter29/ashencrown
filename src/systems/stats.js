@@ -75,7 +75,7 @@ export function computeStats(c) {
   out.maxStamina = Math.round(100 + st.dex * 0.8 + st.vit * 0.4);
   out.maxHp = Math.round(out.maxHp * (1 + (out.maxHpPct || 0) / 100));
   out.armor = Math.round((out.armor + st.vit * 0.4 * sL) * (1 + out.armorPct / 100));
-  out.manaRegen += 1.2 + st.wil * 0.12 + L * 0.03;
+  out.manaRegen += 3.2 + st.wil * 0.2 + L * 0.06;
   out.staminaRegenMult = 1 + out.staminaRegen / 100 + st.dex * 0.004;
   out.critChance += st.dex * 0.12;
   out.spellPower += st.int * 2.2;
@@ -91,14 +91,18 @@ export function computeStats(c) {
     out.weapon = { ...wt, type: w.type, dmg: w.dmg, element: w.element, item: w, spellPower: w.spellPower || 0 };
     out.spellPower += w.spellPower || 0;
     out.spellCrit += wt.spellCrit || 0;
+  } else if (c.equip.tome) {
+    // a spellbook in hand works as a focus: left click throws bolts of its element
+    const t = c.equip.tome;
+    out.weapon = { type: 'tome', name: 'Spellbook', hands: 1, dmg: Math.round((8 + t.tier * 3) * S(t.ilvl || 1)), speed: 1.1, range: 2, arc: 90, stat: 'int', combo: 3, caster: true, element: TOMES[t.tome]?.element, item: t };
   } else out.weapon = { ...UNARMED, dmg: Math.round(UNARMED.dmg * sL) };
   const mainStat = st[out.weapon.stat || 'str'];
   out.weaponDmg = out.weapon.dmg * (1 + mainStat * 0.028) * (1 + out.dmgPct / 100);
   out.spellMult = (1 + out.spellPower / 100) * (1 + out.dmgPct / 200);
   out.moveSpeedMult = 1 + out.moveSpeed / 100;
   out.atkSpeedMult = 1 + out.atkSpeed / 100;
-  out.hasShield = c.equip.offhand?.kind === 'shield';
   out.twoHanded = out.weapon.hands === 2;
+  out.hasShield = c.equip.offhand?.kind === 'shield' && !out.twoHanded;   // a shield rests on your back while you swing a two-hander
   // tome
   const tome = c.equip.tome;
   out.tome = tome ? { id: tome.tome, tier: tome.tier, item: tome } : null;

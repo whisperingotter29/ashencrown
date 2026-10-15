@@ -126,6 +126,7 @@ export function switchSlot(i, quiet = false) {
     if (p.action && p.action.type !== 'dodge') { p.action?.end?.(); p.action = null; p.st.action = null; p.st.spin = false; }
     p.drawing = false; p.chargeT = 0;
     p.cooldowns._swap = 0.18;
+    p.st.swapT = 0;
     p.refreshStats();
   }
   if (!quiet) bus.emit('weaponSwap', { slot: i, item: c.loadout[i] });

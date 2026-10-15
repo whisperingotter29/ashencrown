@@ -734,3 +734,86 @@ export function novaFx(x, y, z, radius, elOrColor) {
   flareFx(x, gy + 1, z, { size: 1.6, color: P.c1, color2: P.c2, dur: 0.2, star: true });
   if (el === 'frost' || el === 'fire' || el === 'void' || el === 'blood') scorchFx(x, z, radius * 0.9, el, el === 'frost' ? 3.2 : 2, 0.55);
 }
+
+// ================================================================== kills
+// Every kill pops: a white-hot flare, a spray of sparks, a shock ring, and soul motes that streak
+// into the player (more of them as the kill streak climbs).
+export function killFx(victim, streak = 1) {
+  const x = victim.pos.x, z = victim.pos.z, gy = ground(x, z);
+  const y = victim.pos.y + (victim.height || 1.8) * 0.5;
+  const big = victim.boss || victim.elite;
+  const heat = Math.min(1, streak / 60);
+  const c1 = heat > 0.5 ? '#fff0c0' : '#ffffff', c2 = heat > 0.5 ? '#ff7a30' : '#ffc070';
+  flareFx(x, y, z, { size: big ? 2.2 : 1.1 + heat * 0.6, color: c1, color2: c2, dur: big ? 0.3 : 0.18, star: true });
+  gburst(x, y, z, { count: big ? 34 : 12 + Math.round(heat * 10), speed: big ? 13 : 9, kind: 'spark', size: 0.08, color: '#ffffff', color2: c2, life: 0.32, gravity: -9, drag: 2.2, hot: 1, up: 0.6 });
+  ringFx(x, gy, z, { radius: big ? 4.5 : 1.8 + heat, color: c1, color2: c2, dur: 0.26, th: 0.16, noise: 0.25, r0: 0.2 });
+  if (big) shellFx(x, y, z, { radius: 3.2, color: c1, color2: c2, dur: 0.3 });
+  soulFx(x, y, z, big ? 14 : 2 + Math.min(6, Math.floor(streak / 8)));
+}
+
+// motes burst out, hang for a beat, then home in on the player
+export function soulFx(x, y, z, n = 4) {
+  const motes = [];
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * TAU, s = rnd(3, 7);
+    motes.push({ x, y, z, vx: Math.cos(a) * s, vy: rnd(2, 6), vz: Math.sin(a) * s, t: -i * 0.03, done: false, h: [] });
+  }
+  const P = PALETTE.holy, cyan = col('#9ff0ff');
+  return addMagic({
+    update(f, dt) {
+      f.t += dt;
+      const p = magic.target;
+      let alive = 0;
+      for (const m of motes) {
+        if (m.done) continue;
+        alive++;
+        m.t += dt;
+        if (m.t < 0) continue;
+        const k = Math.exp(-4 * dt);
+        if (m.t > 0.22 && p) {
+          // steer toward the chest with rising acceleration
+          const tx = p.pos.x, ty = p.pos.y + 1.1, tz = p.pos.z;
+          const dx = tx - m.x, dy = ty - m.y, dz = tz - m.z, L = Math.hypot(dx, dy, dz) || 1;
+          const acc = 60 + m.t * 160;
+          m.vx = m.vx * k + dx / L * acc * dt; m.vy = m.vy * k + dy / L * acc * dt; m.vz = m.vz * k + dz / L * acc * dt;
+          if (L < 0.6) { m.done = true; continue; }
+        } else { m.vx *= k; m.vz *= k; m.vy = m.vy * k - 6 * dt; }
+        m.x += m.vx * dt; m.y += m.vy * dt; m.z += m.vz * dt;
+        m.h.unshift([m.x, m.y, m.z]); if (m.h.length > 6) m.h.pop();
+      }
+      return alive > 0 && f.t < 3;
+    },
+    draw() {
+      const s = UPX * 0.22;
+      for (const m of motes) {
+        if (m.done || m.t < 0) continue;
+        for (let i = 0; i < m.h.length - 1; i++) {
+          const [ax, ay, az] = m.h[i], [bx, by, bz] = m.h[i + 1];
+          seg(mx(bx), my(bz, by - ground(bx, bz)), mx(ax), my(az, ay - ground(ax, az)), s * 0.5 * (1 - (i + 1) / 6), s * 0.5 * (1 - i / 6), 0.8 * (1 - (i + 1) / 6), 0.8 * (1 - i / 6), P.hot, cyan);
+        }
+        quad(mx(m.x), my(m.z, m.y - ground(m.x, m.z)), s * 2.2, s * 2.2, 0, K.GLOW, 0.9, P.hot, cyan, 0.8, 4);
+      }
+    },
+  });
+}
+
+// ================================================================== weapon hits
+// A directional impact for every player weapon hit: a hot flash, sparks thrown away from the
+// attacker, and on crits a star burst and a shock ring.
+export function hitFx(x, y, z, dx, dz, color = '#fff4d0', crit = false) {
+  const L = Math.hypot(dx, dz) || 1;
+  const dir = { x: dx / L, y: 0.25, z: dz / L };
+  const gy = ground(x, z);
+  flareFx(x, y, z, { size: crit ? 1.1 : 0.55, color: '#ffffff', color2: color, dur: crit ? 0.16 : 0.09, star: crit });
+  gburst(x, y, z, { count: crit ? 12 : 5, speed: crit ? 14 : 10, kind: 'spark', size: 0.07, color: '#ffffff', color2: color, life: 0.2, gravity: -10, drag: 3, hot: 1, dir, cone: 0.7, stretch: 0.035 });
+  if (crit) ringFx(x, gy, z, { radius: 1.6, color: '#ffffff', color2: color, dur: 0.2, th: 0.14, noise: 0.15, r0: 0.2 });
+}
+
+// a flourish at the hand whenever an ability fires: makes every key press feel loud
+export function abilityFlourish(p, elOrColor, big = false) {
+  const { P } = resolve(elOrColor);
+  const h = p.model?.handPos ? p.model.handPos(new Vec3()) : { x: p.pos.x, y: p.pos.y + 1.2, z: p.pos.z };
+  flareFx(h.x, h.y, h.z, { size: big ? 1.3 : 0.9, color: P.c1, color2: P.c2, dur: 0.16, star: true });
+  gburst(h.x, h.y, h.z, { count: big ? 14 : 8, speed: 6, kind: 'spark', size: 0.07, color: P.hot, color2: P.c1, life: 0.25, gravity: 0, drag: 3, hot: 1 });
+  ringFx(p.pos.x, ground(p.pos.x, p.pos.z), p.pos.z, { radius: big ? 2.6 : 1.8, color: P.c1, color2: P.c2, dur: 0.24, th: 0.18, noise: 0.35, r0: 0.3 });
+}

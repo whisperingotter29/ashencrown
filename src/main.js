@@ -18,6 +18,8 @@ import { updateSpawner, clearSpawns, cleanupEntities, spawnEnemy, RIVALS } from 
 import { enterDungeon, exitDungeon, updateDungeon, dungeonDef } from './world/dungeon.js';
 import { initClassMechanics, updateClassMech, useSignature } from './systems/classMech.js';
 import { useAbility } from './systems/abilities.js';
+import { ensureLoadout, switchSlot, currentKit, ABILITY_KEYS, LOADOUT_SIZE } from './systems/loadout.js';
+import { initStreak, updateStreak } from './systems/streak.js';
 import { queryColliders } from './systems/collision.js';
 import { initProgression, gainXp } from './systems/progression.js';
 import { initQuests, updateQuests, startQuest, learnSkill, questDef, isActive } from './systems/quests.js';
@@ -69,14 +71,13 @@ initClassMechanics();
 initProgression();
 initQuests();
 initFactions();
+initStreak();
 
 const params = new URLSearchParams(location.search);
 window.__G = G;
 // live module handles for automated testing
 window.__dbg = { forceWeather, cam, atmo, R, spawnEnemy, enterDungeon, terrain, input, worldToScreen, queryColliders, groundHeight };
 
-// held-key query for channelled spells
-G.inputHeld = (slot) => input.down.has(String(slot + 1));
 
 // ============================================================================ title
 let titleUI = null;
@@ -163,17 +164,19 @@ function giveStartingKit(c) {
   const rng = new RNG(7);
   const k = cls.kit;
   const wtype = k.mainhand === 'rapier' ? 'sword' : k.mainhand;
-  c.equip.mainhand = makeWeapon(wtype, 1, 0, rng, { base: k.mainhand === 'rapier' ? 'Rapier' : undefined });
+  // loadout 1-4: the class weapon, then its spellbook, or a sidearm that plays differently
+  const main = makeWeapon(wtype, 1, 0, rng, { base: k.mainhand === 'rapier' ? 'Rapier' : undefined });
+  const second = k.tome ? makeTome(k.tome, 1, 1, 1, rng)
+    : wtype === 'bow' ? makeWeapon('dagger', 1, 0, rng)
+      : wtype === 'dagger' ? makeWeapon('crossbow', 1, 0, rng)
+        : makeWeapon('bow', 1, 0, rng);
+  c.loadout = [main, second, null, null];
+  c.activeSlot = 0;
   if (k.offhand === 'shield') c.equip.offhand = makeShield(1, 0, rng);
   for (const slot of ['chest', 'legs', 'boots']) c.equip[slot] = makeArmor(slot, k.armor, 1, 0, rng);
-  if (k.tome) {
-    const t = makeTome(k.tome, 1, 1, 1, rng);
-    c.equip.tome = t;
-    const spells = spellsForTome(k.tome, 1).map((s) => s.id);
-    spells.forEach((s, i) => { c.skillBar[i] = s; });
-  }
-  for (const s of cls.skills) { c.skills.push(s); const sk = SKILLS[s]; if (sk.type !== 'passive') { const free = c.skillBar.indexOf(null); if (free >= 0) c.skillBar[free] = s; } }
-  c.consumables = { hp_potion: 5, mana_potion: 3 };
+  for (const s of cls.skills) c.skills.push(s);
+  ensureLoadout(c);
+  c.consumables = { hp_potion: 6, mana_potion: 4 };
 }
 
 function showPrologue(c, done) {
@@ -234,6 +237,7 @@ function continueGame() {
 }
 
 function migrateChar(c) {
+  ensureLoadout(c);
   c.discovered = c.discovered || { waystones: [], dungeons: [], towns: [], shrines: [], landmarks: [] };
   c.discovered.landmarks = c.discovered.landmarks || [];
   c.worldBossTimers = {};
@@ -427,16 +431,26 @@ function switchRealm(realm, x, z) {
   if (realm === 'deep') banner('You descend into', 'The Hollow Deep', 'Lantern-lit kingdoms beneath the world, where the old crown fell.');
 }
 
+// Fast travel to any waystone, town or dungeon entrance, from anywhere (dungeons included).
 function fastTravel(w) {
   const p = G.player;
-  if (G.realm === 'dungeon') { toast('You cannot fast travel from inside a dungeon.'); return; }
-  if (G.time - p.lastCombatT < 4) { toast('You cannot fast travel during combat.'); return; }
+  if (!p || p.dead) return;
+  if (G.time - p.lastCombatT < 3) { toast('You cannot fast travel in the middle of a fight.'); return; }
+  const realm = w.realm || 'surface';
   closeModal();
+  bus.emit('fastTravelStart', w);
   transition(() => {
     if (p.mounted) p.toggleMount();
-    if (w.realm !== G.realm) switchRealm(w.realm, w.x + 3, w.z + 3);
-    else { clearSpawns(true); clearPickups(); p.pos.set(w.x + 3, groundHeight(w.x + 3, w.z + 3), w.z + 3); snapCamera(p.pos); }
+    if (G.realm === 'dungeon') exitDungeon();
+    const x = w.x + 3, z = w.z + 3;
+    if (realm !== G.realm) switchRealm(realm, x, z);
+    else { clearSpawns(true); clearPickups(); p.pos.set(x, groundHeight(x, z), z); snapCamera(p.pos); }
     lastBiome = null;
+    setTimeout(() => {
+      pillar(p.pos.x, p.pos.y, p.pos.z, { radius: 1.6, height: 18, color: '#9fd8ff', dur: 0.7 });
+      ring(p.pos.x, p.pos.y, p.pos.z, { radius: 4, color: '#9fd8ff', dur: 0.6 });
+      if (w.name) toast(`Travelled to <b>${esc(w.name)}</b>.`);
+    }, 120);
   });
 }
 bus.on('fastTravel', fastTravel);
@@ -640,7 +654,7 @@ function playFrame(dt, rawDt) {
   // prompt
   const f = G.menuOpen ? null : findInteraction();
   G.prompt = promptFor(f);
-  if (keyPressed('e') && !G.menuOpen && f) interact(f);
+  if (keyPressed('f') && !G.menuOpen && f) interact(f);
   // camera
   cam.target.copy(p.pos);
   if (p.mounted) cam.target.y += 0.8;
@@ -654,6 +668,7 @@ function playFrame(dt, rawDt) {
   if (G.realm === 'surface') for (const L of terrain.glowLights) if ((L.x - p.pos.x) ** 2 + (L.z - p.pos.z) ** 2 < 2500) requestLight(L.x, L.y, L.z, L.color, 5, 9);
   updateVfx(rawDt, G.menuOpen && G.menuOpen !== 'dialogue' ? rawDt : dt);
   updateFeel(rawDt);
+  updateStreak(dt);
   updateTutorial(rawDt);
   updateHud(rawDt);
   // autosave
@@ -682,10 +697,22 @@ function handleHotkeys() {
   if (input.pressed.has('m')) return toggle('map', () => openMap());
   if (input.pressed.has('h')) return toggle('controls', openControls);
   if (open || p.dead) return;
-  for (let i = 0; i < 6; i++) if (input.pressed.has(String(i + 1))) { const id = G.char.skillBar[i]; if (id) useAbility(p, id); }
-  if (input.pressed.has('q')) useSignature(p);
-  if (input.pressed.has('f')) useConsumable('hp_potion');
-  if (input.pressed.has('g')) useConsumable('mana_potion');
+  // 1-4: weapon in hand (controller d-pad cycles through the filled slots)
+  for (let i = 0; i < LOADOUT_SIZE; i++) if (input.pressed.has(String(i + 1))) switchSlot(i);
+  for (const [k, dir] of [['padprev', -1], ['padnext', 1]]) if (input.pressed.has(k)) {
+    for (let j = 1; j < LOADOUT_SIZE; j++) { const i = (G.char.activeSlot + dir * j + LOADOUT_SIZE) % LOADOUT_SIZE; if (G.char.loadout[i]) { switchSlot(i); break; } }
+  }
+  // Q / E / R: the weapon's abilities. Holding the key keeps firing it whenever it comes off cooldown.
+  const kit = currentKit();
+  for (let k = 0; k < 3; k++) {
+    const id = kit[k], key = ABILITY_KEYS[k];
+    if (!id) continue;
+    if (input.pressed.has(key)) useAbility(p, id);
+    else if (input.down.has(key) && (p.cooldowns[id] || 0) <= 0) useAbility(p, id, true);
+  }
+  if (input.pressed.has('x')) useSignature(p);
+  if (input.pressed.has('z')) useConsumable('hp_potion');
+  if (input.pressed.has('v')) useConsumable('mana_potion');
   if (G.debug && input.pressed.has('backquote')) { gainXp(xpToNext(G.char.level)); }
 }
 

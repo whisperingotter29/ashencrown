@@ -12,7 +12,7 @@ import { burst } from '../render/vfx.js';
 import { queryColliders } from './collision.js';
 import { activeKillObjectives } from './quests.js';
 
-const MAX_OPEN = 22;
+const MAX_OPEN = 46;          // grindy: the wilds are crowded
 let spawnT = 0;
 const townNpcs = new Map();       // town id -> [npc]
 const campsAlive = new Map();     // camp key -> enemies
@@ -73,12 +73,12 @@ export function updateSpawner(dt) {
   }
   spawnT -= dt;
   if (spawnT <= 0) {
-    spawnT = 1.6;
+    spawnT = 0.9;
     const inTown = isTownNear(p.pos.x, p.pos.z, 30);
     const n = liveEnemies().filter((e) => !e.camp && !e.world && !e.questTag).length;
     if (!inTown && n < MAX_OPEN) {
       // spawn a pack just off-screen
-      const a = Math.random() * Math.PI * 2, r = rand(55, 85);
+      const a = Math.random() * Math.PI * 2, r = rand(46, 72);
       const x = p.pos.x + Math.cos(a) * r, z = p.pos.z + Math.sin(a) * r;
       if (!isTownNear(x, z, 40) && goodSpot(x, z)) {
         const biome = primaryBiome(x, z, G.realm);
@@ -86,7 +86,7 @@ export function updateSpawner(dt) {
         const id = rng.weighted(pickTable(biome));
         const tpl = ENEMIES[id];
         const [lo, hi] = tpl.pack || [1, 2];
-        const count = Math.floor(rand(lo, hi + 1));
+        const count = Math.floor(rand(lo + 1, hi * 2 + 2));   // bigger packs to mow through
         const elite = chance(0.07 + Math.min(0.08, lvl * 0.002));
         for (let i = 0; i < count; i++) {
           const ex = x + rand(-4, 4), ez = z + rand(-4, 4);

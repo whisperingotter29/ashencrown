@@ -7,25 +7,28 @@ import { input } from '../core/input.js';
 import { el, esc, root, toast, banner, modalName } from '../ui/ui.js';
 import { TrainingDummy } from '../entities/dummy.js';
 import { abilityDef, abilityUsable } from './abilities.js';
+import { currentKit, ABILITY_KEYS } from './loadout.js';
 import { questDef } from './quests.js';
 import { CLASS_BY_ID } from '../data/classes.js';
 import { burst } from '../render/vfx.js';
 import { resolveStatic } from './collision.js';
 import { groundHeight } from '../world/terrain.js';
 
-const T = { active: false, list: [], i: 0, ui: null, dummy: null, moved: 0, last: null, hits: 0, dodges: 0, blocks: 0, skills: 0, menus: 0, t: 0, doneT: 0, startPos: null };
+const T = { active: false, list: [], i: 0, ui: null, dummy: null, moved: 0, last: null, hits: 0, dodges: 0, blocks: 0, skills: 0, swaps: 0, menus: 0, t: 0, doneT: 0, startPos: null };
 export const tutorial = T;
 
 const kc = (k) => `<span class="kc">${esc(k)}</span>`;
 const pad = () => !!input.usingPad;
-const PAD_SLOT = ['X', 'Y', 'RB', 'D-LEFT', 'D-RIGHT', ''];
+const PAD_SLOT = ['X', 'Y', 'RB'];
 
 function buildSteps() {
   const p = G.player, c = G.char, cls = CLASS_BY_ID[c.cls];
   const w = p.derived.weapon;
   const bow = w.type === 'bow', xbow = w.type === 'crossbow', caster = w.type === 'staff' || w.type === 'wand';
-  const slot = c.skillBar.findIndex((id) => id && abilityUsable(p, id).ok);
-  const skill = slot >= 0 ? abilityDef(c.skillBar[slot]).def : null;
+  const kit = currentKit(c);
+  const slot = kit.findIndex((id) => id && abilityUsable(p, id).ok);
+  const skill = slot >= 0 ? abilityDef(kit[slot]).def : null;
+  const second = c.loadout.findIndex((it, i) => it && i !== c.activeSlot);
   const quest = questDef(c.trackedQuest);
   const list = [
     { id: 'move', title: 'On your feet', need: 8, prog: () => T.moved,
@@ -33,24 +36,26 @@ function buildSteps() {
     { id: 'attack', title: 'Strike', need: 3, prog: () => T.hits, start: spawnDummy,
       text: () => {
         const btn = pad() ? kc('RT') : kc('LEFT CLICK');
-        if (bow) return `Aim at the dummy and hold ${btn} to draw your bow, then let go to loose. Three hits.`;
-        if (xbow) return `Aim at the dummy and press ${btn} to fire your crossbow. Three hits.`;
-        if (caster) return `Aim at the dummy and press ${btn} to hurl bolts from your ${w.type}. Three hits.`;
-        return `Aim at the dummy and press ${btn} to swing. Keep pressing to chain a combo. Three hits.`;
+        if (bow) return `Aim at the dummy and hold ${btn}: your bow draws and looses on its own for as long as you hold it. Three hits.`;
+        if (xbow) return `Aim at the dummy and hold ${btn} to keep firing your crossbow. Three hits.`;
+        if (caster) return `Aim at the dummy and hold ${btn} to keep hurling bolts. Three hits.`;
+        return `Aim at the dummy and hold ${btn}. You keep swinging, chaining a combo, for as long as you hold it. Three hits.`;
       } },
     { id: 'dodge', title: 'Roll', need: 1, prog: () => T.dodges,
       text: () => `Press ${kc(pad() ? 'A' : 'SPACE')} to dodge roll. Nothing can touch you mid-roll.` },
     { id: 'block', title: 'Guard', need: 1, prog: () => T.blocks,
       text: () => `Hold ${kc(pad() ? 'LT' : 'RIGHT CLICK')} to block. Tap it just before a blow lands to parry and stagger the attacker.` },
   ];
-  if (skill) list.push({ id: 'skill', title: 'Skills', need: 1, prog: () => T.skills, slot,
-    text: () => `Press ${kc(pad() ? PAD_SLOT[slot] : String(slot + 1))} to use ${esc(skill.name)}. New skills come from trainers, relics and quests.` });
+  if (skill) list.push({ id: 'skill', title: 'Weapon abilities', need: 1, prog: () => T.skills, slot,
+    text: () => `Every weapon has three abilities on ${kc(pad() ? 'X' : 'Q')}${kc(pad() ? 'Y' : 'E')}${kc(pad() ? 'RB' : 'R')}. Press ${kc(pad() ? PAD_SLOT[slot] : ABILITY_KEYS[slot].toUpperCase())} to use ${esc(skill.name)}. Hold the key to keep using it.` });
+  if (second >= 0) list.push({ id: 'swap', title: 'Weapon slots', need: 1, prog: () => T.swaps,
+    text: () => `Press ${kc(pad() ? 'D-PAD' : String(second + 1))} to switch to your ${esc(c.loadout[second].name)}. Slots ${kc('1')}-${kc('4')} each hold a weapon or spellbook, and each one brings its own abilities.` });
   list.push({ id: 'signature', title: cls.signature.name, info: 8, sig: true,
-    text: () => `${kc(pad() ? 'LB' : 'Q')} is your class signature. ${esc(cls.signature.desc)}` });
+    text: () => `${kc(pad() ? 'LB' : 'X')} is your class signature. ${esc(cls.signature.desc)}` });
   list.push({ id: 'menus', title: 'Gear and map', need: 1, prog: () => T.menus,
     text: () => `Open your bag with ${kc(pad() ? 'R3' : 'I')} or the map with ${kc(pad() ? 'BACK' : 'M')}. ${kc(pad() ? 'START' : 'ESC')} closes it again.` });
   list.push({ id: 'quest', title: 'Your first quest', info: 10, leave: 14,
-    text: () => `${quest ? `"${esc(quest.name)}" is in your tracker. ` : ''}Follow the gold arrow. Anyone with a ${kc('!')} over their head has work for you; press ${kc(pad() ? 'B' : 'E')} to talk.` });
+    text: () => `${quest ? `"${esc(quest.name)}" is in your tracker. ` : ''}Follow the gold arrow. Anyone with a ${kc('!')} over their head has work for you; press ${kc(pad() ? 'B' : 'F')} to talk.` });
   return list;
 }
 
@@ -143,7 +148,7 @@ function finish(skipped) {
 // ---------------------------------------------------------------- lifecycle
 export function startTutorial() {
   if (T.active || !G.player || G.char.flags.tutorialDone) return;
-  Object.assign(T, { active: true, i: 0, moved: 0, hits: 0, dodges: 0, blocks: 0, skills: 0, menus: 0, doneT: 0, last: { x: G.player.pos.x, z: G.player.pos.z } });
+  Object.assign(T, { active: true, i: 0, moved: 0, hits: 0, dodges: 0, blocks: 0, skills: 0, swaps: 0, menus: 0, doneT: 0, last: { x: G.player.pos.x, z: G.player.pos.z } });
   T.list = buildSteps();
   T.ui = el('div', 'tutorial panel');
   root().appendChild(T.ui);
@@ -182,4 +187,5 @@ export function initTutorial() {
   bus.on('dodge', () => { if (T.active) T.dodges++; });
   bus.on('blockStart', () => { if (T.active) T.blocks++; });
   bus.on('abilityUsed', () => { if (T.active) T.skills++; });
+  bus.on('weaponSwap', () => { if (T.active) T.swaps++; });
 }

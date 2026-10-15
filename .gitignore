@@ -4,3 +4,4 @@ dist-single/
 archive/
 .vercel/
 *.log
+.claude/

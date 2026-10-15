@@ -4,6 +4,7 @@ import { bus } from '../core/events.js';
 import { CONSUMABLES, MATERIALS_LIST, RARITY, WEAPON_TYPES } from '../data/items.js';
 import { CLASS_BY_ID } from '../data/classes.js';
 import { floatText } from '../render/vfx.js';
+import { equipToLoadout, clearLoadoutSlot } from './loadout.js';
 
 export const INV_SIZE = 48;
 
@@ -41,15 +42,14 @@ export function equip(item, slotOverride) {
   const c = G.char;
   const chk = canEquip(item);
   if (!chk.ok) { bus.emit('toast', chk.why); return false; }
+  // weapons and spellbooks live in the 1-4 loadout
+  if (item.kind === 'weapon' || item.kind === 'tome') return equipToLoadout(item);
   let slot = slotOverride || slotFor(item);
   if (!slot) return false;
   removeItem(item.uid);
   const prev = c.equip[slot];
   c.equip[slot] = item;
   if (prev) c.inventory.push(prev);
-  // two-handers clear the offhand
-  if (slot === 'mainhand' && WEAPON_TYPES[item.type]?.hands === 2 && c.equip.offhand) { c.inventory.push(c.equip.offhand); c.equip.offhand = null; }
-  if (slot === 'offhand' && c.equip.mainhand && WEAPON_TYPES[c.equip.mainhand.type]?.hands === 2) { c.inventory.push(c.equip.mainhand); c.equip.mainhand = null; }
   G.player?.refreshStats();
   bus.emit('equipped', { item, slot });
   return true;
@@ -59,6 +59,7 @@ export function unequip(slot) {
   const c = G.char;
   const it = c.equip[slot];
   if (!it) return;
+  if (slot === 'mainhand' || slot === 'tome') { clearLoadoutSlot(c.activeSlot); return; }
   if (c.inventory.length >= INV_SIZE) { bus.emit('toast', 'Your pack is full.'); return; }
   c.equip[slot] = null;
   c.inventory.push(it);

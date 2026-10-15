@@ -1,4 +1,5 @@
-// The player: input-driven movement, melee combos, heavy attacks, bows, casting, dodge, block/parry.
+// The player: input-driven movement, continuous melee combos (hold to keep swinging), auto-firing
+// bows and crossbows, casting, dodge, block/parry. Weapons come from the loadout (keys 1-4).
 import { Vec3 } from '../core/vec3.js';
 import { G } from '../game.js';
 import { Entity } from './entity.js';
@@ -23,6 +24,7 @@ import { MOUNTS } from '../data/mounts.js';
 import { S } from '../data/items.js';
 import { weatherSlow } from '../world/weather.js';
 import { requestLight, R } from '../render/renderer.js';
+import { magic } from '../render/magic.js';
 import { mulberry32 } from '../core/rng.js';
 
 export class Player extends Entity {
@@ -74,6 +76,7 @@ export class Player extends Entity {
     this.removed = false;
     this.attachModel(actor);
     this.height = 1.9 * lk.scale;
+    magic.target = this;
     R.focus = this.pos;      // occlusion test point for the x-ray outline
     R.focusModel = this.model;
   }
@@ -96,9 +99,10 @@ export class Player extends Entity {
     const A = this.model;
     A.setLook({ ...this.baseLook, ...armorLook(c.equip) });
     A.setWeapon(weaponSpec(c.equip.mainhand));
-    A.setShield(c.equip.offhand ? shieldSpec(c.equip.offhand) : null);
+    A.setShield(c.equip.offhand && !d.twoHanded ? shieldSpec(c.equip.offhand) : null);
     A.setTome(c.equip.tome ? { color: TOMES[c.equip.tome.tome]?.color || '#6a2a20', glow: '#ffe0a0' } : null);
     this.st.twoHanded = d.twoHanded || d.weapon.type === 'staff';
+    this.xbowLoaded = true;
     this.st.weaponType = d.weapon.type;
     this.st.hasShield = d.hasShield;
     this.st.runSpeed = 6;
@@ -173,6 +177,7 @@ export class Player extends Entity {
     this.baseUpdate(dt);
     const d = this.derived;
     const B = this.buffAgg || {};
+    this.st.swapT = (this.st.swapT ?? 9) + dt;
     // timers
     for (const k in this.cooldowns) if (this.cooldowns[k] > 0) this.cooldowns[k] -= dt * (1 + d.cdr / 100);
     for (const [id, t] of Object.entries(this.buffTimers)) {
@@ -213,7 +218,7 @@ export class Player extends Entity {
     if (this.swimming && this.canSwim) { this.yOffset = depth - 1.25; } else this.yOffset = 0;
 
     // mount toggle
-    if (free && keyPressed('r') && !this.action) this.toggleMount();
+    if (free && keyPressed('g') && !this.action) this.toggleMount();
 
     // ---- movement input
     let mx = 0, mz = 0;
@@ -244,7 +249,7 @@ export class Player extends Entity {
     const wt = d.weapon.type;
     if (free && able && !this.mounted && !this.swimming) {
       if (d.weapon.ranged) this.handleRanged(dt, ml);
-      else if (wt === 'staff' || wt === 'wand') this.handleBolt(dt);
+      else if (wt === 'staff' || wt === 'wand' || wt === 'tome') this.handleBolt(dt);
       else this.handleMelee(dt);
     } else if (this.mounted && free && input.mousePressed.left) this.toggleMount();
 
@@ -316,21 +321,18 @@ export class Player extends Entity {
   }
 
   // -------------------------------------------------------------- melee
+  // Hold left click to keep swinging: each swing can be cancelled into the next once its hit has
+  // landed and the blade is into its follow-through, so the combo chain loops without a gap.
   handleMelee(dt) {
-    const d = this.derived;
-    if (input.mousePressed.left) this.attackQueued = 0.35;
+    if (input.mousePressed.left) this.attackQueued = 0.3;
     if (this.attackQueued > 0) this.attackQueued -= dt;
-    if (input.mouse.left) this.chargeT += dt; else {
-      if (this.action?.type === 'charge') this.releaseHeavy();
-      this.chargeT = 0;
-    }
-    if (!this.action || this.action.type === 'attack' && this.action.t >= this.action.dur * 0.72 && this.attackQueued > 0) {
-      if (this.action?.type === 'attack' && this.attackQueued > 0) this.action = null;
-      if (!this.action && input.mouse.left && this.chargeT > 0.38 && this.combo > 0) { this.startCharge(); return; }
-      if (!this.action && (this.attackQueued > 0 || input.mouse.left)) {
-        this.attackQueued = 0;
-        this.startAttack();
-      }
+    const want = input.mouse.left || this.attackQueued > 0;
+    if (!want) return;
+    const a = this.action;
+    if (!a || (a.type === 'attack' && a.hit && a.t >= a.cancelAt)) {
+      this.action = null;
+      this.attackQueued = 0;
+      this.startAttack();
     }
   }
 
@@ -338,38 +340,20 @@ export class Player extends Entity {
     const d = this.derived;
     const w = d.weapon;
     const speed = (w.speed || 1) * d.atkSpeedMult * (1 + ((this.buffAgg?.attackSpeedPct) || 0) / 100);
-    const cost = (w.hands === 2 ? 14 : 8);
-    if (!this.useStamina(cost)) return;
     const comboMax = w.combo || 3;
     const idx = this.combo % comboMax;
-    // snappy: a short anticipation, the hit lands early, and most of the time is follow-through
-    const dur = (w.hands === 2 ? 0.7 : 0.44) / speed;
-    const su = w.hands === 2 ? 0.4 : 0.3;
+    const final = idx === comboMax - 1;
+    // snappy: a short anticipation, the hit lands early, the follow-through can be cancelled into
+    // the next swing. The combo finisher is a touch slower and hits harder.
+    const dur = (w.hands === 2 ? 0.56 : 0.36) / speed * (final ? 1.15 : 1);
+    const su = w.hands === 2 ? 0.36 : 0.28;
     const kind = attackKindFor(w.type, idx);
-    this.action = { type: 'attack', t: 0, dur, strikeAt: dur * su, kind, combo: idx, faceAim: true, hit: false, final: idx === comboMax - 1 };
+    this.action = { type: 'attack', t: 0, dur, strikeAt: dur * su, cancelAt: dur * (final ? 0.78 : 0.62), kind, combo: idx, faceAim: true, hit: false, final };
     this.st.action = 'attack'; this.st.kind = kind; this.st.actionT = 0; this.st.strikeU = su;
     this.combo++;
     this.comboTimer = dur + 0.5;
     this.facing = Math.atan2(this.aim.x - this.pos.x, this.aim.z - this.pos.z);
     bus.emit('swing', { kind, weapon: w.type });
-  }
-
-  startCharge() {
-    this.action = { type: 'charge', t: 0, dur: 99, faceAim: true };
-    this.st.action = 'attack'; this.st.kind = this.derived.twoHanded ? 'overhead' : 'slash'; this.st.actionT = 0.35;
-  }
-
-  releaseHeavy() {
-    const ch = Math.min(1, this.action.t / 0.9);
-    const d = this.derived;
-    const w = d.weapon;
-    if (!this.useStamina(w.hands === 2 ? 22 : 16)) { this.action = null; this.st.action = null; return; }
-    const dur = 0.5 / (w.speed || 1);
-    const kind = w.type === 'spear' || w.type === 'dagger' ? 'spearthrust' : d.twoHanded || w.type === 'mace' ? 'overhead' : 'sweep';
-    this.action = { type: 'attack', t: dur * 0.38, dur, strikeAt: dur * 0.5, kind, combo: 9, faceAim: true, hit: false, heavy: 1.6 + ch * 0.9, final: true };
-    this.st.action = 'attack'; this.st.kind = kind; this.st.strikeU = 0.5;
-    this.combo = 0;
-    bus.emit('swing', { kind, weapon: w.type, heavy: true });
   }
 
   strike(a) {
@@ -381,17 +365,17 @@ export class Player extends Entity {
     const el = w.element || (d.passives.meleeStatus === 'poison' ? 'physical' : 'physical');
     const color = w.element ? ELEM_COLORS[w.element][1] : '#c8dcff';
     const stab = a.kind === 'stab' || a.kind === 'thrust' || a.kind === 'spearthrust';
-    slash(this.pos.x, this.pos.y, this.pos.z, this.facing, { radius: range, arc: a.kind === 'overhead' ? arc * 0.6 : arc, color, dur: a.heavy ? 0.26 : 0.16, reverse: a.kind === 'backslash', kind: stab ? 'thrust' : 'arc', width: a.heavy ? 4 : 3 });
-    if (a.heavy && (a.kind === 'overhead' || a.kind === 'slam')) shockwave(this.pos.x + Math.sin(this.facing) * range * 0.7, this.pos.y, this.pos.z + Math.cos(this.facing) * range * 0.7, { radius: 1.6, cracks: 6, color: color });
+    slash(this.pos.x, this.pos.y, this.pos.z, this.facing, { radius: range, arc: a.kind === 'overhead' ? arc * 0.6 : arc, color, dur: a.final ? 0.22 : 0.15, reverse: a.kind === 'backslash', kind: stab ? 'thrust' : 'arc', width: a.final ? 4 : 3 });
+    if (a.final && (a.kind === 'overhead' || a.kind === 'slam' || d.twoHanded)) shockwave(this.pos.x + Math.sin(this.facing) * range * 0.7, this.pos.y, this.pos.z + Math.cos(this.facing) * range * 0.7, { radius: 1.6, cracks: 6, color: color });
     let hitAny = false;
     for (const e of targetsInArc(this, range + 0.3, arc)) {
       hitAny = true;
-      this.hitWithWeapon(e, comboMult, { heavy: !!a.heavy, final: a.final });
+      this.hitWithWeapon(e, comboMult, { heavy: !!a.final && d.twoHanded, final: a.final, knock: a.final ? 3.5 : undefined });
     }
-    if (a.heavy && d.powers.heavyWave) this.waveAttack(d.powers.heavyWave);
-    if (a.heavy && d.powers.heavyFreeze) for (const e of entitiesNear(this.pos.x + Math.sin(this.facing) * 2, this.pos.z + Math.cos(this.facing) * 2, 3.5, (e) => hostile(this, e))) e.status && (e.frozen = Math.max(e.frozen || 0, 2));
-    if (a.heavy && d.flags.dragonBreath) this.waveAttack('fire', 0.8);
-    if (hitAny) bus.emit('meleeHit', { player: this, heavy: a.heavy });
+    if (a.final && d.powers.heavyWave) this.waveAttack(d.powers.heavyWave);
+    if (a.final && d.powers.heavyFreeze) for (const e of entitiesNear(this.pos.x + Math.sin(this.facing) * 2, this.pos.z + Math.cos(this.facing) * 2, 3.5, (e) => hostile(this, e))) e.status && (e.frozen = Math.max(e.frozen || 0, 2));
+    if (a.final && d.flags.dragonBreath) this.waveAttack('fire', 0.8);
+    if (hitAny) bus.emit('meleeHit', { player: this, heavy: a.final });
     this.lastCombatT = G.time;
   }
 
@@ -447,27 +431,32 @@ export class Player extends Entity {
     const d = this.derived;
     const w = d.weapon;
     if (w.type === 'bow') {
+      // hold to keep shooting: the bow draws to full and looses on its own, then draws again;
+      // letting go early looses a quicker, weaker arrow
+      const full = 0.34;
       if (input.mouse.left && !this.action) {
         if (!this.drawing) { this.drawing = true; this.drawT = 0; bus.emit('bowDraw'); }
         this.drawT += dt * d.atkSpeedMult * (w.speed || 1);
-        this.st.action = 'attack'; this.st.kind = 'bowdraw'; this.st.actionT = Math.min(1, this.drawT / 0.5);
+        this.st.action = 'attack'; this.st.kind = 'bowdraw'; this.st.actionT = Math.min(1, this.drawT / full);
         bus.emit('drawing', { t: this.drawT, still: !moving, dt });
-      } else if (this.drawing) {
-        this.drawing = false;
-        const draw = Math.min(1, this.drawT / 0.7);
-        if (draw > 0.15) this.fireArrow(draw);
-        this.action = { type: 'shot', t: 0, dur: 0.25, faceAim: true };
-        this.st.kind = 'bowrelease'; this.st.actionT = 0;
-      }
+        if (this.drawT >= full) this.looseArrow(1);
+      } else if (this.drawing) this.looseArrow(Math.min(1, this.drawT / full));
     } else {
-      // crossbow
+      // crossbow: hold to keep firing; it cranks back between bolts
       if (input.mouse.left && !this.action && this.xbowLoaded) {
         this.fireArrow(1, 'bolt');
         this.xbowLoaded = false;
-        this.action = { type: 'reload', t: 0, dur: 0.95 / ((w.speed || 0.6) * d.atkSpeedMult) * 0.6, faceAim: true };
+        this.action = { type: 'reload', t: 0, dur: 0.62 / ((w.speed || 0.6) * d.atkSpeedMult) * 0.6, faceAim: true };
         this.st.action = 'attack'; this.st.kind = 'xbow'; this.st.actionT = 0;
       }
     }
+  }
+
+  looseArrow(draw) {
+    this.drawing = false;
+    if (draw > 0.15) this.fireArrow(draw);
+    this.action = { type: 'shot', t: 0, dur: 0.1, faceAim: true };
+    this.st.kind = 'bowrelease'; this.st.actionT = 0;
   }
 
   fireArrow(draw, kind = 'arrow') {
@@ -499,7 +488,7 @@ export class Player extends Entity {
     const w = d.weapon;
     if ((input.mousePressed.left || input.mouse.left) && !this.action) {
       const el = d.powers.holyBolts ? 'holy' : d.tome ? TOMES[d.tome.id].element === 'physical' ? 'void' : TOMES[d.tome.id].element : 'void';
-      const dur = (w.type === 'wand' ? 0.32 : 0.5) / ((w.speed || 1) * d.atkSpeedMult);
+      const dur = (w.type === 'staff' ? 0.4 : 0.27) / ((w.speed || 1) * d.atkSpeedMult);
       this.action = { type: 'bolt', t: 0, dur, strikeAt: dur * 0.4, faceAim: true, el };
       this.st.action = 'attack'; this.st.kind = 'cast'; this.st.actionT = 0; this.st.strikeU = 0.4;
     }
@@ -508,7 +497,7 @@ export class Player extends Entity {
   fireBolt(el) {
     const d = this.derived;
     const w = d.weapon;
-    let dmg = d.weaponDmg * (w.type === 'staff' ? 1.25 : 0.9) * (1 + d.spellPower / 200);
+    let dmg = d.weaponDmg * (w.type === 'staff' ? 1.25 : w.type === 'tome' ? 1.05 : 0.9) * (1 + d.spellPower / 200);
     let crit = Math.random() * 100 < d.critChance + d.spellCrit;
     const hooks = { dmg, crit, kind: 'bolt', element: el };
     bus.emit('preShot', hooks);
@@ -516,8 +505,8 @@ export class Player extends Entity {
     if (this.buffAgg?.dmgPct) dmg *= 1 + this.buffAgg.dmgPct / 100;
     if (crit) dmg *= 1 + d.critDmg / 100;
     const ang = Math.atan2(this.aim.x - this.pos.x, this.aim.z - this.pos.z);
-    const sp = this.model.weaponTip(new Vec3());
-    const spd = w.type === 'wand' ? 34 : 26;
+    const sp = w.type === 'tome' ? this.model.handPos(new Vec3()) : this.model.weaponTip(new Vec3());
+    const spd = w.type === 'staff' ? 28 : 36;
     spawnProjectile({ x: sp.x + Math.sin(ang) * 0.3, y: this.pos.y + 1.35, z: sp.z + Math.cos(ang) * 0.3, vx: Math.sin(ang) * spd, vz: Math.cos(ang) * spd, owner: this, dmg, element: el, kind: 'orb', size: w.type === 'staff' ? 0.36 : 0.24, crit, pierce: d.powers.holyBolts ? 3 : 0, life: 1.0, dmgKind: 'spell', status: el === 'fire' ? { burn: 1.5 } : el === 'frost' ? { chill: 1 } : null });
     flash(sp.x, sp.y, sp.z, ELEM_COLORS[el]?.[1] || '#c0a0ff', 8, 6, 0.12);
     bus.emit('bolt', { el });
@@ -539,21 +528,14 @@ export class Player extends Entity {
   updateAction(dt) {
     const a = this.action;
     a.t += dt;
-    if (a.type !== 'charge') this.st.charge = 0;
+    this.st.charge = 0;
     let speedMult = 1;
     switch (a.type) {
       case 'attack':
         this.st.actionT = Math.min(1, a.t / a.dur);
         if (!a.hit && a.t >= a.strikeAt) { a.hit = true; this.strike(a); }
-        speedMult = a.t < a.strikeAt + 0.1 ? 0.25 : 0.6;
+        speedMult = a.t < a.strikeAt + 0.06 ? 0.45 : 0.75;
         if (a.t >= a.dur) { this.action = null; this.st.action = null; }
-        break;
-      case 'charge':
-        this.st.actionT = 0.34 + Math.min(0.05, a.t * 0.05);
-        this.st.charge = a.t;
-        speedMult = 0.3;
-        if (Math.random() < dt * 30) { const h = this.model.weapon; if (h) { const p = this.model.weaponTip(new Vec3()); particle({ x: p.x, y: p.y + 0.5, z: p.z, vx: (Math.random() - 0.5) * 2, vy: 2, vz: (Math.random() - 0.5) * 2, life: 0.4, size: 0.25 + Math.min(1, a.t) * 0.2, color: a.t > 0.9 ? '#ffd060' : '#ffffff' }); } }
-        if (!input.mouse.left) this.releaseHeavy();
         break;
       case 'bolt':
         this.st.actionT = Math.min(1, a.t / a.dur);

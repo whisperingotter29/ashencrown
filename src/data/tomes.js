@@ -169,6 +169,11 @@ export const TOME_TIER_NAMES = ['', 'Apprentice', 'Journeyman', 'Adept', 'Master
 
 export const SPELLS = {};
 for (const t of Object.values(TOMES)) for (const s of t.spells) { s.tome = t.id; s.element = s.element || t.element; SPELLS[s.id] = s; }
+// Grindy pacing: spells cycle quickly and cheaply; the big tier 4-5 spells keep a little weight.
+for (const s of Object.values(SPELLS)) {
+  if (s.cd) s.cd = Math.max(0.3, +(s.cd * (s.tier >= 4 ? 0.6 : s.type === 'buff' ? 0.6 : 0.45)).toFixed(2));
+  if (s.cost) s.cost = Math.max(3, Math.round(s.cost * 0.6));
+}
 
 export function spellsForTome(tomeId, tier) {
   const t = TOMES[tomeId];

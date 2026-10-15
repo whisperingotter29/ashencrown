@@ -5,13 +5,14 @@ import { xpToNext, MAX_LEVEL } from './stats.js';
 import { dropFromEnemy } from './loot.js';
 import { burst, ring, floatText, pillar } from '../render/vfx.js';
 import { addGold } from './inventory.js';
+import { streakXpMult } from './streak.js';
 
 export const STAT_POINTS_PER_LEVEL = 3;
 
 export function gainXp(amount, silent = false) {
   const c = G.char;
   if (c.level >= MAX_LEVEL) return;
-  const mult = 1 + (G.player?.derived.xpPct || 0) / 100;
+  const mult = (1 + (G.player?.derived.xpPct || 0) / 100) * streakXpMult();
   amount = Math.round(amount * mult);
   c.xp += amount;
   if (!silent && G.player) floatText(G.player.pos.x, G.player.pos.y + 2.8, G.player.pos.z, `+${amount} xp`, { color: '#c0a0ff', force: true, life: 1.2 });

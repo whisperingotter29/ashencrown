@@ -1,4 +1,5 @@
-// Executes spells (from equipped tome), martial skills and combo skills for the player.
+// Executes spells, weapon skills and elemental (combo) skills for the player. What you can use comes
+// from the weapon or spellbook in hand: its Q / E / R kit (see systems/loadout.js).
 import { Vec3 } from '../core/vec3.js';
 import { spikeSprite, totemSprite, iceSprite } from '../px/sprites/fx.js';
 import { G } from '../game.js';
@@ -10,13 +11,15 @@ import { dealDamage, spawnProjectile, spawnHazard, entitiesNear, hostile, target
 import { worldSprite, burst, ring, slash, beam, pillar, lightning, flash, particle, telegraph, floatText, ELEM_COLORS, elemBurst, shockwave } from '../render/vfx.js';
 import { addShake } from '../world/cameraRig.js';
 import { magicOn } from '../render/magic.js';
-import { castFx, coneFx, novaFx, circleFx, explosionFx, blinkFx, hoopsFx, healFx, flareFx, dashTrailFx } from '../render/spellfx.js';
+import { castFx, coneFx, novaFx, circleFx, explosionFx, blinkFx, hoopsFx, healFx, flareFx, dashTrailFx, abilityFlourish } from '../render/spellfx.js';
 import { bus } from '../core/events.js';
 import { setTimeoutGame } from '../entities/enemy.js';
 import { groundHeight } from '../world/terrain.js';
 import { dungeonLOS, dungeonWallAt } from '../world/dungeonQuery.js';
 import { addCollider, removeOwner } from './collision.js';
 import { angleDiff } from '../core/math.js';
+import { currentKit, keyForAbility } from './loadout.js';
+import { input } from '../core/input.js';
 
 export function abilityDef(id) {
   return SPELLS[id] ? { kind: 'spell', def: SPELLS[id] } : SKILLS[id] ? { kind: 'skill', def: SKILLS[id] } : COMBOS.find((c) => c.id === id) ? { kind: 'combo', def: COMBOS.find((c) => c.id === id) } : null;
@@ -35,15 +38,8 @@ export function abilityUsable(player, id) {
   const a = abilityDef(id);
   if (!a) return { ok: false, why: 'Unknown' };
   const d = player.derived;
-  if (a.kind === 'spell') {
-    if (!d.tome) return { ok: false, why: 'You need a spellbook equipped to cast.' };
-    if (d.tome.id !== a.def.tome) return { ok: false, why: `Requires the ${TOMES[a.def.tome].name}.` };
-    if (a.def.tier > d.tome.tier) return { ok: false, why: `Requires a tier ${a.def.tier} tome.` };
-    const slotIdx = player.char.skillBar.filter((x) => x && SPELLS[x]).indexOf(id);
-    if (slotIdx >= d.spellSlots) return { ok: false, why: 'Not enough spell slots in this tome.' };
-  } else if (a.kind === 'combo') {
-    if (!d.tome || d.tome.id !== a.def.tome) return { ok: false, why: `Requires the ${TOMES[a.def.tome].name} equipped.` };
-  }
+  if (!currentKit(player.char).includes(id)) return { ok: false, why: 'Not an ability of the weapon in your hand.' };
+  if (a.kind === 'spell' && (!d.tome || d.tome.id !== a.def.tome)) return { ok: false, why: `Hold the ${TOMES[a.def.tome].name} to cast this.` };
   const need = a.def.needs;
   if (need === 'shield' && !d.hasShield) return { ok: false, why: 'Requires a shield.' };
   if (need === 'ranged' && !d.weapon.ranged) return { ok: false, why: 'Requires a bow or crossbow.' };
@@ -51,13 +47,15 @@ export function abilityUsable(player, id) {
   return { ok: true, a };
 }
 
-export function useAbility(player, id) {
-  if (player.mounted) player.toggleMount();
+// quiet: held-key repeat; don't toast failures
+export function useAbility(player, id, quiet = false) {
   const chk = abilityUsable(player, id);
-  if (!chk.ok) { if (!chk.cd) bus.emit('toast', chk.why); return false; }
+  if (!chk.ok) { if (!chk.cd && !quiet) bus.emit('toast', chk.why); return false; }
   const { kind, def } = chk.a;
-  if (player.action && player.action.type !== 'attack' && player.action.type !== 'shot') return false;
-  if (player.action?.type === 'attack' && player.action.t < player.action.strikeAt) return false;
+  // abilities cut straight through basic attacks (spammy on purpose); other actions finish first
+  if (player.action && !['attack', 'shot', 'bolt', 'reload'].includes(player.action.type)) return false;
+  if (player.mounted) player.toggleMount();
+  if (player.action) { player.action = null; player.st.action = null; player.drawing = false; }
   if (kind === 'spell') {
     const hpCost = def.hpCost ? player.maxHp * def.hpCost : 0;
     if (hpCost && player.hp <= hpCost + 1) { bus.emit('toast', 'Not enough blood.'); return false; }
@@ -67,11 +65,13 @@ export function useAbility(player, id) {
     if (hpCost) { player.hp -= hpCost; floatText(player.pos.x, player.pos.y + 2, player.pos.z, '-' + Math.round(hpCost), { color: '#c01020' }); }
     castSpell(player, def);
   } else {
-    if (!player.useStamina(def.stamina || 10)) return false;
+    if (def.mana) { if (!player.useMana(def.mana)) return false; }
+    else if (!player.useStamina(def.stamina ?? 10)) return false;
     useSkill(player, def, kind === 'combo');
   }
   player.cooldowns[id] = def.cd || 0.5;
   player.lastCombatT = G.time;
+  if (magicOn() && kind !== 'spell') abilityFlourish(player, def.element || player.derived.weapon.element || (def.caster ? 'void' : '#ffd890'), kind === 'combo');
   bus.emit('abilityUsed', { id, kind, def });
   return true;
 }
@@ -314,8 +314,8 @@ function startChannel(p, s, base, el, color) {
     type: 'channel', t: 0, dur: 99, faceAim: true, tickT: 0,
     tick: (dt) => {
       const a = p.action;
-      const slotKey = p.char.skillBar.indexOf(s.id);
-      const held = slotKey >= 0 && G.inputHeld && G.inputHeld(slotKey);
+      const k = keyForAbility(s.id);
+      const held = !!k && input.down.has(k);
       if (!held) { a.stop = true; return; }
       if (s.hpCost) { const c = p.maxHp * s.hpCost * dt * 3; if (p.hp <= c + 1) { a.stop = true; return; } p.hp -= c; }
       else if (!p.useMana(cost * dt * 3)) { a.stop = true; return; }
@@ -355,13 +355,13 @@ export function useSkill(p, sk, combo) {
     case 'melee': {
       p.facing = ang;
       p.action = { type: 'custom', t: 0, dur: 0.45, faceAim: true, move: 0.2, update: (dt, a) => {
-        p.st.action = 'attack'; p.st.kind = sk.id.includes('bash') ? 'bash' : 'overhead'; p.st.actionT = Math.min(1, a.t / 0.45);
+        p.st.action = 'attack'; p.st.kind = sk.thrust ? 'spearthrust' : sk.id.includes('bash') ? 'bash' : 'overhead'; p.st.actionT = Math.min(1, a.t / 0.45);
         if (!a.hit && a.t > 0.22) {
           a.hit = true;
-          slash(p.pos.x, p.pos.y, p.pos.z, p.facing, { radius: sk.range, arc: sk.angle, color: el !== 'physical' ? c2 : '#ffe8c0', dur: 0.25 });
+          slash(p.pos.x, p.pos.y, p.pos.z, p.facing, { radius: sk.range, arc: sk.angle, color: el !== 'physical' ? c2 : '#ffe8c0', dur: 0.25, kind: sk.thrust ? 'thrust' : 'arc', width: sk.thrust ? 5 : 3 });
           for (const e of targetsInArc(p, sk.range, sk.angle)) {
             if (sk.execute && !e.boss && e.hp / e.maxHp < sk.execute) { dealDamage(p, e, e.hp + 1, { kind: 'melee', crit: true }); floatText(e.pos.x, e.pos.y + 2.4, e.pos.z, 'EXECUTED', { color: '#ff3020', force: true }); continue; }
-            p.hitWithWeapon(e, sk.dmg, { status: sk.status, element: sk.element, knock: 5, heavy: true });
+            p.hitWithWeapon(e, sk.dmg, { status: sk.status, element: sk.element, knock: sk.knock || 5, heavy: true });
             if (sk.smite) { pillar(e.pos.x, e.pos.y, e.pos.z, { radius: 1, color: c2, height: 12, dur: 0.4 }); dealDamage(p, e, wd * sk.smite * 0.5, { kind: 'spell', element: 'holy' }); }
           }
           addShake(0.2);
@@ -415,6 +415,21 @@ export function useSkill(p, sk, combo) {
       break;
     }
     case 'nova': {
+      if (sk.caster) {
+        // arcane pulse: a quick two-handed push, no wind-up
+        p.action = { type: 'custom', t: 0, dur: 0.3, move: 0.3, update: (dt, a) => {
+          p.st.action = 'attack'; p.st.kind = 'nova'; p.st.actionT = Math.min(1, a.t / 0.3);
+          if (!a.hit && a.t > 0.08) {
+            a.hit = true;
+            if (magicOn()) novaFx(p.pos.x, p.pos.y, p.pos.z, sk.radius, el);
+            else { ring(p.pos.x, p.pos.y, p.pos.z, { radius: sk.radius, color: c2, dur: 0.45 }); burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 30, speed: sk.radius * 2, color: c1, color2: c2, life: 0.4 }); }
+            addShake(0.25); G.hitstop = Math.max(G.hitstop, 0.04);
+            const dmg = wd * sk.dmg * (1 + p.derived.spellPower / 120);
+            for (const e of entitiesNear(p.pos.x, p.pos.z, sk.radius, (e) => hostile(p, e))) dealDamage(p, e, dmg, { kind: 'spell', element: el, knock: 9, fromX: p.pos.x, fromZ: p.pos.z });
+          }
+        } };
+        break;
+      }
       p.action = { type: 'custom', t: 0, dur: 0.6, move: 0, update: (dt, a) => {
         p.st.action = 'attack'; p.st.kind = 'slam'; p.st.actionT = Math.min(1, a.t / 0.6);
         if (!a.hit && a.t > 0.36) {
@@ -471,6 +486,19 @@ export function useSkill(p, sk, combo) {
       }
       p.action = { type: 'shot', t: 0, dur: 0.35, faceAim: true };
       p.st.action = 'attack'; p.st.kind = 'bowrelease'; p.st.actionT = 0;
+      break;
+    }
+    case 'barrage': {
+      // seeking arcane missiles fanned out of the hand
+      const n = sk.count || 5;
+      const sp = p.model.handPos(new Vec3());
+      const dmg = wd * sk.dmg * (1 + p.derived.spellPower / 120);
+      for (let i = 0; i < n; i++) {
+        const a = ang + (i / Math.max(1, n - 1) - 0.5) * 1.6;
+        setTimeoutGame(i * 0.035, () => spawnProjectile({ x: sp.x, y: p.pos.y + 1.3, z: sp.z, vx: Math.sin(a) * 20, vz: Math.cos(a) * 20, owner: p, dmg, element: el, kind: 'orb', size: 0.24, homing: 7, life: 1.4, dmgKind: 'spell' }));
+      }
+      p.action = { type: 'shot', t: 0, dur: 0.22, faceAim: true };
+      p.st.action = 'attack'; p.st.kind = 'cast'; p.st.actionT = 0;
       break;
     }
     case 'stealth': p.enterStealth(sk.duration); break;
