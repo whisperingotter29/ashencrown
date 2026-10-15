@@ -460,6 +460,7 @@ export function openSettings() {
   row('Effects volume', slider('sfx', 0, 1, 0.05, () => bus.emit('volume')));
   row('Pixel size', select('pixel', [['auto', 'Auto (fit screen)'], [2, 'Small (2x)'], [3, 'Medium (3x)'], [4, 'Large (4x)'], [5, 'Huge (5x)']], () => { R.settings.pixel = S.pixel; applySettings(); }));
   row('Magic glow', select('glow', [[true, 'On'], [false, 'Off']], () => { S.glow = S.glow === true || S.glow === 'true'; R.settings.glow = S.glow; }));
+  row('Spell effects', select('magicFx', [[true, 'Enhanced (shaders)'], [false, 'Classic pixel']], () => { S.magicFx = S.magicFx === true || S.magicFx === 'true'; }));
   row('Damage numbers', select('damageNumbers', [[true, 'On'], [false, 'Off']], () => { S.damageNumbers = S.damageNumbers === true || S.damageNumbers === 'true'; }));
   row('Screen shake & kick', slider('screenShake', 0, 1.5, 0.1));
   row('Controller vibration', select('vibration', [[true, 'On'], [false, 'Off']], () => { S.vibration = S.vibration === true || S.vibration === 'true'; }));

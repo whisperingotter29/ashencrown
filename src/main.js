@@ -9,6 +9,7 @@ import { cam, updateCamera, snapCamera, addShake, worldToScreen } from './world/
 import { initInput, endFrameInput, input, keyPressed, key, pollGamepad } from './core/input.js';
 import { primaryBiome, dangerLevel, heightAt } from './world/terrainGen.js';
 import { initVfx, updateVfx, clearVfx, burst, ring, pillar, floatText, flash } from './render/vfx.js';
+import { initMagic } from './render/magic.js';
 import { initStructures, updateStructures, shrineAwake, rebuildAll } from './world/structures.js';
 import { updateProjectiles, updateHazards, clearCombat } from './systems/combat.js';
 import { Player } from './entities/player.js';
@@ -60,6 +61,7 @@ initInput(R.canvas);
 initTerrain();
 initAtmosphere();
 initVfx();
+initMagic();
 initQuestMarkers();
 initWeather();
 initStructures();

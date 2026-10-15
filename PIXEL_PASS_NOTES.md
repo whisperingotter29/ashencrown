@@ -61,3 +61,28 @@ The game is now fully 2D: a top-down pixel renderer (`src/render/renderer.js` + 
 - Walls and buildings no longer fade when you stand behind them; the player shows as a gold outline through whatever covers them.
 - Terrain worker is inlined (`?worker&inline`) so the game can ship as one file.
 - `npm run build:single` builds `dist-single/ashen-crown.html`, a single self-contained page (JS, CSS, fonts, worker inlined) used for the claude.ai hosted link.
+
+## Pass 6: shader magic layer
+Spells, impacts and auras now render on a WebGL2 layer at screen resolution on top of the pixel
+world (`src/render/magic.js`, recipes in `src/render/spellfx.js`, element palettes in
+`src/render/elements.js`). The pixel art itself is unchanged; magic gets its own smooth look.
+- One instanced quad renderer; the fragment shader picks a material per quad: glow, velocity-stretched
+  spark, noisy flame, ground ring, faceted crystal, shaded orb (per-element interior: roiling fire,
+  frost facets, crackling plasma, void swirl, radiant core, bubbling rot), lightning and beam
+  ribbons, rune circle (draw-on animation, hexagram, glyph band), light shaft, vortex, blast dome,
+  mist, star flare, slash crescent, tapered trail.
+- Four passes per frame: darkening (multiply: ground shadows under orbs, scorch/frost/blight marks,
+  tinted ground under zones), solid (normal blend: ice crystals keep real colour on bright
+  ground), MAX (trails and bolts, so joints don't bead), additive (everything that glows).
+- GPU particles (CPU-simulated): sparks stretch along their screen velocity, flames/mist build
+  volume in the MAX pass, orbit particles (hoops, spirals) dim and shrink behind the body.
+- 3D cues: squashed hoops rising around the body for buffs, crystals orbiting frost orbs with
+  front/back depth, expanding domes on explosions and novas, light shafts rising out of rune
+  circles, ground shadows that shrink as orbs gain height.
+- Every vfx primitive routes here when the layer is on: projectiles, elemBurst, explodeAt, ring,
+  pillar, lightning (fractal, branching, re-strikes), beam, zones, elemental slashes (shed flames,
+  sparks, glints), hit flares; spells add cast circles + converging motes, cone streams, nova
+  domes, blink streaks, heal shafts, dash ribbons.
+- Settings → "Spell effects": Enhanced (shaders) / Classic pixel. Falls back to classic if WebGL2
+  is missing; context loss is handled (rebuilds on restore).
+- The terrain worker is inlined (`?worker&inline`); `npm run build:single` still makes a one-file build.

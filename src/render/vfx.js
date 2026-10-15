@@ -11,6 +11,10 @@ import { PPU, C, bayer, Pix, light, dark } from '../px/pix.js';
 import { ammoSprite } from '../px/sprites/weapons.js';
 import { drawText, textWidth, FONT_H } from '../px/font.js';
 import { G } from '../game.js';
+import { magicOn, gpart, gburst, updateMagic, clearMagic } from './magic.js';
+import { orbFx, shardTrailFx, impactFx, ringFx, pillarFx, boltFx, beamFx, zoneFx, arcFx, flareFx, shellFx } from './spellfx.js';
+import { ELEM_COLORS, elementOf } from './elements.js';
+export { ELEM_COLORS };
 
 const MAX = 2600;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
@@ -71,6 +75,7 @@ const cc = new Map();
 const col = (c) => { if (Array.isArray(c)) return c; let v = cc.get(c); if (!v) { v = C(c); cc.set(c, v); } return v; };
 
 export function particle(o) {
+  if (o.gl && o.additive !== false && magicOn()) { gpart({ ...o, kind: o.kind || (o.size >= 0.5 ? 'glow' : 'spark'), hot: o.hot ?? 0.7 }); return; }
   if (vfx.parts.length >= MAX) vfx.parts.shift();
   const gy = ground(o.x, o.z);
   vfx.parts.push({
@@ -83,6 +88,13 @@ export function particle(o) {
 }
 
 export function burst(x, y, z, o = {}) {
+  if (o.additive !== false && !o.pixel && magicOn()) {
+    // magic sparkle: half velocity-stretched sparks, half soft motes
+    const n = o.count || 20, base = { ...o, color2: o.color2, edge: o.colorEnd || o.color2, gravity: o.gravity ?? -6 };
+    gburst(x, y, z, { ...base, count: Math.ceil(n / 2), kind: 'spark', size: Math.min(0.12, (o.size || 0.35) * 0.3), hot: 1 });
+    gburst(x, y, z, { ...base, count: Math.floor(n / 2), kind: 'glow', size: (o.size || 0.35) * 0.55, size1: 0.04, hot: 0.6 });
+    return;
+  }
   const n = o.count || 20;
   const sp = o.speed || 6;
   for (let i = 0; i < n; i++) {
@@ -155,6 +167,7 @@ function glowParticles(ctx) {
 // out. Outer rim white-hot, a light band, then the swing colour; the tail dithers away.
 // o.kind 'thrust' draws a straight lance streak instead (stabs, spear thrusts).
 export function slash(x, y, z, facing, o = {}) {
+  if (magicOn() && o.color) { const el = elementOf(o.color); if (el && el !== 'physical') arcFx(x, y, z, facing, { ...o, heavy: (o.dur || 0) >= 0.24 }); }
   if (o.kind === 'thrust') return thrustStreak(x, y, z, facing, o);
   const r = (o.radius || 2.4) * PPU, arc = (o.arc || 110) * Math.PI / 180;
   const a0 = Math.atan2(Math.cos(facing), Math.sin(facing));
@@ -233,6 +246,7 @@ function thrustStreak(x, y, z, facing, o) {
 
 // crisp radial hit spark (melee impacts)
 export function hitSpark(x, y, z, o = {}) {
+  if (magicOn() && (o.size || 1) >= 1.5) flareFx(x, y, z, { size: 0.8, color: o.color || '#fff4d0', color2: o.color || '#ffd080', dur: 0.12, star: true });
   const c = col(o.color || '#fff4d0');
   const n = o.rays || 6, len = (o.size || 1) * 6, dur = o.dur || 0.14;
   const gy = ground(x, z);
@@ -255,6 +269,7 @@ export function hitSpark(x, y, z, o = {}) {
 
 // ================================================================== rings
 export function ring(x, y, z, o = {}) {
+  if (magicOn()) return ringFx(x, y, z, o);
   const c = col(o.color || '#ffd080');
   const r0 = (o.r0 ?? 0.3) * PPU, r1 = (o.radius || 4) * PPU, dur = o.dur || 0.45;
   const gy = ground(x, z);
@@ -287,6 +302,7 @@ function ringPx(Ly, cx, cy, rr, th, c, a, u = 0) {
 // Ground impact for slams, landings and heavy overheads: a sharp expanding ring, jagged cracks
 // that stay on the ground for a moment, and a skirt of dust kicked out along the shockwave.
 export function shockwave(x, y, z, o = {}) {
+  if (magicOn() && o.color) { const el = elementOf(o.color); if (el && el !== 'physical') { ringFx(x, y, z, { radius: (o.radius || 3) * 1.05, color: o.color, dur: 0.4, th: 0.3, noise: 0.5 }); shellFx(x, y + 0.5, z, { radius: (o.radius || 3) * 0.8, color: o.color, dur: 0.3 }); } }
   const R = (o.radius || 3) * PPU, c = col(o.color || '#e8d8b8'), crackC = o.crackColor ? col(o.crackColor) : [40, 28, 24];
   const dur = o.dur || 1.1, gy = ground(x, z);
   const cracks = [];
@@ -402,6 +418,7 @@ function strokeGlow(ctx, pts, color, w, a) {
   ctx.globalAlpha = 1;
 }
 export function beam(ax, ay, az, bx, by, bz, o = {}) {
+  if (magicOn()) return beamFx(ax, ay, az, bx, by, bz, o);
   const c = o.color || '#a060ff', w = (o.width || 0.25) * PPU * 1.6, dur = o.dur || 0.1;
   const ga = ground(ax, az), gb = ground(bx, bz);
   return addFx({
@@ -416,6 +433,11 @@ export function beam(ax, ay, az, bx, by, bz, o = {}) {
   });
 }
 export function lightning(ax, ay, az, bx, by, bz, o = {}) {
+  if (magicOn()) {
+    const f = boltFx(ax, ay, az, bx, by, bz, { color: o.color, dur: (o.dur || 0.18) * 1.2, segs: Math.max(8, (o.segs || 10) * 2), jag: Math.min(0.3, 0.12 + (o.jag || 0.8) * 0.05), width: o.width });
+    for (let i = 0; i < 6; i++) { const t = Math.random(); particle({ gl: true, kind: 'spark', x: ax + (bx - ax) * t, y: ay + (by - ay) * t, z: az + (bz - az) * t, vx: (Math.random() - 0.5) * 8, vy: Math.random() * 4, vz: (Math.random() - 0.5) * 8, life: 0.2, size: 0.07, color: '#ffffff', color2: o.color || '#90a8ff', gravity: -6, hot: 1 }); }
+    return f;
+  }
   const segs = o.segs || 10, jag = (o.jag || 0.8) * PPU;
   const c = o.color || '#c0d0ff', dur = o.dur || 0.18;
   const ga = ground(ax, az), gb = ground(bx, bz);
@@ -444,6 +466,7 @@ export function lightning(ax, ay, az, bx, by, bz, o = {}) {
   return f;
 }
 export function pillar(x, y, z, o = {}) {
+  if (magicOn()) return pillarFx(x, y, z, o);
   const H = (o.height || 14) * PPU * 0.6, r = (o.radius || 1.2) * PPU, c = col(o.color || '#ffe080'), dur = o.dur || 0.5;
   const lc = light(c, 1.3), dc = dark(c, 0.8);
   const gy = ground(x, z);
@@ -497,6 +520,31 @@ function orbSprite(color, r) {
 export function projectileDrawable(p, size = 0.3) {
   const kind = p.kind;
   const pointed = kind === 'arrow' || kind === 'bolt' || kind === 'shard' || kind === 'thorn';
+  if (magicOn()) {
+    if (!pointed) {
+      // shader orb: only a ground shadow stays in the pixel world
+      const o = { sortZ: p.pos.z, p, gl: orbFx(p, size), draw() { this.sortZ = p.pos.z; },
+        shadow(ctx) { const r = Math.max(1, Math.round(size * PPU * 0.6)); ctx.fillStyle = 'rgba(10,6,12,0.3)'; ctx.fillRect(Math.round(PX(p.pos.x)) - r, Math.round(PY(p.pos.z, 0)), r * 2 + 1, 1); } };
+      scene.objects.add(o);
+      return o;
+    }
+    if (p.element !== 'physical' || kind === 'shard' || kind === 'thorn') {
+      const spr = ammoSprite(kind, p.color);
+      const o = {
+        sortZ: p.pos.z, p, gl: shardTrailFx(p),
+        draw(ctx) {
+          this.sortZ = p.pos.z;
+          const gy = ground(p.pos.x, p.pos.z), x = Math.round(PX(p.pos.x)), y = Math.round(PY(p.pos.z, p.pos.y - gy));
+          const a = Math.atan2(p.vel.z - p.vel.y, p.vel.x);
+          ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.drawImage(spr.pix.canvas(), -spr.pix.ox, -spr.pix.oy); ctx.restore();
+        },
+        emissive(ctx) { this.draw(ctx); },
+        shadow(ctx) { ctx.fillStyle = 'rgba(10,6,12,0.35)'; ctx.fillRect(Math.round(PX(p.pos.x)) - 1, Math.round(PY(p.pos.z, 0)), 3, 1); },
+      };
+      scene.objects.add(o);
+      return o;
+    }
+  }
   const spr = pointed ? ammoSprite(kind, p.element !== 'physical' || kind === 'shard' || kind === 'thorn' ? p.color : null) : orbSprite(p.color, Math.max(2, Math.round(size * PPU * 0.9)));
   const glowR = pointed ? (p.element !== 'physical' ? 6 : 0) : size * PPU * 2.6;
   const o = {
@@ -556,7 +604,7 @@ export function projectileDrawable(p, size = 0.3) {
   });
   return o;
 }
-export function removeDrawable(o) { if (o) { o.gone = true; scene.objects.delete(o); } }
+export function removeDrawable(o) { if (o) { o.gone = true; if (o.gl) o.gl.gone = true; scene.objects.delete(o); } }
 
 // A sprite standing in the world for a while (spikes, totems, ice walls). update(fx, dt) returns
 // false to remove; fx.rise (0..1) reveals the sprite from the ground up, fx.alpha fades it.
@@ -585,10 +633,13 @@ export function worldSprite(x, z, spr, update) {
 // Persistent ground zone (hazards): dithered fill + rotating dashed rim + soft glow.
 export function zoneDrawable(h, opacity = 0.4) {
   const c = col(h.color);
+  const gl = magicOn() && h.element !== 'physical' ? zoneFx(h) : null;
   return addFx({
+    gl,
     zone: true,
     update() { return !h.gone; },
     decal(Ly) {
+      if (this.gl) return;
       const cx = PX(h.x), cy = PY(h.z, 0), r = h.radius * PPU;
       const a = Math.min(1, h.life * 1.6) * (0.75 + Math.sin(h.age * 6) * 0.25) * opacity * 1.6;
       for (let py = Math.floor(cy - r); py <= Math.ceil(cy + r); py++) for (let px = Math.floor(cx - r); px <= Math.ceil(cx + r); px++) {
@@ -609,7 +660,7 @@ export function zoneDrawable(h, opacity = 0.4) {
         Ly.px(cx + Math.cos(a) * r, cy + Math.sin(a) * r, c, 1);
       }
     },
-    glow(ctx) { glowPx(ctx, PX(h.x), PY(h.z, 0), rgbStr(c), h.radius * PPU * 1.1, 0.16 * Math.min(1, h.life)); },
+    glow(ctx) { if (!this.gl) glowPx(ctx, PX(h.x), PY(h.z, 0), rgbStr(c), h.radius * PPU * 1.1, 0.16 * Math.min(1, h.life)); },
   });
 }
 export function removeZone(f) { if (f) { const i = vfx.fx.indexOf(f); if (i >= 0) vfx.fx.splice(i, 1); } }
@@ -657,6 +708,7 @@ export function updateVfx(dt, gameDt = dt) {
     requestLight(f.x, f.y, f.z, f.color, f.intensity * (1 - f.t / f.dur), f.dist);
   }
   updateParticles(gameDt);
+  updateMagic(gameDt);
   for (let i = vfx.fx.length - 1; i >= 0; i--) {
     const f = vfx.fx[i];
     if (!f.update(f, gameDt)) vfx.fx.splice(i, 1);
@@ -682,16 +734,13 @@ export function clearVfx() {
   vfx.parts.length = 0;
   vfx.numbers.length = 0;
   vfx.flashes.length = 0;
+  clearMagic();
 }
 
 // Element helpers
-export const ELEM_COLORS = {
-  physical: ['#ffffff', '#c8c0b0'], fire: ['#ffd080', '#ff5010'], frost: ['#f0fcff', '#50b8ff'], lightning: ['#ffffff', '#90a8ff'],
-  rot: ['#d0ffa0', '#50b030'], nature: ['#e0ffa0', '#60c030'], void: ['#e8d0ff', '#8030ff'], holy: ['#fffff0', '#ffc840'],
-  water: ['#e0ffff', '#30a0e0'], sand: ['#fff0c0', '#e0a040'], blood: ['#ffb0b0', '#c00818'], sound: ['#fff0ff', '#e070f0'], earth: ['#f0e0c0', '#a07040'],
-};
 export function elemBurst(el, x, y, z, scale = 1) {
   const [c1, c2] = ELEM_COLORS[el] || ELEM_COLORS.physical;
+  if (magicOn()) { impactFx(el, x, y, z, scale); flash(x, y + 1, z, c2, 14 * scale, 9, 0.3); return; }
   const conf = {
     fire: { count: 26, speed: 7, gravity: 3, up: 0.8, life: 0.7, size: 0.5 },
     frost: { count: 22, speed: 6, gravity: -8, life: 0.8, size: 0.35 },

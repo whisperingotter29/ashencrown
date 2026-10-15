@@ -5,6 +5,7 @@
 import { scene } from '../px/scene.js';
 import { view } from '../px/view.js';
 import { PPU, C } from '../px/pix.js';
+import { drawMagic } from './magic.js';
 
 export const R = {
   canvas: null, ctx: null,         // screen canvas (device pixels)
@@ -205,6 +206,8 @@ export function renderFrame(time) {
     }
     ctx.restore();
   }
+  // ---- GPU magic layer (spells, impacts, lightning), added over everything
+  drawMagic(ctx, ox - s, oy - s);
   overlays(ctx);
   // per-frame lists
   scene.decals.length = 0; scene.pixels.length = 0; scene.glows.length = 0; scene.emissives.length = 0; scene.screen.length = 0;

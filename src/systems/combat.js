@@ -3,6 +3,8 @@ import { Vec3 } from '../core/vec3.js';
 import { G } from '../game.js';
 import { S } from '../data/items.js';
 import { ELEMENTS } from '../data/tomes.js';
+import { magicOn } from '../render/magic.js';
+import { explosionFx } from '../render/spellfx.js';
 import { burst, floatText, elemBurst, projectileDrawable, removeDrawable, zoneDrawable, removeZone, ring, flash, particle, ELEM_COLORS, lightning, hitSpark } from '../render/vfx.js';
 import { addShake } from '../world/cameraRig.js';
 import { bus } from '../core/events.js';
@@ -286,7 +288,7 @@ export function updateProjectiles(dt) {
     const ox = p.pos.x, oz = p.pos.z;
     p.pos.addScaledVector(p.vel, dt);
     // trail
-    if (p.kind !== 'arrow' && p.kind !== 'bolt' && Math.random() < dt * 24) particle({ x: p.pos.x, y: p.pos.y, z: p.pos.z, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.2) * 2, vz: (Math.random() - 0.5) * 2, life: 0.35, size: p.kind === 'fireball' ? 0.45 : 0.25, color: p.color, gravity: p.element === 'fire' ? 3 : 0 });
+    if (p.kind !== 'arrow' && p.kind !== 'bolt' && !magicOn() && Math.random() < dt * 24) particle({ x: p.pos.x, y: p.pos.y, z: p.pos.z, vx: (Math.random() - 0.5) * 2, vy: (Math.random() - 0.2) * 2, vz: (Math.random() - 0.5) * 2, life: 0.35, size: p.kind === 'fireball' ? 0.45 : 0.25, color: p.color, gravity: p.element === 'fire' ? 3 : 0 });
     let dead = p.life <= 0;
     // ground / walls
     const gh = groundHeight(p.pos.x, p.pos.z);
@@ -333,8 +335,11 @@ export function updateProjectiles(dt) {
 }
 
 export function explodeAt(owner, x, y, z, radius, dmg, element, status, crit) {
-  ring(x, y, z, { radius: radius * 1.1, color: (ELEM_COLORS[element] || ELEM_COLORS.physical)[1], dur: 0.4 });
-  elemBurst(element, x, y, z, 1.2);
+  if (magicOn()) explosionFx(element, x, y, z, radius);
+  else {
+    ring(x, y, z, { radius: radius * 1.1, color: (ELEM_COLORS[element] || ELEM_COLORS.physical)[1], dur: 0.4 });
+    elemBurst(element, x, y, z, 1.2);
+  }
   flash(x, y + 1, z, (ELEM_COLORS[element] || ELEM_COLORS.physical)[1], 30, radius * 3, 0.35);
   if (owner?.isPlayer) addShake(0.25 * G.settings.screenShake);
   bus.emit('explosion', { owner, radius, x, z });
@@ -381,7 +386,7 @@ export function updateHazards(dt) {
     const h = G.hazards[i];
     h.life -= dt; h.age += dt;
     if (h.follow) { h.x = h.follow.pos.x; h.z = h.follow.pos.z; h.y = h.follow.pos.y; }
-    if (h.particles && Math.random() < dt * (8 + h.radius * 3)) {
+    if (h.particles && !(h.mesh?.gl) && Math.random() < dt * (8 + h.radius * 3)) {
       const a = Math.random() * Math.PI * 2, r = Math.sqrt(Math.random()) * h.radius;
       particle({ x: h.x + Math.cos(a) * r, y: h.y + 0.2, z: h.z + Math.sin(a) * r, vy: 1.5 + Math.random() * 2, life: 0.8, size: 0.4, color: h.color, gravity: 1 });
     }

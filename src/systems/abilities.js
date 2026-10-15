@@ -9,6 +9,8 @@ import { S } from '../data/items.js';
 import { dealDamage, spawnProjectile, spawnHazard, entitiesNear, hostile, targetsInArc, explodeAt, chainLightning, applyStatus } from './combat.js';
 import { worldSprite, burst, ring, slash, beam, pillar, lightning, flash, particle, telegraph, floatText, ELEM_COLORS, elemBurst, shockwave } from '../render/vfx.js';
 import { addShake } from '../world/cameraRig.js';
+import { magicOn } from '../render/magic.js';
+import { castFx, coneFx, novaFx, circleFx, explosionFx, blinkFx, hoopsFx, healFx, flareFx, dashTrailFx } from '../render/spellfx.js';
 import { bus } from '../core/events.js';
 import { setTimeoutGame } from '../entities/enemy.js';
 import { groundHeight } from '../world/terrain.js';
@@ -107,7 +109,8 @@ export function castSpell(p, s) {
   p.st.action = 'attack'; p.st.kind = anim; p.st.actionT = 0; p.st.strikeU = castT / (castT + 0.25);
   // casting glow
   const hand = p.model.handPos(new Vec3());
-  burst(hand.x, hand.y, hand.z, { count: 10, speed: 2, color: c1, color2: c2, life: castT + 0.2, gravity: 2, size: 0.3 });
+  if (magicOn()) castFx(p, el, castT);
+  else burst(hand.x, hand.y, hand.z, { count: 10, speed: 2, color: c1, color2: c2, life: castT + 0.2, gravity: 2, size: 0.3 });
   flash(hand.x, hand.y, hand.z, c2, 10, 7, castT + 0.2);
   bus.emit('castStart', { spell: s });
 }
@@ -137,20 +140,24 @@ function runSpell(p, s, base, el, c1, c2) {
     case 'cone': {
       const { dmg, crit } = spellHooks(p, base, el);
       const R = s.range, A = s.angle;
-      for (let i = 0; i < 40; i++) {
+      if (magicOn()) coneFx(p.pos.x, sy - 0.2, p.pos.z, ang, R, A, el);
+      else for (let i = 0; i < 40; i++) {
         const a = ang + (Math.random() - 0.5) * A * Math.PI / 180;
         const sp = R * (1.6 + Math.random());
         particle({ x: p.pos.x, y: sy - 0.2, z: p.pos.z, vx: Math.sin(a) * sp, vy: Math.random() * 1.5, vz: Math.cos(a) * sp, life: 0.45, size: 0.6, size1: 1.2, color: c1, color2: c2, drag: 2 });
       }
-      slash(p.pos.x, p.pos.y, p.pos.z, ang, { radius: R, arc: A, color: c2, dur: 0.3 });
+      if (!magicOn()) slash(p.pos.x, p.pos.y, p.pos.z, ang, { radius: R, arc: A, color: c2, dur: 0.3 });
       for (const e of targetsInArc(p, R, A, ang)) dealDamage(p, e, dmg, { kind: 'spell', element: el, crit, status: s.status, knock: s.knock || 0, lifesteal: s.lifesteal, fromX: p.pos.x, fromZ: p.pos.z });
       break;
     }
     case 'nova': {
       const { dmg, crit } = spellHooks(p, base, el);
-      ring(p.pos.x, p.pos.y, p.pos.z, { radius: s.radius, color: c2, dur: 0.5 });
-      ring(p.pos.x, p.pos.y + 0.5, p.pos.z, { radius: s.radius * 0.7, color: c1, dur: 0.35 });
-      burst(p.pos.x, p.pos.y + 0.6, p.pos.z, { count: 50, speed: s.radius * 2.2, color: c1, color2: c2, life: 0.5, up: 0.1, spread: 0.4, gravity: 0 });
+      if (magicOn()) novaFx(p.pos.x, p.pos.y, p.pos.z, s.radius, el);
+      else {
+        ring(p.pos.x, p.pos.y, p.pos.z, { radius: s.radius, color: c2, dur: 0.5 });
+        ring(p.pos.x, p.pos.y + 0.5, p.pos.z, { radius: s.radius * 0.7, color: c1, dur: 0.35 });
+        burst(p.pos.x, p.pos.y + 0.6, p.pos.z, { count: 50, speed: s.radius * 2.2, color: c1, color2: c2, life: 0.5, up: 0.1, spread: 0.4, gravity: 0 });
+      }
       addShake(0.2);
       for (const e of entitiesNear(p.pos.x, p.pos.z, s.radius, (e) => hostile(p, e))) dealDamage(p, e, dmg, { kind: 'spell', element: el, crit, status: s.status, lifesteal: s.lifesteal, knock: 3, fromX: p.pos.x, fromZ: p.pos.z });
       break;
@@ -160,6 +167,7 @@ function runSpell(p, s, base, el, c1, c2) {
       const y = gY(pt.x, pt.z);
       const delay = s.delay || 0.3;
       const tl = telegraph({ shape: 'circle', x: pt.x, y, z: pt.z, radius: s.radius, dur: delay, color: c2 });
+      if (magicOn()) circleFx(pt.x, y, pt.z, { radius: s.radius, color: el, dur: delay + 0.35, reveal: Math.max(0.12, delay * 0.7), spin: 1.6 });
       if (s.id === 'meteor' || s.id === 'leviathan') {
         const m = spawnProjectile({ x: pt.x - 6, y: y + 26, z: pt.z - 4, vx: 6 / delay, vy: -26 / delay, vz: 4 / delay, owner: p, dmg: 0, element: el, kind: 'fireball', size: 1.2, life: delay + 0.2, team: 'player' });
         m.hits = new Set(G.entities);
@@ -168,8 +176,8 @@ function runSpell(p, s, base, el, c1, c2) {
         const { dmg, crit } = spellHooks(p, base, el);
         if (el === 'lightning') lightning(pt.x, y + 40, pt.z, pt.x, y, pt.z, { color: c2, segs: 14, jag: 2.5, dur: 0.25 });
         pillar(pt.x, y, pt.z, { radius: s.radius * 0.5, height: 16, color: c2, dur: 0.45 });
-        ring(pt.x, y, pt.z, { radius: s.radius * 1.2, color: c2, dur: 0.5 });
-        elemBurst(el, pt.x, y + 0.5, pt.z, 1.6);
+        if (magicOn()) explosionFx(el, pt.x, y + 0.5, pt.z, s.radius);
+        else { ring(pt.x, y, pt.z, { radius: s.radius * 1.2, color: c2, dur: 0.5 }); elemBurst(el, pt.x, y + 0.5, pt.z, 1.6); }
         flash(pt.x, y + 2, pt.z, c2, 40, s.radius * 4, 0.4);
         addShake(0.3);
         for (const e of entitiesNear(pt.x, pt.z, s.radius, (e) => hostile(p, e))) {
@@ -247,10 +255,12 @@ function runSpell(p, s, base, el, c1, c2) {
       if (G.realm === 'dungeon') {
         for (let k = 10; k >= 0; k--) { const t = k / 10; const x = p.pos.x + (pt.x - p.pos.x) * t, z = p.pos.z + (pt.z - p.pos.z) * t; if (!dungeonWallAt(x, z) && dungeonLOS(p.pos.x, p.pos.z, x, z)) { pt = { x, z }; break; } }
       }
-      burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 30, speed: 5, color: c1, color2: c2, life: 0.6 });
+      const ox = p.pos.x, oz = p.pos.z;
+      if (!magicOn()) burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 30, speed: 5, color: c1, color2: c2, life: 0.6 });
       p.pos.x = pt.x; p.pos.z = pt.z;
       p.invuln = Math.max(p.invuln, 0.2);
-      burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 30, speed: 5, color: c1, color2: c2, life: 0.6 });
+      if (magicOn()) blinkFx(ox, p.pos.y, oz, p.pos.x, p.pos.y, p.pos.z, el);
+      else burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 30, speed: 5, color: c1, color2: c2, life: 0.6 });
       ring(p.pos.x, gY(p.pos.x, p.pos.z), p.pos.z, { radius: 3, color: c2, dur: 0.35 });
       break;
     }
@@ -259,15 +269,19 @@ function runSpell(p, s, base, el, c1, c2) {
       if (data.shieldPct) { p.buffs.shield = (p.buffs.shield || 0) + p.maxHp * data.shieldPct / 100; delete data.shieldPct; }
       p.addBuff(s.id, s.duration, data);
       ring(p.pos.x, p.pos.y, p.pos.z, { radius: 2.5, color: c2, dur: 0.6 });
-      burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 30, speed: 3, color: c1, color2: c2, life: 1, gravity: 3, up: 1 });
+      if (magicOn()) hoopsFx(p, el);
+      else burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 30, speed: 3, color: c1, color2: c2, life: 1, gravity: 3, up: 1 });
       floatText(p.pos.x, p.pos.y + 2.6, p.pos.z, s.name, { color: c1, force: true });
       break;
     }
     case 'heal': {
       p.heal(p.maxHp * s.heal);
       if (s.hot) p.addBuff(s.id + '_hot', s.duration, { regenPct: (s.hot * 100) / s.duration });
-      pillar(p.pos.x, p.pos.y, p.pos.z, { radius: 1.2, height: 8, color: c2, dur: 0.6 });
-      burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 30, speed: 2, color: c1, color2: c2, life: 1.2, gravity: 4, up: 1.5 });
+      if (magicOn()) healFx(p, el);
+      else {
+        pillar(p.pos.x, p.pos.y, p.pos.z, { radius: 1.2, height: 8, color: c2, dur: 0.6 });
+        burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 30, speed: 2, color: c1, color2: c2, life: 1.2, gravity: 4, up: 1.5 });
+      }
       bus.emit('spellHeal', { amount: p.maxHp * s.heal });
       break;
     }
@@ -282,6 +296,7 @@ function runSpell(p, s, base, el, c1, c2) {
         const x = p.pos.x + Math.sin(a) * 2.5, z = p.pos.z + Math.cos(a) * 2.5;
         bus.emit('spawnAlly', { id: s.summon, x, z, lifeTime: s.duration, owner: p });
         burst(x, gY(x, z) + 0.3, z, { count: 25, speed: 4, color: c1, color2: c2, life: 0.9, up: 1.4 });
+        if (magicOn()) { circleFx(x, gY(x, z), z, { radius: 1.6, color: el, dur: 0.9, reveal: 0.2, spin: 2 }); flareFx(x, gY(x, z) + 1, z, { size: 1.4, color: c1, color2: c2, dur: 0.25, star: true }); }
       }
       break;
     }
@@ -318,7 +333,7 @@ function startChannel(p, s, base, el, color) {
       }
       const ex = best ? best.pos.x : p.pos.x + Math.sin(ang) * s.range, ez = best ? best.pos.z : p.pos.z + Math.cos(ang) * s.range, ey = best ? best.pos.y + 1.1 : sy - 0.4;
       beam(sx, sy, sz, ex, ey, ez, { color, width: 0.18, dur: dt * 1.6 });
-      if (Math.random() < 0.5) particle({ x: ex, y: ey, z: ez, vx: (sx - ex) * 1.5, vy: 0, vz: (sz - ez) * 1.5, life: 0.5, size: 0.3, color });
+      if (Math.random() < 0.5) particle({ gl: true, x: ex, y: ey, z: ez, vx: (sx - ex) * 1.5, vy: 0, vz: (sz - ez) * 1.5, life: 0.5, size: 0.3, color });
       a.tickT -= dt;
       if (best && a.tickT <= 0) {
         a.tickT = 0.25;
@@ -359,6 +374,7 @@ export function useSkill(p, sk, combo) {
       if (data.shieldPct) { p.buffs.shield = (p.buffs.shield || 0) + p.maxHp * data.shieldPct / 100; delete data.shieldPct; }
       p.addBuff(sk.id, sk.duration, data);
       ring(p.pos.x, p.pos.y, p.pos.z, { radius: sk.radius || 3, color: c2 !== '#c8c0b0' ? c2 : '#ffd080', dur: 0.5 });
+      if (magicOn()) hoopsFx(p, c2 !== '#c8c0b0' ? el : '#ffc860', { count: 2, dur: 0.7 });
       floatText(p.pos.x, p.pos.y + 2.6, p.pos.z, sk.name, { color: '#ffe0a0', force: true });
       if (sk.fear) for (const e of entitiesNear(p.pos.x, p.pos.z, sk.radius, (e) => hostile(p, e))) applyStatus(e, 'fear', sk.fear);
       if (sk.id === 'bonebarrier') burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 30, speed: 4, color: '#e8e0d0', additive: false, life: 1, size: 0.4 });
@@ -370,12 +386,13 @@ export function useSkill(p, sk, combo) {
       p.facing = ang;
       const hit = new Set();
       p.invuln = Math.max(p.invuln, 0.25);
+      if (magicOn()) dashTrailFx(p, el, 0.3);
       p.action = { type: 'custom', t: 0, dur: 0.32, move: 0, update: (dt, a) => {
         p.st.action = 'attack'; p.st.kind = 'spearthrust'; p.st.actionT = 0.55;
         const sp = sk.range / 0.3;
         p.move(Math.sin(p.facing) * sp * dt, Math.cos(p.facing) * sp * dt, dt);
         p.moveSpeedNow = sp;
-        if (el !== 'physical') particle({ x: p.pos.x, y: p.pos.y + 0.3, z: p.pos.z, life: 1.2, size: 0.8, color: c1, color2: c2, vy: 0.5 });
+        if (el !== 'physical' && !magicOn()) particle({ gl: true, kind: magicOn() && el === 'fire' ? 'flame' : 'glow', x: p.pos.x, y: p.pos.y + 0.3, z: p.pos.z, life: magicOn() ? 0.5 : 1.2, size: 0.8, size1: 0.2, color: c1, color2: c2, vy: 0.5 });
         for (const e of targetsInArc(p, 1.8, 120)) { if (hit.has(e)) continue; hit.add(e); p.hitWithWeapon(e, sk.dmg, { status: sk.status, element: sk.element, knock: 4 }); }
       } };
       break;
@@ -466,12 +483,14 @@ export function useSkill(p, sk, combo) {
         if (dp < bd && d2 < 49) { bd = dp; best = e; }
       }
       if (!best) { bus.emit('toast', 'No target.'); p.cooldowns[sk.id] = 0.2; p.stamina += sk.stamina || 0; return; }
+      const tx0 = p.pos.x, tz0 = p.pos.z;
       burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 25, speed: 5, color: el !== 'physical' ? c2 : '#4a3a6a', additive: el !== 'physical', life: 0.6 });
       const behind = best.facing + Math.PI;
       const nx = best.pos.x + Math.sin(behind) * (best.radius + 1.0), nz = best.pos.z + Math.cos(behind) * (best.radius + 1.0);
       if (G.realm !== 'dungeon' || (!dungeonWallAt(nx, nz))) { p.pos.x = nx; p.pos.z = nz; }
       p.facing = Math.atan2(best.pos.x - p.pos.x, best.pos.z - p.pos.z);
       p.invuln = Math.max(p.invuln, 0.3);
+      if (magicOn()) blinkFx(tx0, p.pos.y, tz0, p.pos.x, p.pos.y, p.pos.z, el !== 'physical' ? el : '#8a70c0');
       burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 25, speed: 5, color: el !== 'physical' ? c2 : '#4a3a6a', additive: el !== 'physical', life: 0.6 });
       if (sk.dmg) {
         ring(best.pos.x, best.pos.y, best.pos.z, { radius: sk.radius || 3, color: c2, dur: 0.4 });
@@ -486,10 +505,12 @@ export function useSkill(p, sk, combo) {
       const pt = aimPoint(p, sk.range);
       let tx = pt.x, tz = pt.z;
       if (G.realm === 'dungeon') for (let k = 10; k >= 0; k--) { const t = k / 10; const x = p.pos.x + (pt.x - p.pos.x) * t, z = p.pos.z + (pt.z - p.pos.z) * t; if (!dungeonWallAt(x, z) && dungeonLOS(p.pos.x, p.pos.z, x, z)) { tx = x; tz = z; break; } }
-      burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 25, speed: 4, color: '#a070ff', life: 0.5 });
+      const bx0 = p.pos.x, bz0 = p.pos.z;
+      if (!magicOn()) burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 25, speed: 4, color: '#a070ff', life: 0.5 });
       p.pos.x = tx; p.pos.z = tz;
       p.invuln = Math.max(p.invuln, 0.25);
-      burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 25, speed: 4, color: '#a070ff', life: 0.5 });
+      if (magicOn()) blinkFx(bx0, p.pos.y, bz0, p.pos.x, p.pos.y, p.pos.z, 'void');
+      else burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 25, speed: 4, color: '#a070ff', life: 0.5 });
       break;
     }
     case 'leap': {
