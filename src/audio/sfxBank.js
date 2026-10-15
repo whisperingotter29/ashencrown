@@ -52,10 +52,12 @@ function tanhCurve(k) {
 const scalePath = (f, k) => (typeof f === 'number' ? f * k : f.map(([t, v]) => [t, v * k]));
 
 // ------------------------------------------------------------------ builder
-// Thin helpers over raw Web Audio nodes in an OfflineAudioContext. Times are seconds from 0.
+// Thin helpers over raw Web Audio nodes in an OfflineAudioContext. Recipe times are seconds from the
+// start of the sound; `o` shifts them to the sound's slot when several sounds share one render.
 // Decay `d` is roughly the time to fall ~43 dB (exponential, time constant d/5).
 class B {
-  constructor(c, r, sr) { this.c = c; this.r = r; this.sr = sr; this.out = c.destination; this.N = noiseFor(sr); }
+  constructor(c, r, sr, o = 0, out = c.destination) { this.c = c; this.r = r; this.sr = sr; this.o = o; this.out = out; this.N = noiseFor(sr); }
+  T(t) { return t + this.o; }
   R(a, b) { return a + (b - a) * this.r(); }
   g(v = 1, dst = this.out) { const n = this.c.createGain(); n.gain.value = v; n.connect(dst); return n; }
   env(p, t, peak, a, d, hold = 0, sus = 0) {
@@ -71,7 +73,7 @@ class B {
     for (let i = 1; i < f.length; i++) p.exponentialRampToValueAtTime(Math.max(1, cl(f[i][1])), t + f[i][0]);
   }
   filt(type, f, Q = 0.707, dst = this.out, t = 0) {
-    const n = this.c.createBiquadFilter(); n.type = type; this.path(n.frequency, t, f); n.Q.value = Q; n.connect(dst); return n;
+    const n = this.c.createBiquadFilter(); n.type = type; this.path(n.frequency, this.T(t), f); n.Q.value = Q; n.connect(dst); return n;
   }
   drive(k = 2, dst = this.out) { const n = this.c.createWaveShaper(); n.curve = tanhCurve(k); n.connect(dst); return n; }
   // amplitude modulator: returns an input node whose gain wobbles between 1-depth and 1
@@ -79,7 +81,7 @@ class B {
     const n = this.c.createGain(); n.gain.value = 1 - depth / 2; n.connect(dst);
     const l = this.c.createOscillator(); l.type = type; l.frequency.value = rate;
     const lg = this.c.createGain(); lg.gain.value = depth / 2; l.connect(lg); lg.connect(n.gain);
-    l.start(t); l.stop(t + dur + 0.1);
+    l.start(this.T(t)); l.stop(this.T(t) + dur + 0.1);
     return n;
   }
   vib(param, t, cents, rate, end) {
@@ -87,7 +89,8 @@ class B {
     const lg = this.c.createGain(); lg.gain.value = cents; l.connect(lg); lg.connect(param);
     l.start(t); l.stop(end);
   }
-  tone({ type = 'sine', f = 440, t = 0, a = 0.001, d = 0.2, hold = 0, g = 1, dst = this.out, det = 0, vib = 0, vibF = 6 }) {
+  tone({ type = 'sine', f = 440, t: t0 = 0, a = 0.001, d = 0.2, hold = 0, g = 1, dst = this.out, det = 0, vib = 0, vibF = 6 }) {
+    const t = this.T(t0);
     const o = this.c.createOscillator(); o.type = type; this.path(o.frequency, t, f); if (det) o.detune.value = det;
     const e = this.c.createGain(); e.gain.value = 0; this.env(e.gain, t, g, a, d, hold);
     o.connect(e); e.connect(dst);
@@ -97,19 +100,20 @@ class B {
     return o;
   }
   // filtered noise burst (optionally two filters in series, with frequency paths)
-  nz({ c = 'white', t = 0, a = 0.001, d = 0.1, hold = 0, g = 1, dst = this.out, ft = null, f = 1000, Q = 0.707, ft2 = null, f2 = 1000, Q2 = 0.707, rate = 1 }) {
+  nz({ c = 'white', t: t0 = 0, a = 0.001, d = 0.1, hold = 0, g = 1, dst = this.out, ft = null, f = 1000, Q = 0.707, ft2 = null, f2 = 1000, Q2 = 0.707, rate = 1 }) {
+    const t = this.T(t0);
     const s = this.c.createBufferSource(); s.buffer = this.N[c]; s.loop = true; s.playbackRate.value = rate;
     const e = this.c.createGain(); e.gain.value = 0; this.env(e.gain, t, g, a, d, hold); e.connect(dst);
     let head = e;
-    if (ft2) head = this.filt(ft2, f2, Q2, head, t);
-    if (ft) head = this.filt(ft, f, Q, head, t);
+    if (ft2) head = this.filt(ft2, f2, Q2, head, t0);
+    if (ft) head = this.filt(ft, f, Q, head, t0);
     s.connect(head);
     s.start(t, this.r() * 1.8); s.stop(t + a + hold + d * 1.5 + 0.05);
     return s;
   }
   click({ t = 0, f = 3000, d = 0.004, g = 0.5, dst = this.out }) { this.nz({ c: 'white', t, a: 0.0003, d, g, ft: 'highpass', f, dst }); }
-  fm({ f = 440, ratio = 2, index = 2, index1 = null, t = 0, a = 0.001, d = 0.3, hold = 0, g = 1, dst = this.out, type = 'sine', mtype = 'sine', di = null, vib = 0, vibF = 6 }) {
-    const c = this.c;
+  fm({ f = 440, ratio = 2, index = 2, index1 = null, t: t0 = 0, a = 0.001, d = 0.3, hold = 0, g = 1, dst = this.out, type = 'sine', mtype = 'sine', di = null, vib = 0, vibF = 6 }) {
+    const c = this.c, t = this.T(t0);
     const car = c.createOscillator(); car.type = type; this.path(car.frequency, t, f);
     const mod = c.createOscillator(); mod.type = mtype; this.path(mod.frequency, t, scalePath(f, ratio));
     const f0 = typeof f === 'number' ? f : f[0][1];
@@ -136,8 +140,8 @@ class B {
       this.tone({ t, f: fr, a, d: Math.max(0.01, d), g: g * gg, dst });
     });
   }
-  ring({ t = 0, f1 = 300, f2 = 70, a = 0.002, d = 0.3, g = 0.3, dst = this.out }) {
-    const c = this.c, o1 = c.createOscillator(), o2 = c.createOscillator();
+  ring({ t: t0 = 0, f1 = 300, f2 = 70, a = 0.002, d = 0.3, g = 0.3, dst = this.out }) {
+    const t = this.T(t0), c = this.c, o1 = c.createOscillator(), o2 = c.createOscillator();
     o1.frequency.value = f1; o2.frequency.value = f2;
     const rm = c.createGain(); rm.gain.value = 0; o2.connect(rm.gain); o1.connect(rm);
     const e = c.createGain(); e.gain.value = 0; this.env(e.gain, t, g, a, d); rm.connect(e); e.connect(dst);
@@ -150,7 +154,7 @@ class B {
     const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = damp; lp.Q.value = 0;
     const fbG = c.createGain(); fbG.gain.value = fb;
     del.connect(lp); lp.connect(fbG); fbG.connect(del);
-    const e = c.createGain(); e.gain.value = 0; this.env(e.gain, t, g, 0.001, d); e.connect(dst); lp.connect(e);
+    const e = c.createGain(); e.gain.value = 0; this.env(e.gain, this.T(t), g, 0.001, d); e.connect(dst); lp.connect(e);
     this.nz({ c: 'white', t, a: 0.0004, d: burst, g: 1, dst: del, ft: 'lowpass', f: Math.min(this.sr * 0.45, damp * 2.5) });
   }
   // bright plucked tone (harp / lute) for higher notes
@@ -182,7 +186,8 @@ class B {
     }
   }
   // randomly-pitched sawtooth "electric" buzz
-  zap({ t = 0, dur = 0.3, fmin = 70, fmax = 900, step = 0.008, g = 0.6, dst = this.out }) {
+  zap({ t: t0 = 0, dur = 0.3, fmin = 70, fmax = 900, step = 0.008, g = 0.6, dst = this.out }) {
+    const t = this.T(t0);
     const o = this.c.createOscillator(); o.type = 'sawtooth';
     for (let tt = 0; tt < dur; tt += step) o.frequency.setValueAtTime(this.R(fmin, fmax), t + tt);
     const e = this.c.createGain(); e.gain.value = 0; this.env(e.gain, t, g, 0.002, dur);
@@ -208,7 +213,7 @@ class B {
     const s = this.c.createBufferSource(); s.buffer = buf;
     const gn = this.g(g, dst);
     s.connect(ft ? this.filt(ft, f, Q, gn, t) : gn);
-    s.start(t);
+    s.start(this.T(t));
   }
 }
 
@@ -238,7 +243,7 @@ def('swing_thrust', { dur: 0.22, n: 3, vol: -10, vary: 1.5, cat: 'swing', pri: 0
   b.nz({ c: 'white', a: 0.035, d: 0.11, ft: 'bandpass', f: [[0, 1200], [0.07, b.R(3800, 4800)]], Q: 2 });
   b.nz({ c: 'pink', a: 0.02, d: 0.08, g: 0.5, ft: 'lowpass', f: 900 });
 });
-def('blade_ring', { dur: 0.6, n: 3, vol: -19, vary: 1, cat: 'swing', pri: 1 }, (b) => {
+def('blade_ring', { sr: 44100, dur: 0.6, n: 3, vol: -19, vary: 1, cat: 'swing', pri: 1 }, (b) => {
   b.modal({ f: b.R(2300, 3100), ratios: [1, 1.51, 2.27, 3.03, 3.98], decays: [0.45, 0.35, 0.25, 0.18, 0.12], g: 0.7 });
   b.nz({ c: 'white', a: 0.01, d: 0.12, g: 0.25, ft: 'bandpass', f: [[0, 4000], [0.1, 8000]], Q: 3 });
 });
@@ -249,10 +254,10 @@ def('bow_twang', { dur: 0.5, n: 3, vol: -8, vary: 1.2, cat: 'swing', pri: 0 }, (
   b.nz({ c: 'white', d: 0.045, g: 0.55, ft: 'highpass', f: 2600 });
   b.tone({ type: 'triangle', f: [[0, 260], [0.04, 170]], d: 0.06, g: 0.4 });
 });
-def('arrow_whiz', { dur: 0.3, n: 2, vol: -17, vary: 2, cat: 'swing', pri: 1 }, (b) => {
+def('arrow_whiz', { sr: 44100, dur: 0.3, n: 2, vol: -17, vary: 2, cat: 'swing', pri: 1 }, (b) => {
   b.nz({ c: 'white', a: 0.02, d: 0.22, ft: 'bandpass', f: [[0, 3400], [0.25, 1700]], Q: 5 });
 });
-def('xbow_thunk', { dur: 0.45, n: 3, vol: -6, vary: 1, cat: 'swing', pri: 0 }, (b) => {
+def('xbow_thunk', { dur: 0.36, n: 3, vol: -6, vary: 1, cat: 'swing', pri: 0 }, (b) => {
   b.click({ g: 0.9, f: 2500 });
   b.tone({ f: [[0, 140], [0.08, 55]], d: 0.12, g: 1 });
   b.pluck({ f: b.R(170, 200), fb: 0.93, damp: 3500, g: 0.7, d: 0.2 });
@@ -266,42 +271,42 @@ def('bow_draw', { dur: 0.6, n: 2, vol: -22, vary: 1, cat: 'swing', pri: 2 }, (b)
 });
 
 // ---- hits -----------------------------------------------------------------------------------
-def('hit_flesh', { dur: 0.32, n: 5, vol: -5, vary: 1.5, cat: 'hit', lpVar: 1, pri: 0 }, (b) => {
+def('hit_flesh', { dur: 0.27, n: 5, vol: -5, vary: 1.5, cat: 'hit', lpVar: 1, pri: 0 }, (b) => {
   const dr = b.drive(1.8);
   b.tone({ f: [[0, b.R(150, 200)], [0.08, 46]], d: 0.15, dst: dr });
   b.nz({ c: 'white', d: 0.045, g: 0.9, ft: 'lowpass', f: [[0, 4000], [0.05, 700]], dst: dr });
   b.nz({ c: 'pink', t: 0.004, a: 0.003, d: 0.09, g: 0.55, ft: 'bandpass', f: b.R(450, 800), Q: 2.5, dst: dr });
   b.click({ g: 0.5, f: 3000 });
 });
-def('hit_armor', { dur: 0.5, n: 4, vol: -7, vary: 1.2, cat: 'hit', lpVar: 0.8, pri: 0 }, (b) => {
+def('hit_armor', { dur: 0.4, n: 4, vol: -7, vary: 1.2, cat: 'hit', lpVar: 0.8, pri: 0 }, (b) => {
   b.click({ g: 0.8, f: 2000 });
   b.modal({ f: b.R(480, 760), ratios: [1, 2.32, 4.25, 6.63, 9.38], decays: [0.3, 0.22, 0.15, 0.1, 0.06], g: 0.55, jit: 0.02 });
   b.tone({ f: [[0, 140], [0.06, 62]], d: 0.1, g: 0.85 });
   b.nz({ c: 'white', d: 0.035, g: 0.45, ft: 'highpass', f: 2200 });
 });
-def('hit_bone', { dur: 0.32, n: 3, vol: -6, vary: 1.5, cat: 'hit', lpVar: 0.8, pri: 0 }, (b) => {
+def('hit_bone', { dur: 0.14, n: 3, vol: -6, vary: 1.5, cat: 'hit', lpVar: 0.8, pri: 0 }, (b) => {
   b.nz({ c: 'white', d: 0.022, ft: 'bandpass', f: b.R(2000, 2800), Q: 1.4 });
   b.modal({ f: b.R(650, 1000), ratios: [1, 2.6, 4.1], decays: 0.05, g: 0.6 });
   b.tone({ f: [[0, 120], [0.05, 60]], d: 0.07, g: 0.6 });
   b.crackle({ dur: 0.07, rate: 300, g: 0.6, ft: 'bandpass', f: 2500, Q: 0.8 });
 });
-def('hit_stone', { dur: 0.42, n: 3, vol: -6, vary: 1.2, cat: 'hit', lpVar: 0.8, pri: 0 }, (b) => {
+def('hit_stone', { dur: 0.26, n: 3, vol: -6, vary: 1.2, cat: 'hit', lpVar: 0.8, pri: 0 }, (b) => {
   b.tone({ f: [[0, 105], [0.09, 48]], d: 0.13 });
   b.crackle({ dur: 0.2, rate: 450, g: 0.8, ft: 'lowpass', f: 2600, shape: 'exp', len: 50 });
   b.modal({ f: b.R(260, 340), ratios: [1, 1.93, 3.1], decays: 0.07, g: 0.5 });
   b.nz({ c: 'white', d: 0.02, g: 0.6, ft: 'bandpass', f: 1500, Q: 1 });
 });
-def('crit_crack', { dur: 0.55, n: 3, vol: -8, vary: 1, cat: 'crit', pri: 0 }, (b) => {
+def('crit_crack', { sr: 44100, dur: 0.5, n: 3, vol: -8, vary: 1, cat: 'crit', pri: 0 }, (b) => {
   b.nz({ c: 'white', d: 0.02, ft: 'highpass', f: 1400, dst: b.drive(4) });
   b.modal({ t: 0.002, f: b.R(1800, 2300), ratios: [1, 1.41, 2.13, 2.87, 3.6], decays: [0.4, 0.3, 0.25, 0.2, 0.15], g: 0.4 });
   b.nz({ c: 'white', a: 0.003, d: 0.18, g: 0.22, ft: 'highpass', f: 6500 });
 });
-def('sub_thump', { dur: 0.5, n: 2, vol: -5, vary: 0.8, cat: 'sub', pri: 0 }, (b) => {
+def('sub_thump', { sr: 16000, dur: 0.5, n: 2, vol: -5, vary: 0.8, cat: 'sub', pri: 0 }, (b) => {
   const dr = b.drive(1.5);
   b.tone({ f: [[0, 88], [0.2, 31]], d: 0.34, dst: dr });
   b.tone({ f: [[0, 190], [0.04, 70]], d: 0.05, g: 0.45, dst: dr });
 });
-def('hurt', { dur: 0.45, n: 3, vol: -5, vary: 1, cat: 'hurt', pri: 0 }, (b) => {
+def('hurt', { dur: 0.38, n: 3, vol: -5, vary: 1, cat: 'hurt', pri: 0 }, (b) => {
   const dr = b.drive(3);
   b.tone({ f: [[0, 115], [0.15, 40]], d: 0.2, dst: dr });
   b.nz({ c: 'brown', d: 0.14, g: 0.8, ft: 'lowpass', f: 700, dst: dr });
@@ -311,27 +316,27 @@ def('hurt', { dur: 0.45, n: 3, vol: -5, vary: 1, cat: 'hurt', pri: 0 }, (b) => {
 });
 
 // ---- kills ----------------------------------------------------------------------------------
-def('kill_flesh', { dur: 0.7, n: 4, vol: -4, vary: 1.2, cat: 'kill', pri: 0 }, (b) => {
+def('kill_flesh', { dur: 0.48, n: 4, vol: -4, vary: 1.2, cat: 'kill', pri: 0 }, (b) => {
   const dr = b.drive(2.5);
   b.crackle({ dur: 0.16, rate: 1600, g: 0.9, ft: 'bandpass', f: b.R(1400, 2000), Q: 0.7, dst: dr, len: 30 });
   b.tone({ f: [[0, 125], [0.15, 36]], d: 0.26, dst: dr });
   b.nz({ c: 'pink', t: 0.01, a: 0.002, d: 0.24, g: 0.75, ft: 'lowpass', f: [[0, 2600], [0.2, 380]] });
   b.nz({ c: 'white', t: 0.02, d: 0.13, g: 0.45, ft: 'bandpass', f: [[0, 950], [0.12, 280]], Q: 5 });
 });
-def('kill_bone', { dur: 0.8, n: 3, vol: -5, vary: 1.2, cat: 'kill', pri: 0 }, (b) => {
+def('kill_bone', { dur: 0.42, n: 3, vol: -5, vary: 1.2, cat: 'kill', pri: 0 }, (b) => {
   b.crackle({ dur: 0.28, rate: 700, g: 0.8, ft: 'bandpass', f: 2400, Q: 0.8, len: 25 });
   for (let i = 0; i < 7; i++) b.modal({ t: b.R(0, 0.3), f: b.R(550, 1500), ratios: [1, 2.6, 4.1], decays: b.R(0.03, 0.06), g: b.R(0.2, 0.5) });
   b.tone({ f: [[0, 105], [0.1, 50]], d: 0.15, g: 0.8 });
   b.nz({ c: 'white', d: 0.03, g: 0.7, ft: 'bandpass', f: 2200, Q: 1 });
 });
-def('kill_stone', { dur: 1.0, n: 2, vol: -4, vary: 1, cat: 'kill', sr: 32000, pri: 0 }, (b) => {
+def('kill_stone', { dur: 0.76, n: 2, vol: -4, vary: 1, cat: 'kill', sr: 32000, pri: 0 }, (b) => {
   b.nz({ c: 'brown', a: 0.005, d: 0.55, g: 0.9, ft: 'lowpass', f: 320 });
   b.crackle({ dur: 0.6, rate: 900, g: 0.8, ft: 'lowpass', f: 3000, shape: 'exp', len: 50 });
   b.tone({ f: [[0, 85], [0.25, 34]], d: 0.32 });
   b.nz({ c: 'white', d: 0.03, g: 0.6, ft: 'bandpass', f: 1300 });
 });
 // the reward "tick": pitched up along a pentatonic run by the kill streak at play time
-def('kill_tick', { dur: 0.35, n: 1, vol: -13, vary: 0, cat: 'tick', group: 'ui', pri: 0 }, (b) => {
+def('kill_tick', { sr: 44100, dur: 0.26, n: 1, vol: -13, vary: 0, cat: 'tick', group: 'ui', pri: 0 }, (b) => {
   const f = 659.26;
   b.tone({ f, d: 0.16, g: 0.6 });
   b.tone({ f: f * 2, d: 0.08, g: 0.3 });
@@ -339,12 +344,28 @@ def('kill_tick', { dur: 0.35, n: 1, vol: -13, vary: 0, cat: 'tick', group: 'ui',
   b.tone({ type: 'triangle', f: f / 2, d: 0.06, g: 0.2 });
   b.click({ g: 0.25, f: 5000, d: 0.003 });
 });
-def('streak_sting', { dur: 1.5, n: 1, vol: -11, vary: 0, cat: 'sting', group: 'ui', pri: 1 }, (b) => {
+def('streak_sting', { sr: 44100, dur: 1.4, n: 1, vol: -11, vary: 0, cat: 'sting', group: 'ui', pri: 1 }, (b) => {
   [76, 79, 83, 88, 91].forEach((m, i) => b.bell({ t: i * 0.05, f: mtof(m), d: 0.7, g: 0.35, ratio: 3.01, idx: 1.6 }));
   b.nz({ c: 'white', t: 0.05, a: 0.15, d: 0.8, g: 0.15, ft: 'highpass', f: 7000 });
   b.tone({ type: 'triangle', f: mtof(64), t: 0.2, a: 0.02, d: 0.9, g: 0.25 });
 });
-def('gong', { dur: 2.8, n: 1, vol: -10, vary: 0.5, cat: 'sting', sr: 32000, pri: 1 }, (b) => {
+// named streak milestones (KILLING SPREE, RAMPAGE ...): rising swell into a brass power chord + crash
+def('streak_shout', { dur: 2.0, n: 1, vol: -6, vary: 0, cat: 'sting', group: 'ui', pri: 1, parts: [
+  { dur: 0.36, reverse: true, build: (b) => { b.nz({ c: 'white', d: 0.34, g: 0.5, ft: 'highpass', f: 4000 }); b.nz({ c: 'pink', d: 0.3, g: 0.7, ft: 'bandpass', f: 900, Q: 0.8 }); } },
+  { at: 0.34, dur: 1.65, build: (b) => {
+    const dr = b.drive(2);
+    b.tone({ f: [[0, 80], [0.25, 32]], d: 0.45, dst: dr });
+    b.nz({ c: 'white', d: 0.025, g: 0.8, ft: 'lowpass', f: 7000, dst: dr });
+    b.brass({ notes: [45, 52, 57, 61, 64].map(mtof), a: 0.02, hold: 0.25, d: 0.9, g: 0.6, open: 4500 });
+    b.nz({ c: 'white', a: 0.004, d: 1.2, g: 0.22, ft: 'highpass', f: 5000 });
+    [81, 85, 88, 93].forEach((m, i) => b.bell({ t: 0.05 + i * 0.05, f: mtof(m), d: 0.5, g: 0.12 }));
+  } },
+] });
+def('streak_end', { dur: 0.7, n: 1, vol: -16, vary: 0, cat: 'sting', group: 'ui', pri: 2 }, (b) => {
+  b.bell({ f: mtof(76), d: 0.3, g: 0.35, ratio: 2, idx: 0.8 });
+  b.bell({ t: 0.12, f: mtof(71), d: 0.45, g: 0.3, ratio: 2, idx: 0.8 });
+});
+def('gong', { dur: 2.8, n: 1, vol: -10, vary: 0.5, cat: 'sting', sr: 16000, pri: 1 }, (b) => {
   b.modal({ f: 98, ratios: [1, 1.47, 2.09, 2.56, 3.14, 4.2], decays: [2.4, 1.8, 1.4, 1.0, 0.8, 0.5], gains: [1, 0.7, 0.6, 0.4, 0.35, 0.2], g: 0.6, a: 0.004 });
   b.nz({ c: 'pink', d: 0.12, g: 0.5, ft: 'lowpass', f: 1200 });
 });
@@ -522,11 +543,20 @@ const HIT = {
   },
 };
 export const ELEMENTS = Object.keys(HIT);
+// render lengths (s) for hit / bolt / cast, measured from the decays so no time is spent on silence
+const EL_DUR = {
+  fire: [0.6, 0.36, 0.74], frost: [0.4, 0.4, 0.76], lightning: [0.72, 0.36, 0.64], void: [0.6, 0.5, 1.1],
+  holy: [0.8, 0.56, 1.1], rot: [0.38, 0.36, 0.7], nature: [0.24, 0.3, 0.6], blood: [0.34, 0.5, 0.75],
+  water: [0.44, 0.4, 0.8], sand: [0.38, 0.36, 0.76], earth: [0.52, 0.48, 0.92], sound: [0.5, 0.56, 1.1], physical: [0.3, 0.26, 0.48],
+};
+const BRIGHT = { frost: 1 };   // glass partials reach past 16 kHz: keep 44.1 kHz for frost
 for (const el of ELEMENTS) {
-  def(el + '_hit', { dur: 0.75, n: 3, vol: -6, vary: 1.2, cat: 'elem', group: 'magic', lpVar: 0.6, pri: 1, sr: el === 'earth' ? 32000 : undefined }, (b, v) => HIT[el](b, 1, v));
+  const [dh, db, dc] = EL_DUR[el];
+  const sr = BRIGHT[el] ? 44100 : undefined;
+  def(el + '_hit', { dur: dh, n: 3, vol: -6, vary: 1.2, cat: 'elem', group: 'magic', lpVar: 0.6, pri: 1, sr }, (b, v) => HIT[el](b, 1, v));
   const P = CAST_PARTS[el];
-  def(el + '_bolt', { dur: 0.55, n: 2, vol: -9, vary: 1.5, cat: 'cast', group: 'magic', pri: 1, parts: P && P(0.45) }, (b, v) => CAST[el](b, 0.45, v));
-  def(el + '_cast', { dur: 1.1, n: 2, vol: -6, vary: 0.8, cat: 'cast', group: 'magic', pri: 2, sr: el === 'earth' ? 32000 : undefined, parts: P && P(1) }, (b, v) => CAST[el](b, 1, v));
+  def(el + '_bolt', { dur: db, n: 2, vol: -9, vary: 1.5, cat: 'cast', group: 'magic', pri: 1, sr, parts: P && P(0.45) }, (b, v) => CAST[el](b, 0.45, v));
+  def(el + '_cast', { dur: dc, n: 2, vol: -6, vary: 0.8, cat: 'cast', group: 'magic', pri: 2, sr, parts: P && P(1) }, (b, v) => CAST[el](b, 1, v));
 }
 // generic spell wind-up: a reversed swell, stretched at runtime to land on the cast moment
 def('charge', { dur: 0.7, n: 2, vol: -14, vary: 0.5, cat: 'cast', group: 'magic', pri: 1, parts: [{ dur: 0.7, reverse: true, build: (b) => {
@@ -535,7 +565,7 @@ def('charge', { dur: 0.7, n: 2, vol: -14, vary: 0.5, cat: 'cast', group: 'magic'
 } }] });
 
 // ---- explosions & slams ---------------------------------------------------------------------
-def('boom_small', { dur: 1.1, n: 3, vol: -4, vary: 1.2, cat: 'boom', pri: 1 }, (b) => {
+def('boom_small', { dur: 0.86, n: 3, vol: -4, vary: 1.2, cat: 'boom', pri: 1 }, (b) => {
   const dr = b.drive(2.2);
   b.nz({ c: 'white', d: 0.02, ft: 'lowpass', f: 7000, dst: dr });
   b.nz({ c: 'brown', a: 0.002, d: 0.55, ft: 'lowpass', f: [[0, 2000], [0.3, 180]], dst: dr });
@@ -551,11 +581,11 @@ def('boom_big', { dur: 2.4, n: 2, vol: -3, vary: 1, cat: 'boom', sr: 32000, pri:
   b.nz({ c: 'brown', t: 0.05, a: 0.08, d: 1.7, g: 0.8, ft: 'lowpass', f: 130, dst: am });
   b.crackle({ t: 0.03, dur: 1.6, rate: 70, g: 0.3, ft: 'highpass', f: 700, shape: 'exp', len: 60 });
 });
-def('rumble_tail', { dur: 2.6, n: 2, vol: -9, vary: 1, cat: 'boom', sr: 22050, pri: 1 }, (b) => {
+def('rumble_tail', { dur: 2.6, n: 1, vol: -9, vary: 1, cat: 'boom', sr: 22050, pri: 1 }, (b) => {
   const am = b.am(b.R(3, 5), 0.6, b.out, 0, 2.6);
   b.nz({ c: 'brown', a: 0.15, d: 2.1, ft: 'lowpass', f: b.R(100, 140), dst: am });
 });
-def('slam', { dur: 1.0, n: 3, vol: -3, vary: 1, cat: 'boom', sr: 32000, pri: 1 }, (b) => {
+def('slam', { dur: 0.8, n: 3, vol: -3, vary: 1, cat: 'boom', sr: 32000, pri: 1 }, (b) => {
   const dr = b.drive(2.2);
   b.tone({ f: [[0, 78], [0.25, 28]], d: 0.46, dst: dr });
   b.nz({ c: 'white', d: 0.04, g: 0.9, ft: 'lowpass', f: 3200, dst: dr });
@@ -564,7 +594,7 @@ def('slam', { dur: 1.0, n: 3, vol: -3, vary: 1, cat: 'boom', sr: 32000, pri: 1 }
 });
 
 // ---- abilities ------------------------------------------------------------------------------
-def('dash', { dur: 0.45, n: 3, vol: -7, vary: 1, cat: 'ability', pri: 1 }, (b) => {
+def('dash', { dur: 0.4, n: 3, vol: -7, vary: 1, cat: 'ability', pri: 1 }, (b) => {
   b.nz({ c: 'pink', a: 0.12, d: 0.18, ft: 'bandpass', f: [[0, 500], [0.15, 4200]], Q: 1.4 });
   b.tone({ f: [[0, 380], [0.15, 1700]], a: 0.03, d: 0.13, g: 0.12 });
   b.nz({ c: 'white', a: 0.08, d: 0.12, g: 0.3, ft: 'highpass', f: 6000 });
@@ -629,7 +659,7 @@ def('blink', { dur: 0.7, n: 3, vol: -7, vary: 1.2, cat: 'ability', group: 'magic
     [1, 1.5, 2.25, 3].forEach((k, i) => b.tone({ f: 1200 * k, a: 0.01, d: 0.3, g: 0.07, vib: 40, vibF: 9 + i }));
   } },
 ] });
-def('summon', { dur: 1.7, n: 2, vol: -7, vary: 1, cat: 'ability', group: 'magic', sr: 32000, pri: 2 }, (b) => {
+def('summon', { dur: 1.7, n: 2, vol: -7, vary: 1, cat: 'ability', group: 'magic', sr: 22050, pri: 2 }, (b) => {
   b.nz({ c: 'brown', a: 0.8, d: 0.5, g: 0.9, ft: 'lowpass', f: [[0, 90], [0.9, 650]] });
   b.fm({ f: 55, ratio: 0.5, index: 5, a: 0.6, d: 0.7, g: 0.5 });
   b.modal({ t: 0.75, f: 330, ratios: [0.5, 1, 1.19, 1.5, 2], decays: 0.8, g: 0.3 });
@@ -654,17 +684,17 @@ def('stealth', { dur: 0.8, n: 2, vol: -10, vary: 1, cat: 'ability', group: 'magi
   b.nz({ c: 'pink', a: 0.05, d: 0.5, g: 0.8, ft: 'bandpass', f: [[0, 3200], [0.5, 280]], Q: 1.2 });
   b.tone({ f: [[0, 800], [0.45, 180]], a: 0.04, d: 0.4, g: 0.12 });
 });
-def('trap_set', { dur: 0.4, n: 2, vol: -9, vary: 1, cat: 'ability', pri: 2 }, (b) => {
+def('trap_set', { dur: 0.2, n: 2, vol: -9, vary: 1, cat: 'ability', pri: 2 }, (b) => {
   b.modal({ f: b.R(1400, 1700), ratios: [1, 2.1, 3.3], decays: 0.03, g: 0.7 });
   b.modal({ t: 0.085, f: b.R(1100, 1300), ratios: [1, 2.1, 3.3], decays: 0.04, g: 0.8 });
   b.tone({ t: 0.085, f: [[0, 220], [0.04, 120]], d: 0.05, g: 0.6 });
 });
-def('totem', { dur: 0.8, n: 2, vol: -7, vary: 1, cat: 'ability', pri: 2 }, (b) => {
+def('totem', { dur: 0.64, n: 2, vol: -7, vary: 1, cat: 'ability', pri: 2 }, (b) => {
   for (let i = 0; i < 3; i++) b.modal({ t: i * 0.11, f: b.R(220, 320), ratios: [1, 2.4, 3.9], decays: 0.1, g: 0.7 });
   b.tone({ t: 0.22, f: [[0, 100], [0.15, 45]], d: 0.2, g: 0.8 });
   b.crackle({ t: 0.2, dur: 0.4, rate: 700, g: 0.35, ft: 'bandpass', f: 4000, shape: 'exp', len: 12 });
 });
-def('flask_throw', { dur: 0.45, n: 2, vol: -9, vary: 1.5, cat: 'ability', pri: 2 }, (b) => {
+def('flask_throw', { dur: 0.3, n: 2, vol: -9, vary: 1.5, cat: 'ability', pri: 2 }, (b) => {
   b.modal({ f: b.R(2200, 2700), ratios: [1, 2.32, 3.9], decays: 0.12, g: 0.4 });
   b.nz({ c: 'pink', t: 0.02, a: 0.06, d: 0.15, g: 0.7, ft: 'bandpass', f: [[0, 700], [0.08, 2400]], Q: 1.3 });
   b.bubbles({ t: 0.02, dur: 0.2, n: 3, fmin: 500, fmax: 900, g: 0.2 });
@@ -683,7 +713,7 @@ def('block', { dur: 0.7, n: 3, vol: -5, vary: 1.2, cat: 'def', pri: 0 }, (b) => 
   b.tone({ f: [[0, 160], [0.06, 80]], d: 0.09, g: 0.8 });
   b.nz({ c: 'white', d: 0.07, g: 0.4, ft: 'bandpass', f: 3500, Q: 2 });
 });
-def('parry', { dur: 1.5, n: 2, vol: -5, vary: 0.8, cat: 'def', pri: 0 }, (b) => {
+def('parry', { dur: 1.45, n: 2, vol: -5, vary: 0.8, cat: 'def', pri: 0 }, (b) => {
   b.click({ g: 1, f: 2500 });
   b.modal({ f: b.R(1250, 1450), ratios: [1, 1.5, 2.0, 2.76, 3.5], decays: [1.2, 0.9, 0.7, 0.5, 0.4], g: 0.6 });
   b.nz({ c: 'white', a: 0.002, d: 0.28, g: 0.5, ft: 'bandpass', f: [[0, 6500], [0.25, 3000]], Q: 3 });
@@ -691,19 +721,72 @@ def('parry', { dur: 1.5, n: 2, vol: -5, vary: 0.8, cat: 'def', pri: 0 }, (b) => 
   b.bell({ t: 0.01, f: mtof(95), d: 0.7, g: 0.12, ratio: 3, idx: 1.2 });
   b.tone({ f: [[0, 180], [0.05, 90]], d: 0.08, g: 0.6 });
 });
-def('guard', { dur: 0.3, n: 2, vol: -16, vary: 1.5, cat: 'def', pri: 1 }, (b) => {
+def('guard', { dur: 0.14, n: 2, vol: -16, vary: 1.5, cat: 'def', pri: 1 }, (b) => {
   b.crackle({ dur: 0.1, rate: 350, g: 0.6, ft: 'bandpass', f: 2200, Q: 1, len: 10 });
   b.tone({ f: [[0, 190], [0.04, 120]], d: 0.05, g: 0.5 });
   b.modal({ t: 0.01, f: b.R(900, 1200), ratios: [1, 2.3], decays: 0.05, g: 0.25 });
 });
 
-// ---- weapon swap ----------------------------------------------------------------------------
+// ---- footsteps by surface (quiet, many variants, 32 kHz) ------------------------------------
+const STEP = { n: 4, vol: -21, vary: 1.5, cat: 'step', lpVar: 0.8, pri: 1 };
+const heel = (b, f = 120, g = 0.6) => b.tone({ f: [[0, f], [0.04, f * 0.58]], d: 0.05, g });
+def('step_grass', { ...STEP, dur: 0.14 }, (b) => {
+  heel(b);
+  b.crackle({ dur: 0.09, rate: 900, g: 0.7, ft: 'bandpass', f: b.R(2500, 3800), Q: 0.7, shape: 'exp', len: 8 });
+  b.nz({ c: 'pink', a: 0.005, d: 0.06, g: 0.35, ft: 'bandpass', f: 1200, Q: 0.8 });
+});
+def('step_dirt', { ...STEP, dur: 0.12 }, (b) => {
+  heel(b, 140, 0.7);
+  b.crackle({ dur: 0.08, rate: 700, g: 0.8, ft: 'bandpass', f: b.R(1500, 2200), Q: 0.9, shape: 'exp', len: 20 });
+});
+def('step_stone', { ...STEP, dur: 0.1, vol: -20 }, (b) => {
+  b.click({ g: 0.6, f: 1800, d: 0.003 });
+  b.tone({ f: [[0, 220], [0.02, 150]], d: 0.035, g: 0.6 });
+  b.modal({ f: b.R(900, 1300), ratios: [1, 2.3], decays: 0.02, g: 0.2 });
+  b.crackle({ dur: 0.04, rate: 500, g: 0.3, ft: 'highpass', f: 3000, len: 6 });
+});
+def('step_sand', { ...STEP, dur: 0.15 }, (b) => {
+  b.crackle({ t: 0.005, dur: 0.12, rate: 4000, g: 0.6, ft: 'bandpass', f: 2200, Q: 0.6, shape: 'bell', len: 4 });
+  heel(b, 100, 0.4);
+});
+def('step_snow', { ...STEP, dur: 0.16 }, (b) => {
+  b.crackle({ dur: 0.13, rate: 1800, g: 0.8, ft: 'bandpass', f: b.R(1300, 1800), Q: 1.2, shape: 'bell', len: 14 });
+  heel(b, 110, 0.4);
+});
+def('step_ash', { ...STEP, dur: 0.12 }, (b) => {
+  b.crackle({ dur: 0.09, rate: 1200, g: 0.8, ft: 'highpass', f: 2500, shape: 'exp', len: 6 });
+  heel(b, 130, 0.5);
+});
+def('step_splash', { ...STEP, dur: 0.18, vol: -19 }, (b) => {
+  b.nz({ c: 'white', a: 0.004, d: 0.1, g: 0.8, ft: 'bandpass', f: b.R(1400, 2200), Q: 0.8 });
+  b.bubbles({ dur: 0.08, n: 3, fmin: 500, fmax: 1100, g: 0.25 });
+  heel(b, 120, 0.4);
+});
+def('swim', { dur: 0.6, n: 3, vol: -16, vary: 1.5, cat: 'step', pri: 2 }, (b) => {
+  b.nz({ c: 'pink', a: 0.15, d: 0.3, g: 0.8, ft: 'bandpass', f: [[0, 400], [0.15, 1200], [0.45, 500]], Q: 1 });
+  b.bubbles({ t: 0.1, dur: 0.3, n: 5, fmin: 300, fmax: 900, g: 0.25 });
+});
+def('hoof', { dur: 0.16, n: 4, vol: -15, vary: 1.5, cat: 'step', pri: 2 }, (b) => {
+  for (const [t, g] of [[0, 1], [b.R(0.06, 0.08), 0.75]]) {
+    b.modal({ t, f: b.R(420, 560), ratios: [1, 1.6, 2.7], decays: 0.03, g: 0.6 * g });
+    b.tone({ t, f: [[0, 260], [0.03, 120]], d: 0.04, g: 0.6 * g });
+    b.crackle({ t, dur: 0.04, rate: 600, g: 0.3 * g, ft: 'bandpass', f: 2000, len: 10 });
+  }
+});
+
+// ---- weapon swap & equipment ----------------------------------------------------------------
+def('equip', { dur: 0.36, n: 3, vol: -10, vary: 1, cat: 'swap', pri: 1 }, (b) => {
+  b.crackle({ dur: 0.22, rate: 500, g: 0.6, ft: 'bandpass', f: 3000, Q: 0.9, shape: 'bell', len: 10 });
+  for (let i = 0; i < 4; i++) b.modal({ t: b.R(0.02, 0.2), f: b.R(2500, 4000), ratios: [1, 1.7], decays: 0.03, g: b.R(0.1, 0.25) });
+  b.modal({ t: 0.24, f: b.R(1300, 1600), ratios: [1, 2.2], decays: 0.03, g: 0.5 });
+  b.tone({ t: 0.24, f: [[0, 200], [0.03, 120]], d: 0.04, g: 0.4 });
+});
 def('swap_blade', { dur: 0.7, n: 3, vol: -9, vary: 1, cat: 'swap', pri: 1 }, (b) => {
   b.nz({ c: 'white', a: 0.06, d: 0.22, g: 0.7, ft: 'bandpass', f: [[0, 2400], [0.25, 7200]], Q: 4 });
   b.modal({ t: 0.2, f: b.R(2400, 2900), ratios: [1, 1.48, 2.21, 2.93], decays: 0.45, g: 0.45 });
   b.click({ t: 0.2, g: 0.5, f: 3000 });
 });
-def('swap_heavy', { dur: 0.5, n: 2, vol: -8, vary: 1, cat: 'swap', pri: 1 }, (b) => {
+def('swap_heavy', { dur: 0.26, n: 2, vol: -8, vary: 1, cat: 'swap', pri: 1 }, (b) => {
   b.tone({ f: [[0, 170], [0.08, 80]], d: 0.12 });
   b.modal({ f: b.R(280, 340), ratios: [1, 2.3, 3.7], decays: 0.16, g: 0.5 });
   b.crackle({ dur: 0.12, rate: 400, g: 0.4, ft: 'bandpass', f: 1800, len: 12 });
@@ -728,7 +811,7 @@ def('swap_tome', { dur: 0.6, n: 2, vol: -9, vary: 1, cat: 'swap', pri: 1 }, (b) 
 
 // ---- loot & economy -------------------------------------------------------------------------
 const shimmer = (b, t, a, d, g) => b.nz({ c: 'white', t, a, d, g, ft: 'highpass', f: 7000 });
-def('loot_0', { dur: 0.3, n: 2, vol: -12, vary: 1, cat: 'loot', group: 'ui', pri: 1 }, (b) => {
+def('loot_0', { dur: 0.15, n: 2, vol: -12, vary: 1, cat: 'loot', group: 'ui', pri: 1 }, (b) => {
   b.modal({ f: b.R(850, 1000), ratios: [1, 2.5], decays: 0.05, g: 0.6 });
   b.crackle({ dur: 0.05, rate: 300, g: 0.3, ft: 'bandpass', f: 2500, len: 10 });
   b.tone({ f: mtof(84), d: 0.1, g: 0.15 });
@@ -736,11 +819,11 @@ def('loot_0', { dur: 0.3, n: 2, vol: -12, vary: 1, cat: 'loot', group: 'ui', pri
 def('loot_1', { dur: 0.7, n: 1, vol: -11, vary: 0, cat: 'loot', group: 'ui', pri: 1 }, (b) => {
   b.bell({ f: mtof(79), d: 0.4, g: 0.4 }); b.bell({ t: 0.07, f: mtof(86), d: 0.45, g: 0.4 });
 });
-def('loot_2', { dur: 1.0, n: 1, vol: -10, vary: 0, cat: 'loot', group: 'ui', pri: 1 }, (b) => {
+def('loot_2', { sr: 44100, dur: 0.86, n: 1, vol: -10, vary: 0, cat: 'loot', group: 'ui', pri: 1 }, (b) => {
   [84, 88, 91].forEach((m, i) => b.bell({ t: i * 0.06, f: mtof(m), d: 0.5, g: 0.35 }));
   shimmer(b, 0.02, 0.05, 0.4, 0.12);
 });
-def('loot_3', { dur: 1.6, n: 1, vol: -9, vary: 0, cat: 'loot', group: 'ui', pri: 2 }, (b) => {
+def('loot_3', { sr: 44100, dur: 1.35, n: 1, vol: -9, vary: 0, cat: 'loot', group: 'ui', pri: 2 }, (b) => {
   [81, 85, 88, 93, 97].forEach((m, i) => b.bell({ t: i * 0.06, f: mtof(m), d: 0.7, g: 0.3 }));
   b.choir({ notes: [57, 64, 69].map(mtof), a: 0.1, d: 1.0, g: 0.3 });
   shimmer(b, 0.05, 0.2, 0.8, 0.12);
@@ -762,18 +845,18 @@ def('loot_5', { dur: 3.2, n: 1, vol: -6, vary: 0, cat: 'loot', group: 'ui', pri:
     shimmer(b, 0, 0.01, 1.4, 0.2);
   } },
 ] });
-def('coin', { dur: 0.4, n: 4, vol: -12, vary: 1, cat: 'coin', group: 'ui', pri: 1 }, (b) => {
+def('coin', { sr: 44100, dur: 0.32, n: 4, vol: -12, vary: 1, cat: 'coin', group: 'ui', pri: 1 }, (b) => {
   let t = 0;
   for (let i = 0, k = 2 + Math.floor(b.R(0, 2)); i < k; i++) { b.modal({ t, f: b.R(2900, 4200), ratios: [1, 1.34, 2.72, 3.9], decays: [0.14, 0.1, 0.07, 0.05], g: b.R(0.4, 0.7) }); t += b.R(0.03, 0.07); }
 });
-def('coin_shower', { dur: 1.0, n: 1, vol: -11, vary: 0.5, cat: 'coin', group: 'ui', pri: 2 }, (b) => {
+def('coin_shower', { sr: 44100, dur: 0.75, n: 1, vol: -11, vary: 0.5, cat: 'coin', group: 'ui', pri: 2 }, (b) => {
   for (let i = 0; i < 12; i++) b.modal({ t: b.R(0, 0.55), f: b.R(2700, 4500), ratios: [1, 1.34, 2.72, 3.9], decays: [0.14, 0.1, 0.07, 0.05], g: b.R(0.25, 0.55) });
 });
-def('mat', { dur: 0.25, n: 2, vol: -14, vary: 2, cat: 'coin', group: 'ui', pri: 1 }, (b) => {
+def('mat', { dur: 0.14, n: 2, vol: -14, vary: 2, cat: 'coin', group: 'ui', pri: 1 }, (b) => {
   b.tone({ f: [[0, 380], [0.04, 900]], d: 0.07, g: 0.5 });
   b.click({ g: 0.25, f: 3000 });
 });
-def('potion', { dur: 0.8, n: 1, vol: -9, vary: 1, cat: 'misc', pri: 2 }, (b) => {
+def('potion', { dur: 0.7, n: 1, vol: -9, vary: 1, cat: 'misc', pri: 2 }, (b) => {
   b.tone({ f: [[0, 650], [0.03, 260]], d: 0.04, g: 0.6 });
   b.click({ g: 0.4, f: 2000 });
   for (let i = 0; i < 4; i++) b.tone({ t: 0.15 + i * 0.13, f: [[0, b.R(170, 220)], [0.05, b.R(360, 420)]], a: 0.005, d: 0.07, g: 0.45 });
@@ -801,16 +884,16 @@ def('tut_step', { dur: 0.8, n: 1, vol: -12, vary: 0, cat: 'sting', group: 'ui', 
 def('toast', { dur: 0.15, n: 1, vol: -18, vary: 0.5, cat: 'toast', group: 'ui', pri: 1 }, (b) => {
   b.tone({ f: 1250, d: 0.05, g: 0.4 }); b.tone({ t: 0.04, f: 1660, d: 0.06, g: 0.3 });
 });
-def('denied', { dur: 0.3, n: 2, vol: -14, vary: 0.5, cat: 'denied', group: 'ui', pri: 1 }, (b) => {
+def('denied', { dur: 0.2, n: 2, vol: -14, vary: 0.5, cat: 'denied', group: 'ui', pri: 1 }, (b) => {
   b.tone({ type: 'triangle', f: [[0, 230], [0.08, 160]], d: 0.12, g: 0.6 });
   b.tone({ type: 'square', f: 110, d: 0.1, g: 0.3, dst: b.filt('lowpass', 450, 0) });
 });
-def('ui_click', { dur: 0.08, n: 3, vol: -14, vary: 1.5, cat: 'ui', group: 'ui', pri: 0 }, (b) => {
+def('ui_click', { sr: 44100, dur: 0.05, n: 3, vol: -14, vary: 1.5, cat: 'ui', group: 'ui', pri: 0 }, (b) => {
   b.nz({ c: 'white', d: 0.007, ft: 'bandpass', f: b.R(3000, 4000), Q: 1.2 });
   b.tone({ f: [[0, 1900], [0.02, 1200]], d: 0.018, g: 0.35 });
   b.tone({ f: [[0, 300], [0.01, 160]], d: 0.015, g: 0.3 });
 });
-def('ui_hover', { dur: 0.06, n: 2, vol: -26, vary: 2, cat: 'hover', group: 'ui', pri: 0 }, (b) => {
+def('ui_hover', { sr: 44100, dur: 0.04, n: 2, vol: -26, vary: 2, cat: 'hover', group: 'ui', pri: 0 }, (b) => {
   b.tone({ f: 2400, d: 0.014, g: 0.4 });
   b.nz({ c: 'white', d: 0.004, g: 0.25, ft: 'highpass', f: 6000 });
 });
@@ -819,11 +902,11 @@ def('ui_open', { dur: 0.4, n: 1, vol: -14, vary: 0.5, cat: 'ui', group: 'ui', pr
   b.tone({ t: 0.08, f: [[0, 210], [0.04, 140]], d: 0.05, g: 0.5 });
   b.bell({ t: 0.09, f: mtof(79), d: 0.2, g: 0.15 });
 });
-def('ui_close', { dur: 0.35, n: 1, vol: -15, vary: 0.5, cat: 'ui', group: 'ui', pri: 0 }, (b) => {
+def('ui_close', { dur: 0.22, n: 1, vol: -15, vary: 0.5, cat: 'ui', group: 'ui', pri: 0 }, (b) => {
   b.nz({ c: 'pink', a: 0.05, d: 0.12, g: 0.6, ft: 'bandpass', f: [[0, 2000], [0.12, 500]], Q: 1.2 });
   b.tone({ t: 0.06, f: [[0, 180], [0.04, 110]], d: 0.05, g: 0.5 });
 });
-def('ui_tab', { dur: 0.12, n: 2, vol: -16, vary: 1.5, cat: 'ui', group: 'ui', pri: 0 }, (b) => {
+def('ui_tab', { dur: 0.06, n: 2, vol: -16, vary: 1.5, cat: 'ui', group: 'ui', pri: 0 }, (b) => {
   b.nz({ c: 'white', d: 0.02, g: 0.7, ft: 'bandpass', f: 4500, Q: 1 });
   b.tone({ f: 1500, d: 0.025, g: 0.3 });
 });
@@ -837,12 +920,12 @@ def('signature', { dur: 2.3, n: 1, vol: -5, vary: 0, cat: 'sting', pri: 2, parts
     b.nz({ c: 'white', a: 0.005, d: 1.3, g: 0.25, ft: 'highpass', f: 5000 });
   } },
 ] });
-def('mount', { dur: 1.0, n: 1, vol: -9, vary: 1, cat: 'misc', pri: 2 }, (b) => {
+def('mount', { dur: 0.86, n: 1, vol: -9, vary: 1, cat: 'misc', pri: 2 }, (b) => {
   [0, 0.12, 0.3, 0.42].forEach((t) => { b.modal({ t, f: b.R(480, 560), ratios: [1, 1.6], decays: 0.03, g: 0.6 }); b.tone({ t, f: [[0, 300], [0.03, 150]], d: 0.04, g: 0.5 }); });
   b.tone({ type: 'sawtooth', f: [[0, 70], [0.3, 90]], t: 0.05, a: 0.1, d: 0.3, g: 0.2, dst: b.filt('bandpass', 700, 8) });
   b.nz({ c: 'pink', t: 0.55, a: 0.05, d: 0.25, g: 0.4, ft: 'bandpass', f: 800, Q: 1 });
 });
-def('travel', { dur: 1.8, n: 1, vol: -7, vary: 0, cat: 'sting', group: 'magic', pri: 2 }, (b) => {
+def('travel', { dur: 1.55, n: 1, vol: -7, vary: 0, cat: 'sting', group: 'magic', pri: 2 }, (b) => {
   const am = b.am(8, 0.6, b.out, 0, 1.6);
   b.nz({ c: 'pink', a: 0.5, d: 0.8, g: 0.8, ft: 'bandpass', f: [[0, 300], [0.6, 3000], [1.4, 600]], Q: 1.5, dst: am });
   [76, 79, 83, 88].forEach((m, i) => b.bell({ t: 0.2 + i * 0.1, f: mtof(m), d: 0.6, g: 0.2 }));
@@ -870,35 +953,35 @@ def('enchant', { dur: 1.4, n: 1, vol: -8, vary: 0, cat: 'misc', group: 'magic', 
   { dur: 0.5, reverse: true, build: (b) => { shimmer(b, 0, 0.001, 0.45, 0.5); b.fm({ f: 880, ratio: 3.01, index: 2, d: 0.45, g: 0.25 }); } },
   { at: 0.48, dur: 0.9, build: (b) => [81, 85, 88, 93].forEach((m, i) => b.bell({ t: i * 0.05, f: mtof(m), d: 0.6, g: 0.25 })) },
 ] });
-def('salvage', { dur: 0.6, n: 1, vol: -9, vary: 1, cat: 'misc', pri: 2 }, (b) => {
+def('salvage', { dur: 0.34, n: 1, vol: -9, vary: 1, cat: 'misc', pri: 2 }, (b) => {
   b.crackle({ dur: 0.25, rate: 900, g: 0.8, ft: 'bandpass', f: 1800, shape: 'exp', len: 30 });
   b.tone({ f: [[0, 130], [0.08, 60]], d: 0.12, g: 0.7 });
   for (let i = 0; i < 4; i++) b.modal({ t: b.R(0.02, 0.3), f: b.R(1500, 3000), ratios: [1, 2.3], decays: 0.06, g: 0.3 });
 });
-def('roar', { dur: 2.2, n: 2, vol: -5, vary: 1, cat: 'sting', sr: 32000, pri: 2 }, (b) => {
+def('roar', { dur: 2.2, n: 1, vol: -5, vary: 1, cat: 'sting', sr: 22050, pri: 2 }, (b) => {
   const form = b.formants([[420, 3, 1], [850, 4, 0.7], [1900, 5, 0.3]], b.drive(4));
   const am = b.am(28, 0.5, form, 0, 2);
   b.fm({ f: [[0, 75], [0.3, 92], [1.6, 55]], ratio: 0.5, index: 10, index1: 5, a: 0.15, hold: 0.5, d: 1.0, g: 1, type: 'sawtooth', dst: am });
   b.nz({ c: 'pink', a: 0.2, hold: 0.4, d: 1.0, g: 0.5, ft: 'bandpass', f: 900, Q: 0.8 });
   b.tone({ f: [[0, 60], [0.5, 30]], a: 0.05, d: 0.8, g: 0.8 });
 });
-def('thunder', { dur: 3.5, n: 2, vol: -6, vary: 1.5, cat: 'amb', sr: 22050, pri: 2 }, (b) => {
+def('thunder', { dur: 3.5, n: 1, vol: -6, vary: 1.5, cat: 'amb', sr: 22050, pri: 2 }, (b) => {
   b.nz({ c: 'white', d: 0.05, g: 0.6, ft: 'lowpass', f: 5000, dst: b.drive(3) });
   const am = b.am(b.R(2, 4), 0.7, b.out, 0, 3.4);
   b.nz({ c: 'brown', a: 0.05, d: 2.8, g: 1, ft: 'lowpass', f: [[0, 260], [2.8, 70]], dst: am });
   b.crackle({ dur: 1.2, rate: 40, g: 0.3, ft: 'lowpass', f: 900, shape: 'exp', len: 200 });
 });
-def('dice', { dur: 0.12, n: 3, vol: -10, vary: 2, cat: 'misc', group: 'ui', pri: 2 }, (b) => {
+def('dice', { dur: 0.08, n: 3, vol: -10, vary: 2, cat: 'misc', group: 'ui', pri: 2 }, (b) => {
   b.modal({ f: b.R(1500, 2100), ratios: [1, 2.2], decays: 0.02, g: 0.7 }); b.click({ g: 0.4, f: 3000 });
 });
-def('beat', { dur: 0.1, n: 1, vol: -18, vary: 0, cat: 'misc', group: 'ui', pri: 2 }, (b) => {
+def('beat', { dur: 0.06, n: 1, vol: -18, vary: 0, cat: 'misc', group: 'ui', pri: 2 }, (b) => {
   b.modal({ f: 1200, ratios: [1, 2.7], decays: 0.03, g: 0.6 });
 });
-def('heartbeat', { dur: 0.6, n: 1, vol: -6, vary: 0, cat: 'heart', group: 'ui', sr: 22050, pri: 1 }, (b) => {
+def('heartbeat', { dur: 0.46, n: 1, vol: -6, vary: 0, cat: 'heart', group: 'ui', sr: 22050, pri: 1 }, (b) => {
   b.tone({ f: [[0, 62], [0.1, 42]], d: 0.13 }); b.nz({ c: 'brown', d: 0.05, g: 0.4, ft: 'lowpass', f: 300 });
   b.tone({ t: 0.21, f: [[0, 54], [0.1, 38]], d: 0.15, g: 0.8 });
 });
-def('player_death', { dur: 3.2, n: 1, vol: -4, vary: 0, cat: 'sting', sr: 32000, pri: 2 }, (b) => {
+def('player_death', { dur: 3.2, n: 1, vol: -4, vary: 0, cat: 'sting', sr: 22050, pri: 2 }, (b) => {
   const dr = b.drive(2.5);
   b.tone({ f: [[0, 70], [0.6, 25]], d: 1.0, dst: dr });
   b.nz({ c: 'brown', d: 1.2, g: 0.8, ft: 'lowpass', f: [[0, 1500], [1, 100]], dst: dr });
@@ -921,7 +1004,7 @@ function finish(data, sr, raw) {
   if (peak < 1e-6) return null;
   let end = data.length;
   if (!raw) {
-    const thr = peak * 0.0008;
+    const thr = peak * 0.0018;          // ~ -55 dB below the peak counts as silence
     while (end > 1 && Math.abs(data[end - 1]) < thr) end--;
     end = Math.min(data.length, end + Math.floor(sr * 0.01));
   }
@@ -940,55 +1023,74 @@ function finish(data, sr, raw) {
   return { data: out, peak: peak * gain, rms: rms * gain };
 }
 
-async function renderVariant(rec, v, baseSr) {
+// All variants (and parts) of a recipe render side by side in ONE OfflineAudioContext: each sound
+// gets its own time slot behind a gate that is open only inside the slot, so nothing bleeds across.
+// One context per recipe instead of one per variant cuts the per-render overhead roughly in half.
+async function renderRecipe(rec, baseSr) {
   const sr = rec.sr || baseSr;
-  const r = rng(hash(rec.id) + v * 7919);
   const parts = rec.parts || [{ dur: rec.dur, build: rec.build }];
-  const done = await Promise.all(parts.map((p) => {
-    const len = Math.max(1, Math.ceil(p.dur * sr));
-    const c = new OfflineAudioContext(1, len, sr);
-    p.build(new B(c, r, sr), v);
-    return c.startRendering().then((buf) => {
-      let d = buf.getChannelData(0);
-      if (p.reverse) d = d.slice().reverse();
-      return { d, at: Math.round((p.at || 0) * sr) };
-    });
-  }));
-  let mix;
-  if (done.length === 1 && !done[0].at) mix = done[0].d;
-  else {
-    let total = 0;
-    for (const p of done) total = Math.max(total, p.at + p.d.length);
-    mix = new Float32Array(total);
-    for (const p of done) for (let i = 0; i < p.d.length; i++) mix[p.at + i] += p.d[i];
+  const gap = Math.ceil(sr * 0.01);
+  const slots = [];
+  let cursor = 0;
+  for (let v = 0; v < rec.n; v++) parts.forEach((p) => { const len = Math.max(1, Math.ceil(p.dur * sr)); slots.push({ v, p, start: cursor, len }); cursor += len + gap; });
+  const c = new OfflineAudioContext(1, cursor, sr);
+  const rngs = [];
+  for (const sl of slots) {
+    const gate = c.createGain(); gate.gain.value = 0;
+    gate.gain.setValueAtTime(1, sl.start / sr); gate.gain.setValueAtTime(0, (sl.start + sl.len) / sr);
+    gate.connect(c.destination);
+    rngs[sl.v] = rngs[sl.v] || rng(hash(rec.id) + sl.v * 7919);
+    sl.p.build(new B(c, rngs[sl.v], sr, sl.start / sr, gate), sl.v);
   }
-  if (rec.slice) mix = mix.slice(Math.floor(rec.slice[0] * sr), Math.floor(rec.slice[1] * sr));
-  const fin = finish(mix, sr, !!rec.loop);
-  if (!fin) return null;
-  const ab = new AudioBuffer({ length: fin.data.length, numberOfChannels: 1, sampleRate: sr });
-  ab.copyToChannel(fin.data, 0);
-  return { buf: ab, peak: fin.peak, rms: fin.rms };
+  const data = (await c.startRendering()).getChannelData(0);
+  const out = [];
+  for (let v = 0; v < rec.n; v++) {
+    const mine = slots.filter((sl) => sl.v === v).map((sl) => {
+      let d = data.slice(sl.start, sl.start + sl.len);
+      if (sl.p.reverse) d.reverse();
+      return { d, at: Math.round((sl.p.at || 0) * sr) };
+    });
+    let mix;
+    if (mine.length === 1 && !mine[0].at) mix = mine[0].d;
+    else {
+      let total = 0;
+      for (const p of mine) total = Math.max(total, p.at + p.d.length);
+      mix = new Float32Array(total);
+      for (const p of mine) for (let i = 0; i < p.d.length; i++) mix[p.at + i] += p.d[i];
+    }
+    if (rec.slice) mix = mix.slice(Math.floor(rec.slice[0] * sr), Math.floor(rec.slice[1] * sr));
+    const fin = finish(mix, sr, !!rec.loop);
+    if (!fin) continue;
+    const ab = new AudioBuffer({ length: fin.data.length, numberOfChannels: 1, sampleRate: sr });
+    ab.copyToChannel(fin.data, 0);
+    out.push({ buf: ab, peak: fin.peak, rms: fin.rms });
+  }
+  return out;
 }
 
-// Render every recipe (priority order) in small parallel batches, yielding between batches so the
-// main thread keeps rendering frames. onSound(rec, buffers) fires as each sound becomes playable.
-export async function bakeAll(onSound, { baseSr = 44100, batch = 12 } = {}) {
+// Render every recipe in priority order through a small pool of concurrent offline renders (each
+// OfflineAudioContext renders on its own audio thread). A sound becomes playable as soon as its
+// recipe has rendered: onSound(rec, results) fires once per recipe.
+export async function bakeAll(onSound, { baseSr = 32000, pool = 12 } = {}) {
   const t0 = performance.now();
-  const jobs = [];
-  const order = [...RECIPES].sort((a, b) => a.pri - b.pri);
-  for (const rec of order) for (let v = 0; v < rec.n; v++) jobs.push({ rec, v });
-  const got = new Map();
-  let bytes = 0, rendered = 0;
-  for (let i = 0; i < jobs.length; i += batch) {
-    const chunk = jobs.slice(i, i + batch);
-    const res = await Promise.all(chunk.map((j) => renderVariant(j.rec, j.v, baseSr).catch((e) => { console.warn('[sfx] bake failed', j.rec.id, e); return null; })));
-    chunk.forEach((j, k) => {
-      const r = res[k];
-      if (!got.has(j.rec)) got.set(j.rec, []);
-      if (r) { got.get(j.rec).push(r); bytes += r.buf.length * 4; rendered++; }
-      if (got.get(j.rec).length && (j.v === j.rec.n - 1)) onSound(j.rec, got.get(j.rec));
-    });
-    await new Promise((res2) => setTimeout(res2, 0));
-  }
-  return { ms: performance.now() - t0, variants: rendered, sounds: got.size, bytes };
+  const jobs = [...RECIPES].sort((a, b) => a.pri - b.pri);
+  const cost = {};
+  let bytes = 0, variants = 0, sounds = 0, next = 0, coreMs = 0, coreLeft = jobs.filter((r) => r.pri === 0).length;
+  const worker = async () => {
+    while (next < jobs.length) {
+      const rec = jobs[next++];
+      const ts = performance.now();
+      const res = await renderRecipe(rec, baseSr).catch((e) => { console.warn('[sfx] bake failed', rec.id, e); return []; });
+      cost[rec.id] = performance.now() - ts;
+      if (rec.pri === 0 && --coreLeft === 0) coreMs = performance.now() - t0;
+      if (!res.length) continue;
+      for (const r of res) bytes += r.buf.length * 4;
+      variants += res.length; sounds++;
+      onSound(rec, res);
+    }
+  };
+  await Promise.all(Array.from({ length: pool }, worker));
+  for (const k of Object.keys(NOISE)) delete NOISE[k];      // noise beds are only needed while baking
+  const slow = Object.entries(cost).sort((a, b) => b[1] - a[1]).slice(0, 10).map(([k, v]) => k + ':' + Math.round(v));
+  return { ms: performance.now() - t0, coreMs, variants, sounds, bytes, slow };
 }

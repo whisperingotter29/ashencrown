@@ -3,6 +3,8 @@
 import { G } from '../game.js';
 import { bus } from '../core/events.js';
 import { E, play, stop, duck } from './sfxEngine.js';
+import { primaryBiome, roadAt } from '../world/terrainGen.js';
+import { TOWNS } from '../data/world.js';
 
 const RARITY_IDX = { common: 0, uncommon: 1, rare: 2, epic: 3, legendary: 4, mythic: 5 };
 const RUN = [0, 2, 4, 7, 9, 12, 14, 16, 19, 21];            // pentatonic climb of the kill streak tick
@@ -115,11 +117,22 @@ function rewardTick(n, burst) {
   n = Math.max(1, n | 0);
   const tier = Math.floor((n - 1) / 10);
   play('kill_tick', { at: S.tickT, semis: RUN[(n - 1) % 10], vol: Math.min(5, tier * 1.2) + (burst > 2 ? 1 : 0), prio: 2 });
-  if (n % 10 === 0) {
+  if (n % 10 === 0 && !SHOUT_AT[n]) {                           // every tenth kill: a sparkle that climbs with the streak
     play('streak_sting', { at: S.tickT + 0.04, semis: Math.min(7, tier - 1), vol: Math.min(4, tier) });
-    if (n >= 25) play('sub_thump', { at: S.tickT + 0.04, vol: -2 });
-    if (n >= 50) { play('boom_small', { at: S.tickT + 0.04, vol: -6 }); duck(4, 0.2, 0.8); }
+    if (n >= 30) play('sub_thump', { at: S.tickT + 0.04, vol: -4 });
   }
+}
+// named milestones from the streak system (10 KILLING SPREE, 25 RAMPAGE, 50, 100, 200, 350, 500)
+const SHOUT_AT = { 10: 0, 25: 1, 50: 2, 100: 3, 200: 4, 350: 5, 500: 6 };
+function onShout({ n }) {
+  const k = SHOUT_AT[n] ?? Math.min(6, Math.floor(Math.log2(Math.max(1, n / 10))));
+  const t = Math.max(E.ctx.currentTime + 0.02, S.tickT + 0.05);
+  play('streak_shout', { at: t, semis: Math.min(9, k * 1.5), vol: Math.min(3, k), prio: 5 });
+  play('streak_sting', { at: t + 0.36, semis: Math.min(9, k * 1.5), vol: -2 });
+  if (k >= 1) play('sub_thump', { at: t + 0.34, vol: 0, prio: 4 });
+  if (k >= 2) play('boom_small', { at: t + 0.34, vol: -4 + k, prio: 4 });
+  if (k >= 3) play('gong', { at: t + 0.34, vol: -6 + k, semis: -k });
+  duck(5 + k * 1.5, 0.5 + k * 0.15, 1.2);
 }
 
 function onShot({ kind, draw = 1, crit }) {
@@ -250,9 +263,72 @@ function startLoop(key, id, o = {}) {
 }
 function stopLoop(key, fade = 0.15) { const v = S.loops[key]; if (v) stop(v, fade); S.loops[key] = null; }
 
+// ------------------------------------------------------------------ footsteps
+// Contact frames of the walk cycle are 0 and 3 of the actor's 6-frame stride (px/actor.js), so a
+// step lands every time the run phase crosses a multiple of 3. The poll runs every 40 ms; each step
+// is scheduled at its predicted audio time so the timing stays tight. Mounts: 4-frame gallop.
+const F = { idx: -1, ph: 0, t: 0, hoof: { idx: -1, ph: 0, t: 0 }, surf: 'grass', surfT: -9, swimT: 0 };
+function surfaceAt(p) {
+  const tn = E.ctx.currentTime;
+  if (tn - F.surfT < 0.3) return F.surf;
+  F.surfT = tn;
+  const x = p.pos.x, z = p.pos.z;
+  let s = 'grass';
+  if (p.wading) s = 'splash';
+  else if (G.realm === 'dungeon') s = 'stone';
+  else if (G.realm === 'deep') s = roadAt(x, z, 'deep') < 4 ? 'dirt' : 'stone';
+  else if (TOWNS.some((t) => Math.hypot(x - t.x, z - t.z) < t.r * 0.9)) s = 'stone';
+  else if (roadAt(x, z) < 3.4) s = 'dirt';
+  else {
+    const b = primaryBiome(x, z);
+    s = b === 'wastes' ? (p.pos.y > 13 ? 'stone' : 'sand') : b === 'frost' ? 'snow' : b === 'coast' ? (p.pos.y < 3 ? 'sand' : 'grass') : b === 'maw' ? 'ash' : 'grass';
+  }
+  return (F.surf = s);
+}
+function stepAt(p, at) {
+  const surf = surfaceAt(p);
+  const vol = (p.sprinting ? 2 : 0) + (G.combatTimer > 0 ? -2 : 0);
+  play('step_' + surf, { at, vol, semis: p.sprinting ? 1 : 0 });
+  if (G.weather?.def?.wet && G.realm === 'surface' && (surf === 'grass' || surf === 'dirt' || surf === 'stone')) play('step_splash', { at, vol: vol - 7, cat: 'misc' });
+}
+// advance a phase-locked step counter; returns the audio time of a step due before the next poll
+function nextStep(st, ph, every, tn) {
+  const rate = (ph - st.ph) / Math.max(1e-3, tn - st.t);
+  st.ph = ph; st.t = tn;
+  const idx = Math.floor(ph / every);
+  if (st.idx < 0 || idx - st.idx > 2 || idx < st.idx - 1) st.idx = idx;     // (re)sync
+  if (rate <= 0.5) return -1;
+  const dtNext = ((st.idx + 1) * every - ph) / rate;
+  if (dtNext > 0.055) return -1;
+  st.idx += 1;
+  return tn + Math.max(0.005, dtNext);
+}
+function footsteps(p) {
+  const m = p.model;
+  if (!m || typeof m.ph !== 'number' || G.mode !== 'play') return;
+  const tn = E.ctx.currentTime;
+  const moving = (p.moveSpeedNow || 0) > 0.5 && !p.dead && p.action?.type !== 'dodge';
+  if (m.mount) {
+    const h = F.hoof, ph = m.mount.ph || 0;
+    if (!moving) { h.ph = ph; h.t = tn; h.idx = Math.floor(ph / 2); return; }
+    const when = nextStep(h, ph, 2, tn);
+    if (when > 0) play('hoof', { at: when, vol: p.sprinting ? 2 : 0 });
+    return;
+  }
+  if (p.swimming) {
+    if (moving && tn - F.swimT > 0.75) { F.swimT = tn; play('swim'); }
+    F.idx = -1;
+    return;
+  }
+  if (!moving) { F.ph = m.ph; F.t = tn; F.idx = Math.floor(m.ph / 3); return; }
+  const when = nextStep(F, m.ph, 3, tn);
+  if (when > 0) stepAt(p, when);
+}
+
 export function sfxTick() {
   if (!E.ready) return;
   const p = P();
+  if (p) footsteps(p);
   if (S.loops.spin && !p?.st?.spin) stopLoop('spin', 0.18);
   const ch = p && !p.dead && p.action?.type === 'channel';
   if (ch && !S.loops.beam) startLoop('beam', 'beam_loop', { fadeIn: 0.08, semis: BEAM_SEMIS[S.beamEl] || 0, lp: LP[S.beamEl] || 12000 });
@@ -329,7 +405,12 @@ export function hookSfxEvents() {
     }
     if (item.element && elOk(item.element)) play(item.element + '_bolt', { vol: -11, delay: 0.15 });
   });
-  on('streak', ({ n }) => { if (typeof n === 'number') { S.extStreak = true; S.streak = n; } });
+  on('streak', ({ n }) => {
+    if (typeof n !== 'number') return;
+    if (n === 0 && S.streak >= 10) play('streak_end', { vol: Math.min(4, S.streak / 25) });   // a big streak just ran out
+    S.extStreak = true; S.streak = n;
+  });
+  on('streakShout', onShout);
 
   // progression & loot
   on('levelUp', () => { play('levelup', { prio: 5 }); duck(10, 1.0, 1.5); });
@@ -365,8 +446,16 @@ export function hookSfxEvents() {
   on('toast', () => play('toast'));
   on('lowMana', () => play('denied', { semis: 4 }));
   on('lowStamina', () => play('denied', { semis: -2 }));
-  on('fastTravel', () => { play('travel', { prio: 3 }); duck(5, 0.6, 1); });
-  on('recall', () => play('travel', { prio: 3 }));
+  on('fastTravelStart', () => { play('travel', { prio: 3 }); duck(5, 0.6, 1); });
+  on('purchase', ({ item }) => { play('coin', { semis: -4 }); play('coin', { delay: 0.06, semis: -2, vol: -3 }); if (item) play('loot_' + Math.min(5, RARITY_IDX[item.rarity] ?? 0), { delay: 0.08, vol: -3 }); });
+  on('equipped', ({ item, slot }) => {
+    if (String(slot).startsWith('loadout')) { if (item) play(item.kind === 'tome' ? 'swap_tome' : 'swap_heavy', { vol: -3 }); return; }
+    play('equip', { semis: item ? 0 : -3, vol: item ? 0 : -3 });
+  });
+  on('kitChanged', () => play('ui_tab', { semis: 3 }));
+  on('questStarted', () => play('tut_step', { semis: -2 }));
+  on('rivalDefeated', () => { play('quest', { prio: 4 }); duck(6, 0.6, 1); });
+  on('bossEngaged', () => { play('roar', { prio: 5 }); play('boom_big', { vol: -2 }); play('gong', { vol: -2, semis: -5 }); duck(10, 1.0, 1.8); });
   on('waystone', () => play('waystone'));
   on('shrineBlessed', () => play('shrine'));
   on('rested', () => play('shrine', { vol: -4, semis: -5 }));
