@@ -61,7 +61,7 @@ export class Enemy extends Entity {
     this.pos.set(x, groundHeight(x, z), z);
     this.home = new Vec3(x, 0, z);
     this.leash = opts.leash || (this.boss ? 70 : 46);
-    this.aggroR = opts.aggroR || (this.boss ? 26 : tpl.ranged ? 20 : 16);
+    this.aggroR = opts.aggroR || (this.boss ? 26 : tpl.ranged ? 26 : 22);   // grindy: packs notice you from across the screen
     this.state = 'idle';
     this.stateT = rand(0, 3);
     this.target = null;

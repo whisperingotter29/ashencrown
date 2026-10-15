@@ -34,6 +34,14 @@ bus.on('spawnEnemy', ({ id, level, x, z, summoner, dungeon }) => {
   const e = spawnEnemy(id, level, x, z, { dungeon, leash: 60 });
   if (e && summoner) { summoner.summons.push(e); e.target = summoner.target; e.state = 'chase'; }
 });
+// packs fight together: when one notices you, its neighbours come too
+bus.on('aggro', (e) => {
+  if (!e?.target || e.ally) return;
+  for (const o of G.entities) {
+    if (o === e || o.dead || o.team !== 'enemy' || o.ally || o.target || o.boss) continue;
+    if ((o.pos.x - e.pos.x) ** 2 + (o.pos.z - e.pos.z) ** 2 < 120) { o.target = e.target; o.state = 'chase'; }
+  }
+});
 bus.on('spawnAlly', ({ id, x, z, lifeTime, owner, champion }) => {
   const lvl = owner.level;
   const e = spawnEnemy(id, lvl, x, z, { ally: true, lifeTime, hpMult: champion ? 1.8 : 1, dmgMult: champion ? 1.8 : 1, scale: champion ? 1.3 : 1, name: champion ? 'Skeletal Champion' : undefined });
