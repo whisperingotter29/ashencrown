@@ -156,6 +156,46 @@ export class Pix {
     }
     return this;
   }
+  // selective outline ("sel-out"): the outline takes a deep shade of the colour it borders, a touch
+  // warmer and lighter on the lit top-left side, near-black on the shadow side, so silhouettes stay
+  // readable without the flat sticker look of a pure black line
+  outlineSel(base = OUTLINE, litMix = 0.42, darkMix = 0.16) {
+    const w = this.w, h = this.h, src = new Uint8ClampedArray(this.d);
+    const A = (x, y) => (x < 0 || y < 0 || x >= w || y >= h ? 0 : src[(y * w + x) * 4 + 3]);
+    const at = (x, y) => { const i = (y * w + x) * 4; return [src[i], src[i + 1], src[i + 2], 255]; };
+    base = C(base);
+    for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+      if (A(x, y) > 40) continue;
+      // neighbour on the lit side (this pixel sits above / left of the body) or the shadow side
+      let nb = null, lit = false;
+      if (A(x + 1, y) > 100) { nb = at(x + 1, y); lit = true; }
+      else if (A(x, y + 1) > 100) { nb = at(x, y + 1); lit = true; }
+      else if (A(x - 1, y) > 100) nb = at(x - 1, y);
+      else if (A(x, y - 1) > 100) nb = at(x, y - 1);
+      if (!nb) continue;
+      const deep = [nb[0] * 0.38, nb[1] * 0.36, nb[2] * 0.42 + 6, 255];
+      this.set(x, y, mixc(base, deep, lit ? litMix : darkMix));
+    }
+    return this;
+  }
+  // exact quarter-turn rotation (k = 1: 90deg clockwise), pivot carried along
+  rot90(k = 1) {
+    k = ((k % 4) + 4) % 4;
+    if (!k) return this.clone();
+    const sw = this.w, sh = this.h;
+    const p = k === 2 ? new Pix(sw, sh) : new Pix(sh, sw);
+    for (let y = 0; y < sh; y++) for (let x = 0; x < sw; x++) {
+      const i = (y * sw + x) * 4;
+      if (!this.d[i + 3]) continue;
+      let nx, ny;
+      if (k === 1) { nx = sh - 1 - y; ny = x; } else if (k === 2) { nx = sw - 1 - x; ny = sh - 1 - y; } else { nx = y; ny = sw - 1 - x; }
+      const o = (ny * p.w + nx) * 4;
+      p.d[o] = this.d[i]; p.d[o + 1] = this.d[i + 1]; p.d[o + 2] = this.d[i + 2]; p.d[o + 3] = this.d[i + 3];
+    }
+    const ox = this.ox, oy = this.oy;
+    if (k === 1) { p.ox = sh - oy; p.oy = ox; } else if (k === 2) { p.ox = sw - ox; p.oy = sh - oy; } else { p.ox = oy; p.oy = sw - ox; }
+    return p;
+  }
   // top-left lighting: brighten opaque pixels whose upper/left neighbour is empty, darken lower/right edges
   rim(lightK = 1.18, darkK = 0.78) {
     const w = this.w, h = this.h, src = new Uint8ClampedArray(this.d);

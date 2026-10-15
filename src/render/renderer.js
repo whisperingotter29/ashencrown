@@ -6,6 +6,7 @@ import { scene } from '../px/scene.js';
 import { view } from '../px/view.js';
 import { PPU, C } from '../px/pix.js';
 import { drawMagic } from './magic.js';
+import { drawCastShadows } from '../px/shadow.js';
 
 export const R = {
   canvas: null, ctx: null,         // screen canvas (device pixels)
@@ -123,7 +124,10 @@ export function renderFrame(time) {
   list.sort((a, b) => a.sortZ - b.sortZ);
   // flat ground pieces (piers, plazas, rune circles), then shadows under everything that stands up
   for (const o of list) if (o.flat) o.draw(lctx);
+  // ---- shadow stage: directional cast shadows (src/px/shadow.js), then contact shadows
+  drawCastShadows(lctx, list);
   for (const o of list) if (o.shadow) o.shadow(lctx);
+  // ---- end shadow stage
   // the player's screen box: anything in front of it that overlaps turns see-through
   let fb = R.focusBox;
   if (R.focus) {

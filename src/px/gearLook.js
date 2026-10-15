@@ -38,6 +38,8 @@ export function armorLook(equip = {}) {
     const ri = rIndex(c);
     out.chest = { weight: c.weight, color: materialColor(c), trim: rarityTrim(c) };
     if (ri >= 2 || c.set) out.cape = c.set && SETS[c.set] ? SETS[c.set].trim : ri >= 4 ? '#8a1a1a' : materialColor(c);
+    // light armour gets a scarf (in the trim colour) instead of a cape until it's rare enough
+    if (c.weight === 'leather' && !out.cape) out.scarf = ri >= 2 ? rarityTrim(c) : '#8e3a2c';
   }
   if (equip.gloves) out.gloves = { color: materialColor(equip.gloves) };
   if (equip.legs) out.legs = { color: materialColor(equip.legs) };

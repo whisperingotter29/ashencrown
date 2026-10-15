@@ -11,7 +11,8 @@ export function raceLook(lk, app = { skin: 0, hair: 0 }, extra = {}) {
   return {
     scale: lk.scale, build: lk.build, skin: lk.skin[app.skin % lk.skin.length], hair: lk.hair[app.hair % lk.hair.length],
     ears: lk.ears, beard: lk.beard, tusks: lk.tusks, horns: lk.horns, fins: lk.fins, wings: lk.wings, beastEars: lk.beastEars, tail: lk.tail,
-    eyesGlow: lk.eyesGlow, voidMarks: lk.voidMarks, glowSkin: lk.glowSkin, stone: lk.stone,
+    eyesGlow: lk.eyesGlow, voidMarks: lk.voidMarks, glowSkin: lk.glowSkin, stone: lk.stone, scales: lk.scales,
+    vseed: (app.skin | 0) * 10 + (app.hair | 0),   // picks hair style / eye colour variety
     ...extra,
   };
 }
@@ -30,7 +31,7 @@ export function enemySpec(tpl, { scale = 1, ilvl = 5, rarity = 'common', seed = 
       shirt: c1, pants: tpl.human ? c2 : c1, bootsColor: '#3a2a20',
       skeleton: !!tpl.skeleton, eyesGlow: tpl.undead || tpl.void ? c3 : null, beard: !!tpl.beard,
       tusks: /Troll/.test(tpl.name || ''), wings: !!tpl.wings, wingColor: c3,
-      longHair: /Hag|Witch|Matron|Queen|Siren/.test(tpl.name || ''), crown: tpl.crown ? '#ffd060' : null,
+      longHair: /Hag|Witch|Matron|Queen|Siren/.test(tpl.name || ''), crown: tpl.crown ? '#ffd060' : null, vseed: h % 97,
     };
     const dl = dressLook({ gear: tpl.gear, rarity, ilvl, seed: h });
     Object.assign(look, dl.look);
