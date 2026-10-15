@@ -125,6 +125,13 @@ button.chip:active:not(:disabled) { border-image-source: var(--img-chip-on); tra
 @keyframes winSwap { from { transform: translateY(calc(var(--u) * 2)); } }
 .win-plate { position: absolute; top: calc(var(--u) * -15); left: 50%; transform: translateX(-50%); padding: calc(var(--u) * 2) calc(var(--u) * 8); line-height: 0; z-index: 3; filter: drop-shadow(0 var(--u) 0 rgba(0,0,0,0.5)); }
 .win-plate img { display: block; }
+/* tabs sit on the left edge of the frame, so a tabbed window carries its title plate on the right */
+.window.has-tabs .win-plate { left: auto; right: calc(var(--u) * 22); transform: none; }
+/* the pause card is too narrow for tabs; its buttons already lead to Settings and Controls */
+.window.pause-win .win-tabs { display: none; }
+.window.pause-win .win-plate { left: 50%; right: auto; transform: translateX(-50%); }
+/* keep the hanging title plate clear of the first row of content */
+.window.has-tabs > .body { padding-top: calc(var(--u) * 10); }
 .win-tabs { position: absolute; left: calc(var(--u) * 8); bottom: 100%; margin-bottom: calc(var(--u) * -4); display: flex; gap: calc(var(--u) * 2); z-index: 1; }
 .tab { font-family: var(--label); font-size: var(--lbl-2); line-height: 16px; color: var(--cream-2); text-shadow: var(--u) var(--u) 0 #1a0c06; display: flex; align-items: center; gap: calc(var(--u) * 2);
   padding: calc(var(--u) * 1) calc(var(--u) * 4) calc(var(--u) * 3); border: calc(var(--u) * 5) solid transparent; border-bottom-width: calc(var(--u) * 3); border-image: var(--img-tab) 5 5 3 5 fill / calc(var(--u) * 5) calc(var(--u) * 5) calc(var(--u) * 3) calc(var(--u) * 5) round; transform: translateY(calc(var(--u) * 3)); transition: transform 60ms steps(2); }
