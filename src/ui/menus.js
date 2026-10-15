@@ -7,7 +7,7 @@ import { G } from '../game.js';
 import { el, esc, kc, root, openModal, closeModal, modalName, modalNode, windowFrame, bindTip, bindDrag, bindDrop, itemCard, hideTip, toast, pxTitle, morph, uiUnit } from './ui.js';
 import { itemIcon, skillIcon, simpleIcon } from './icons.js';
 import { equip, unequip, removeItem, slotFor, useConsumable, itemPower, INV_SIZE } from '../systems/inventory.js';
-import { RARITIES, RARITY, MATERIALS_LIST, CONSUMABLES, LEGENDARIES, SETS } from '../data/items.js';
+import { RARITIES, RARITY, MATERIALS_LIST, CONSUMABLES, LEGENDARIES, SETS, WEAPON_TYPES } from '../data/items.js';
 import { RACE_BY_ID } from '../data/races.js';
 import { CLASS_BY_ID } from '../data/classes.js';
 import { TOMES, ELEMENTS } from '../data/tomes.js';
@@ -86,16 +86,19 @@ function cellCls(it, o = {}) { return 'cell slotf' + (it ? ' rf-' + it.rarity : 
 const SLOT_GHOST = { helm: 'helm', chest: 'chest', gloves: 'gloves', legs: 'legs', boots: 'boots', amulet: 'amulet', ring1: 'ring', ring2: 'ring', offhand: 'shield' };
 const ghostIcon = (slot) => simpleIcon(SLOT_GHOST[slot] || 'gem', '#8a7a64');
 
-// pixel portrait of the player (their actual in-game sprite, armour included)
+// pixel portrait of the player (their actual in-game sprite, armour included), trimmed to the
+// figure and scaled by a whole number of UI pixels. k = sprite pixel size in UI units.
 const portraitCache = new WeakMap();
-function heroPortrait() {
-  const fr = G.player?.model?.spr?.views?.down?.idle?.[0];
+function heroPortrait(k = 3) {
+  const spr = G.player?.model?.spr;
+  let fr = null;
+  try { fr = spr?.frame ? spr.frame('down', {}) : spr?.views?.down?.idle?.[0]; } catch (e) { fr = null; }
   const pix = fr?.pix || fr;
   if (!pix?.canvas) return '';
-  let url = portraitCache.get(pix);
-  if (!url) { url = pix.canvas().toDataURL(); portraitCache.set(pix, url); }
-  const s = 2 * uiUnit();
-  return `<img class="hero-img" src="${url}" width="${pix.w * s}" height="${pix.h * s}" draggable="false">`;
+  let p = portraitCache.get(pix);
+  if (!p) { const t = pix.trim ? pix.trim(0) : pix; p = { url: t.canvas().toDataURL(), w: t.w, h: t.h }; portraitCache.set(pix, p); }
+  const s = k * uiUnit();
+  return `<img class="hero-img" src="${p.url}" width="${p.w * s}" height="${p.h * s}" draggable="false">`;
 }
 
 // ===================================================================== CHARACTER WINDOW
@@ -153,7 +156,7 @@ function buildBag(body, c) {
   left.appendChild(doll);
   // weapon loadout 1-4
   const lo = el('div', 'loadout f-sheet');
-  lo.appendChild(el('div', 'sec-h', `<span>Weapons</span><span class="sec-sub">${kc('1')}–${kc('4')} swap in battle</span>`));
+  lo.appendChild(el('div', 'sec-h', '<span>Weapons</span>'));
   const row = el('div', 'lo-row');
   for (let i = 0; i < LOADOUT_SIZE; i++) {
     const it = c.loadout[i], on = i === c.activeSlot;
@@ -202,7 +205,7 @@ function buildBag(body, c) {
     if (it && equippable(it) && it.req <= c.level) { const cur = compareFor(it); better = cur ? itemPower(it) > itemPower(cur) : (canSlot(it) ? c.loadout.some((x) => !x) : !c.equip[slotFor(it)]); }
     const cell = el('div', cellCls(it, { sel: it && it.uid === inv.sel, dim }), cellHtml(it, { better }));
     if (it) {
-      bindTip(cell, () => (it.uid === inv.sel ? '' : cardFor(it, compareFor(it)) + (it.junk ? '<div class="tip-note">Marked as junk</div>' : '')));
+      bindTip(cell, () => (it.uid === inv.sel ? '' : cardFor(it, compareFor(it)) + (it.junk ? '<div class="tip-note">Marked as junk</div>' : '')), { pos: i % 8 >= 4 ? 'left' : 'right' });
       cell.onclick = () => { inv.sel = it.uid; inv.confirm = null; rerender(); };
       cell.ondblclick = () => { doEquip(it); rerender(); };
       cell.oncontextmenu = (e) => { e.preventDefault(); if (e.shiftKey) it.junk = !it.junk; else doEquip(it); rerender(); };
@@ -269,7 +272,7 @@ function buildBag(body, c) {
     det.appendChild(acts);
   } else {
     det.classList.add('empty');
-    det.innerHTML = `<div class="detail-empty">${img(simpleIcon('gem', '#b89868'), 'big-ghost')}<b>Select an item</b><span>Click anything in your bag or on your character to inspect it here. Items marked ${'<i class="better-ico"></i>'} are an upgrade.</span></div>`;
+    det.innerHTML = `<div class="detail-empty"><div class="cell slotf empty big"></div><b>Select an item</b><span>Click anything in your bag or on your character to inspect it here. A green arrow marks an upgrade.</span></div>`;
   }
   right.appendChild(det);
   wrap.appendChild(right);
@@ -292,7 +295,7 @@ function buildAttributes(body, c) {
   // left: portrait + attributes
   const left = el('div', 'attr-left f-sheet');
   const need = xpToNext(c.level);
-  left.appendChild(el('div', 'attr-id', `<div class="hero-bg small">${heroPortrait()}</div><div><div class="nm">${esc(c.name)}</div><div class="sub">${c.title ? esc(c.title) + ' · ' : ''}Level ${c.level} ${esc(race.name)} ${esc(cls.name)}</div><div class="xp"><i style="width:${Math.min(100, (c.xp / need) * 100).toFixed(1)}%"></i></div><div class="xpt">${c.xp} / ${need} XP</div></div>`));
+  left.appendChild(el('div', 'attr-id', `<div class="hero-bg small">${heroPortrait(1)}</div><div><div class="nm">${esc(c.name)}</div><div class="sub">${c.title ? esc(c.title) + ' · ' : ''}Level ${c.level} ${esc(race.name)} ${esc(cls.name)}</div><div class="xp"><i style="width:${Math.min(100, (c.xp / need) * 100).toFixed(1)}%"></i></div><div class="xpt">${c.xp} / ${need} XP</div></div>`));
   left.appendChild(el('div', 'sec-h', `<span>Attributes</span>${c.statPoints ? `<span class="pts">${c.statPoints} to spend</span>` : ''}`));
   for (const k of ['str', 'dex', 'int', 'vit', 'wil']) {
     const r = el('div', 'arow', `${img(simpleIcon(...STAT_ICON[k]), 'mini')}<span class="an">${STAT_NAMES[k]}</span><b>${d.stats[k]}</b>`);
@@ -381,7 +384,7 @@ export function openSkills() {
     const kit = kitFor(item);
     kit.forEach((id, k) => {
       const m = id && abilityMeta(id);
-      const ks = el('div', 'kslot' + (sk.key === k ? ' pending' : '') + (sk.pick ? ' armed' : ''), `<div class="cell slotf big${m ? '' : ' empty'}">${m ? img(skillIcon(m.d, m.d.element), 'ic') : ''}${kc(KEYS[k], 'big')}</div><div class="kn">${m ? esc(m.d.name) : 'Empty'}</div><div class="kt">${m ? `${m.cd}s · ${m.cost}` : '&nbsp;'}</div>`);
+      const ks = el('div', 'kslot' + (sk.key === k ? ' pending' : '') + (sk.pick ? ' armed' : ''), `<div class="cell slotf big${m ? '' : ' empty'}">${m ? img(skillIcon(m.d, m.d.element), 'ic') : ''}${kc(KEYS[k], 'big')}</div><div class="kn">${m ? esc(m.d.name) : 'Empty'}</div><div class="kt">${m ? `${m.cd}s<br>${m.cost}` : '&nbsp;<br>&nbsp;'}</div>`);
       ks.dataset.key = 'k' + k;
       if (m) bindTip(ks, () => abilityTip(id, KEYS[k]));
       ks.onclick = () => {
@@ -427,7 +430,7 @@ export function openSkills() {
   const cls = CLASS_BY_ID[c.cls];
   const p = G.player;
   const rv = p?.resource || 0, rmax = p?.resourceMax || cls.resource.max;
-  side.appendChild(el('div', 'sig f-sheet', `<div class="sec-h"><span>Signature</span>${kc('X')}</div><div class="sig-row"><div class="cell slotf big rf-legendary">${img(skillIcon({ id: 'sig_' + cls.id, type: 'buff' }, 'holy'), 'ic')}</div><div><b>${esc(cls.signature.name)}</b><span>${esc(cls.signature.desc)}</span></div></div><div class="res"><span>${esc(cls.resource.name)}</span><div class="res-bar"><i style="width:${Math.min(100, (rv / rmax) * 100).toFixed(1)}%;background:${cls.resource.color}"></i></div><b>${Math.floor(rv)}/${rmax}</b></div><div class="dim small">${esc(cls.mechanic)}</div>`));
+  side.appendChild(el('div', 'sig f-sheet', `<div class="sec-h"><span>Signature</span>${kc('X')}</div><div class="sig-row"><div class="cell slotf big rf-legendary">${img(skillIcon({ id: 'sig_' + cls.id, type: 'sig', color: '#a8641c' }), 'ic')}</div><div><b>${esc(cls.signature.name)}</b><span>${esc(cls.signature.desc)}</span></div></div><div class="res"><span>${esc(cls.resource.name)}</span><div class="res-bar"><i style="width:${Math.min(100, (rv / rmax) * 100).toFixed(1)}%;background:${cls.resource.color}"></i></div><b>${Math.floor(rv)}/${rmax}</b></div><div class="dim small">${esc(cls.mechanic)}</div>`));
   const pas = el('div', 'passives f-sheet scroll');
   pas.appendChild(el('div', 'sec-h', '<span>Passives</span><span class="sec-sub">always active</span>'));
   const passives = c.skills.map((id) => SKILLS[id]).filter((s) => s && s.type === 'passive');
@@ -440,7 +443,7 @@ export function openSkills() {
   body.appendChild(wrap);
   openModal('skills', w);
 }
-function shortName(it) { const n = it.name; return n.length > 16 ? n.split(' ').slice(-2).join(' ') : n; }
+function shortName(it) { return it.kind === 'tome' ? `${ELEMENTS[TOMES[it.tome]?.element]?.name || 'Spell'} Tome` : WEAPON_TYPES[it.type]?.name || it.name; }
 
 // ===================================================================== JOURNAL (J)
 let journalSel = null, journalTab = 'quests';
@@ -607,7 +610,7 @@ export function openMap(realmOverride) {
   if (sel) {
     const dl = dangerLevel(sel.mx, sel.mz, R_);
     foot.appendChild(el('div', 'tsel', `<i class="mk mk-${sel.kind}${sel.shard ? ' shard' : ''}"></i><div><b>${esc(sel.name)}</b><span>${esc(BIOMES[sel.region]?.short || '')} · danger ${dl}${dl > c.level + 4 ? ' <em>deadly</em>' : ''}</span></div>`));
-    const go = el('button', 'primary wide', `Travel to ${esc(sel.name.length > 18 ? sel.name.slice(0, 17) + '…' : sel.name)}`);
+    const go = el('button', 'primary wide', 'Travel');
     go.onclick = () => travelTo(sel);
     foot.appendChild(go);
   } else foot.appendChild(el('div', 'tsel hint', `<span>Pick any town, waystone or discovered dungeon, on the map or in this list, then travel there.</span>`));
@@ -712,13 +715,14 @@ function initMapView(view) {
   mapView.draw = draw;
   let drag = null;
   cv.onmousedown = (e) => { drag = { x: e.clientX, y: e.clientY, cx: mapView.cx, cz: mapView.cz, moved: false }; };
-  const pick = (e) => { const r = cv.getBoundingClientRect(); const mx = e.clientX - r.left, my = e.clientY - r.top; let best = null, bd = 1e9; for (const o of hot) { const d = Math.hypot(o.x - mx, o.y - my); if (d < o.r && d < bd) { bd = d; best = o; } } return best; };
+  const local = (e) => { const r = cv.getBoundingClientRect(); const k = r.width ? cv.width / r.width : 1; return [(e.clientX - r.left) * k, (e.clientY - r.top) * k, k]; };
+  const pick = (e) => { const [mx, my] = local(e); let best = null, bd = 1e9; for (const o of hot) { const d = Math.hypot(o.x - mx, o.y - my); if (d < o.r && d < bd) { bd = d; best = o; } } return best; };
   bindTip(cv, () => { if (drag?.moved) return ''; return mapView.hover?.html || ''; }, { pos: 'cursor' });
   cv.onmousemove = (e) => {
     if (drag) {
-      const s = scale();
+      const s = scale(), k = local(e)[2];
       if (Math.abs(e.clientX - drag.x) + Math.abs(e.clientY - drag.y) > 4) drag.moved = true;
-      mapView.cx = drag.cx - (e.clientX - drag.x) / s; mapView.cz = drag.cz - (e.clientY - drag.y) / s; draw();
+      mapView.cx = drag.cx - ((e.clientX - drag.x) * k) / s; mapView.cz = drag.cz - ((e.clientY - drag.y) * k) / s; draw();
     }
     const h = pick(e);
     mapView.hover = h;
@@ -736,8 +740,8 @@ function initMapView(view) {
   cv.ondblclick = (e) => { const h = pick(e); if (h?.dest) travelTo(h.dest); };
   cv.onwheel = (e) => {
     e.preventDefault();
-    const r = cv.getBoundingClientRect();
-    const [wx, wz] = toWorld(e.clientX - r.left, e.clientY - r.top);
+    const [lx, ly] = local(e);
+    const [wx, wz] = toWorld(lx, ly);
     const z0 = mapView.zoom;
     mapView.zoom = Math.max(0.8, Math.min(8, mapView.zoom * (e.deltaY < 0 ? 1.2 : 1 / 1.2)));
     // zoom toward the cursor
@@ -760,7 +764,7 @@ export function openPause() {
   if (c) {
     const cls = CLASS_BY_ID[c.cls], race = RACE_BY_ID[c.race];
     const pt = Math.floor((c.playTime || 0) / 60);
-    col.appendChild(el('div', 'pcard f-sheet', `<div class="hero-bg small">${heroPortrait()}</div><div><div class="nm">${esc(c.name)}</div><div class="sub">Level ${c.level} ${esc(race.name)} ${esc(cls.name)}</div><div class="sub">Day ${c.day} · ${Math.floor(pt / 60)}h ${pt % 60}m played · ${c.gold} gold</div></div>`));
+    col.appendChild(el('div', 'pcard f-sheet', `<div class="hero-bg small">${heroPortrait(1)}</div><div><div class="nm">${esc(c.name)}</div><div class="sub">Level ${c.level} ${esc(race.name)} ${esc(cls.name)}</div><div class="sub">Day ${c.day} · ${Math.floor(pt / 60)}h ${pt % 60}m played · ${c.gold} gold</div></div>`));
   }
   const btns = el('div', 'pbtns');
   const mk = (t, fn, cls = '') => { const b = el('button', cls, t); b.onclick = fn; btns.appendChild(b); };
@@ -774,8 +778,9 @@ export function openPause() {
   openModal('pause', w);
 }
 
+const sysTabs = () => (G.char ? SYS_TABS : SYS_TABS.slice(1));
 export function openSettings() {
-  const { w, body } = windowFrame('Settings', SYS_TABS, 'settings', sysTab, { id: 'system', cls: 'sys-win settings-win', hints: [['Esc', 'Close']] });
+  const { w, body } = windowFrame('Settings', sysTabs(), 'settings', sysTab, { id: 'system', cls: 'sys-win settings-win', hints: [['Esc', 'Close']] });
   const col = el('div', 'settings f-sheet scroll');
   const S = G.settings;
   const row = (label, ctl, key) => { const r = el('div', 'set-row'); r.dataset.key = 's-' + key; r.appendChild(el('span', 'sl', label)); r.appendChild(ctl); col.appendChild(r); };
@@ -828,7 +833,7 @@ const CONTROLS_PAD = [
   ['Start', 'Menu'], ['Back', 'Map'],
 ];
 export function openControls() {
-  const { w, body } = windowFrame('Controls', SYS_TABS, 'controls', sysTab, { id: 'system', cls: 'sys-win controls-win', hints: [['Esc', 'Close']] });
+  const { w, body } = windowFrame('Controls', sysTabs(), 'controls', sysTab, { id: 'system', cls: 'sys-win controls-win', hints: [['Esc', 'Close']] });
   const col = el('div', 'controls');
   const sheet = (title, rows, pad) => {
     const s = el('div', 'ctl f-sheet');
@@ -844,7 +849,7 @@ export function openControls() {
 // ===================================================================== DEATH
 export function showDeath(onRespawn) {
   const d = el('div', 'death', `<div class="t"></div><div class="death-sub">The dice are not finished with you.</div>`);
-  d.querySelector('.t').appendChild(pxTitle('You have fallen', 4, { bands: ['#ff9a80', '#e04030', '#a01810', '#5a0806'] }));
+  d.querySelector('.t').appendChild(pxTitle('You have fallen', window.innerWidth < 1100 ? 3 : 4, { bands: ['#ff9a80', '#e04030', '#a01810', '#5a0806'] }));
   const b = el('button', 'primary', 'Rise again');
   b.onclick = () => { d.remove(); onRespawn(); };
   d.appendChild(b);

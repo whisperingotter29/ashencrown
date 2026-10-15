@@ -337,7 +337,15 @@ export function initPixelKit() {
   build();
   const root = document.documentElement.style;
   for (const [k, v] of Object.entries(K)) root.setProperty('--img-' + k.replace(/[A-Z]/g, (m) => '-' + m.toLowerCase()), `url(${v})`);
-  const setU = () => { const u = unit(); root.setProperty('--u', u + 'px'); document.documentElement.dataset.u = u; };
+  // windows are laid out for a 1280 x 720 screen at --u 2; smaller screens shrink them uniformly
+  // (snapped to quarter steps) instead of clipping or reflowing them
+  const setU = () => {
+    const u = unit();
+    root.setProperty('--u', u + 'px');
+    document.documentElement.dataset.u = u;
+    const fit = u === 2 ? Math.min(1, window.innerWidth / 1280, window.innerHeight / 720) : 1;
+    root.setProperty('--uiz', String(Math.max(0.5, Math.floor(fit * 4 + 0.001) / 4)));
+  };
   setU();
   window.addEventListener('resize', setU);
 }
