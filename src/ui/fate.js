@@ -271,7 +271,7 @@ function card(side, kicker, name, tag, desc, traits) {
 function showResult() {
   const race = RACES[scene.race - 1], cls = CLASSES[scene.cls - 1];
   const rc = card('left', `CRIMSON DIE · ${scene.race}`, race.name, race.tagline, race.desc, [...race.traits, { name: 'Homeland', desc: TOWNS.find((t) => t.id === race.home)?.name || race.home }]);
-  const cc = card('right', `GOLDEN DIE · ${scene.cls}`, cls.name, cls.tagline, cls.desc, [{ name: 'Signature (Q): ' + cls.signature.name, desc: cls.signature.desc }, { name: 'Kit', desc: `${cls.kit.mainhand}${cls.kit.offhand ? ' & shield' : ''}, ${cls.kit.armor} armour${cls.kit.tome ? ', a spellbook' : ''}` }]);
+  const cc = card('right', `GOLDEN DIE · ${scene.cls}`, cls.name, cls.tagline, cls.desc, [{ name: 'Signature (X): ' + cls.signature.name, desc: cls.signature.desc }, { name: 'Kit', desc: `${cls.kit.mainhand}${cls.kit.offhand ? ' & shield' : ''}, ${cls.kit.armor} armour${cls.kit.tome ? ', a spellbook' : ''}` }]);
   ui.appendChild(rc); ui.appendChild(cc);
   ui.cards = [rc, cc];
   const rare = rareFateFor(race.id, cls.id);

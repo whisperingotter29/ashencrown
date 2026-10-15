@@ -103,6 +103,9 @@ function placeTip(rect, pos) {
   } else if (pos === 'top') {
     x = rect.left + rect.width / 2 - w / 2; y = rect.top - h - gap;
     if (y < 8) y = rect.bottom + gap;
+  } else if (pos === 'left') {
+    x = rect.left - w - gap; y = rect.top;
+    if (x < 8) x = rect.right + gap;
   } else {
     x = rect.right + gap; y = rect.top;
     if (x + w > W - 8) x = rect.left - w - gap;
@@ -246,6 +249,9 @@ export function closeModal() {
   hideTip();
   bus.emit('menuClose', n);
 }
+// outside of play (title screen, character creation) the game loop doesn't read keys, so Esc
+// closes windows here
+window.addEventListener('keydown', (e) => { if (e.code === 'Escape' && modal && G.mode !== 'play') closeModal(); });
 export function modalName() { return modal?.name || null; }
 export function modalNode() { return modal?.win || null; }
 
@@ -255,7 +261,7 @@ export function windowFrame(title, tabs, activeTab, onTab, opts = {}) {
   const w = el('div', 'window f-wood' + (tabs ? ' has-tabs' : '') + (opts.cls ? ' ' + opts.cls : ''));
   w.dataset.win = opts.id || String(title);
   const plate = el('div', 'win-plate f-plate');
-  plate.appendChild(pxTitle(title, 2));
+  plate.appendChild(pixelTitle(String(title).toUpperCase(), { scale: Math.max(2, Math.round(uiUnit() * 1.5)) }));
   w.appendChild(plate);
   if (tabs) {
     const tb = el('div', 'win-tabs');
@@ -303,7 +309,7 @@ const delta = (v, unit = '', inv = false) => {
 export function itemCard(item, o = {}) {
   const c = G.char;
   const cmp = o.compare && o.compare !== item ? o.compare : null;
-  let h = `<div class="icard ${rarityCls(item)}"><div class="ic-head">`;
+  let h = `<div class="icard rc-${item.rarity}"><div class="ic-head">`;
   if (o.icon) h += `<div class="ic-icon slotf ${rarityCls(item)}"><img src="${o.icon}" draggable="false"></div>`;
   h += `<div class="ic-title"><div class="ic-name">${esc(item.name)}${item.upgrade ? ` <span class="ic-up">+${item.upgrade}</span>` : ''}</div><div class="ic-type">${itemTypeLine(item)} · iLvl ${item.ilvl}</div></div></div><div class="ic-body">`;
   if (item.kind === 'weapon') {

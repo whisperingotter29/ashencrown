@@ -1,6 +1,6 @@
 // Canvas-painted item and skill icons (cached as data URLs).
 import { RARITY, MATERIALS } from '../data/items.js';
-import { ELEMENTS, TOMES } from '../data/tomes.js';
+import { TOMES } from '../data/tomes.js';
 
 import { Pix } from '../px/pix.js';
 
@@ -113,30 +113,111 @@ export function simpleIcon(kind, color) {
   return url;
 }
 
-// Skill/spell icons: element-tinted medallion with a rune glyph
-const GLYPH = {
-  projectile: '➶', cone: '◣', nova: '✺', ground: '☄', rain: '⁂', zone: '◎', aura: '❂', chain: 'ϟ', buff: '✚', heal: '✙', summon: '☠', blink: '⤳', beam: '═', line: '⫶',
-  melee: '⚔', dash: '➽', spin: '↻', flurry: '≋', volley: '⇶', shot: '➹', stealth: '◐', teleport: '⇄', dashblink: '⇢', leap: '⤒', flask: '⚗', totem: '♣', trap: '⊗', wall: '▤', passive: '◈',
+
+// ---------------------------------------------------------------- skill / spell icons
+// Drawn directly on the 20px pixel grid (no downsampling): a bevelled medallion banded in the
+// ability's element colour, with a hand-placed 12px glyph for the ability type in bone white,
+// outlined in the element's darkest shade and drop-shadowed. Crisp at every integer scale.
+const ICON_EL = {
+  physical: '#6c7888', fire: '#d4481a', frost: '#2a88cc', lightning: '#5464e0', rot: '#4a9a2a', nature: '#3e9a34',
+  void: '#6c2ad2', holy: '#d8a020', water: '#2a78c4', sand: '#c08a3a', blood: '#a81424', sound: '#b050c8', earth: '#8a6030',
 };
+const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16), 255];
+const scaleC = (c, k, add = 0) => [Math.max(0, Math.min(255, Math.round(c[0] * k + add))), Math.max(0, Math.min(255, Math.round(c[1] * k + add))), Math.max(0, Math.min(255, Math.round(c[2] * k + add))), 255];
+
+// glyph painter on a 12 x 12 mask
+function glyph(fn) {
+  const m = new Uint8Array(144);
+  const set = (x, y) => { x = Math.round(x); y = Math.round(y); if (x >= 0 && y >= 0 && x < 12 && y < 12) m[y * 12 + x] = 1; };
+  const clr = (x, y) => { x = Math.round(x); y = Math.round(y); if (x >= 0 && y >= 0 && x < 12 && y < 12) m[y * 12 + x] = 0; };
+  const g = {
+    R: (x, y, w, h) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) set(x + i, y + j); },
+    X: (x, y, w, h) => { for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) clr(x + i, y + j); },
+    L: (x0, y0, x1, y1) => { const n = Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) || 1; for (let i = 0; i <= n; i++) set(x0 + ((x1 - x0) * i) / n, y0 + ((y1 - y0) * i) / n); },
+    D: (cx, cy, r) => { for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (Math.hypot(x - cx, y - cy) <= r + 0.25) set(x, y); },
+    E: (cx, cy, r) => { for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (Math.hypot(x - cx, y - cy) <= r + 0.25) clr(x, y); },
+    O: (cx, cy, r, a0 = 0, a1 = 360) => { for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) { const d = Math.hypot(x - cx, y - cy); let a = (Math.atan2(y - cy, x - cx) * 180) / Math.PI; if (a < 0) a += 360; if (Math.abs(d - r) < 0.6 && a >= a0 && a <= a1) set(x, y); } },
+    P: (pts) => { for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) { let inside = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < ((xj - xi) * (y - yi)) / (yj - yi) + xi) inside = !inside; } if (inside) set(x, y); } },
+  };
+  fn(g);
+  return m;
+}
+const GLYPHS = {
+  melee: (g) => { g.P([[10, 0], [11, 1], [4, 8], [3, 7]]); g.L(9, 1, 3, 7); g.L(1, 6, 5, 10); g.L(2, 6, 5, 9); g.L(1, 10, 2, 9); g.R(0, 10, 2, 2); },
+  dash: (g) => { g.R(2, 5, 5, 2); g.P([[6, 1.5], [11.5, 6], [6, 10.5]]); g.R(0, 2, 3, 1); g.R(0, 9, 3, 1); g.R(1, 5, 1, 2); },
+  spin: (g) => { g.O(6, 6, 4.6, 0, 300); g.O(6, 6, 3.8, 0, 300); g.P([[9.5, 0], [12, 3.5], [8, 4.5]]); g.D(6, 6, 1); },
+  flurry: (g) => { g.L(0, 8, 5, 1); g.L(1, 8, 6, 1); g.L(3, 11, 9, 3); g.L(4, 11, 10, 3); g.L(7, 11, 11, 6); },
+  volley: (g) => { for (const [x, y] of [[4, 1], [8, 2], [10, 6]]) { g.L(1, 10, x, y); g.R(x - 1, y - 1, 2, 2); } g.R(0, 10, 2, 2); },
+  shot: (g) => { g.L(1, 10, 9, 2); g.L(2, 10, 10, 2); g.P([[11.5, 0.5], [11.5, 5.5], [6.5, 0.5]]); g.L(0, 8, 2, 10); g.L(1, 11, 3, 9); },
+  barrage: (g) => { g.D(3, 8, 1.6); g.D(7, 3, 1.6); g.D(9.5, 8.5, 1.6); g.L(0, 11, 2, 9); g.L(4, 6, 5, 5); g.L(7, 11, 8, 10); },
+  projectile: (g) => { g.D(7.5, 4.5, 3.2); g.L(0, 11, 4, 7); g.L(1, 11, 5, 7); g.R(0, 8, 1, 1); g.R(3, 11, 1, 1); },
+  cone: (g) => { g.P([[1, 6], [11.5, 0.5], [11.5, 11.5]]); g.E(1, 6, 2.5); g.R(0, 5, 2, 2); },
+  nova: (g) => { g.D(6, 6, 2); for (let i = 0; i < 8; i++) { const a = (i / 8) * Math.PI * 2; g.L(6 + Math.cos(a) * 3.6, 6 + Math.sin(a) * 3.6, 6 + Math.cos(a) * 5.4, 6 + Math.sin(a) * 5.4); } },
+  ground: (g) => { g.D(5, 7, 3); g.L(7, 4, 11, 0); g.L(8, 5, 11, 2); g.L(6, 3, 9, 0); g.R(0, 11, 12, 1); },
+  rain: (g) => { for (const [x, y] of [[1, 0], [5, 2], [9, 0], [3, 6], [7, 7], [10, 5]]) g.R(x, y, 1, 3); g.R(0, 11, 12, 1); },
+  zone: (g) => { g.O(6, 6, 5); g.D(6, 6, 1); g.R(3, 4, 1, 1); g.R(8, 3, 1, 1); g.R(4, 8, 1, 1); g.R(8, 8, 1, 1); },
+  aura: (g) => { g.O(6, 6, 5.2); g.O(6, 6, 2.8); g.D(6, 6, 0.8); },
+  chain: (g) => { g.P([[7.5, 0], [2, 6.5], [5.5, 6.5], [3.5, 11.5], [10, 4.5], [6.5, 4.5], [9, 0]]); },
+  buff: (g) => { g.P([[6, 0.5], [11.5, 6], [8, 6], [8, 11.5], [4, 11.5], [4, 6], [0.5, 6]]); },
+  heal: (g) => { g.R(4, 1, 4, 10); g.R(1, 4, 10, 4); },
+  summon: (g) => { g.D(6, 5, 4.5); g.R(3, 8, 6, 3); g.X(3, 4, 2, 2); g.X(7, 4, 2, 2); g.X(5, 7, 2, 1); g.X(4, 10, 1, 1); g.X(7, 10, 1, 1); },
+  blink: (g) => { g.R(0, 5, 2, 2); g.R(3, 5, 2, 2); g.P([[6, 1.5], [11.5, 6], [6, 10.5]]); },
+  dashblink: (g) => { g.R(0, 5, 2, 2); g.R(3, 5, 2, 2); g.P([[6, 1.5], [11.5, 6], [6, 10.5]]); },
+  teleport: (g) => { g.O(6, 6, 5, 200, 360); g.O(6, 6, 5, 0, 20); g.O(6, 6, 3, 20, 200); g.D(6, 6, 1); g.P([[0, 4], [3, 8], [0, 9]]); g.P([[12, 8], [9, 4], [12, 3]]); },
+  beam: (g) => { g.R(2, 5, 10, 2); g.D(2, 6, 2.2); g.R(5, 2, 1, 1); g.R(8, 9, 1, 1); g.R(10, 3, 1, 1); },
+  line: (g) => { g.P([[0, 11.5], [2.5, 5], [5, 11.5]]); g.P([[3.5, 11.5], [6, 0.5], [8.5, 11.5]]); g.P([[7, 11.5], [9.5, 4], [12, 11.5]]); },
+  leap: (g) => { for (let i = 0; i <= 8; i++) { const x = 1 + i, y = 9 - Math.round(7 * Math.sin((i / 8) * Math.PI) * 1); if (i % 2 === 0) g.R(x, y, 1, 1); } g.P([[8, 7], [12, 7], [10, 11.5]]); g.R(0, 11, 5, 1); },
+  flask: (g) => { g.R(5, 0, 3, 4); g.R(4, 0, 5, 1); g.D(6.5, 7.5, 3.8); },
+  totem: (g) => { g.R(4, 1, 4, 11); g.R(1, 3, 10, 2); g.X(5, 6, 1, 1); g.X(7, 6, 1, 1); g.X(5, 9, 2, 1); },
+  trap: (g) => { g.R(0, 9, 12, 2); for (let i = 0; i < 4; i++) g.P([[i * 3, 9], [i * 3 + 1.5, 4], [i * 3 + 3, 9]]); g.R(5, 11, 2, 1); },
+  wall: (g) => { g.R(0, 1, 12, 10); g.X(0, 4, 12, 1); g.X(0, 7, 12, 1); g.X(4, 1, 1, 3); g.X(9, 1, 1, 3); g.X(2, 5, 1, 2); g.X(7, 5, 1, 2); g.X(5, 8, 1, 3); g.X(10, 8, 1, 3); },
+  stealth: (g) => { g.D(6, 6, 5.2); g.E(8.5, 4, 4.4); },
+  passive: (g) => { g.P([[6, 0], [12, 6], [6, 12], [0, 6]]); g.P([[6, 3.5], [8.5, 6], [6, 8.5], [3.5, 6]].map(([x, y]) => [x, y])); g.X(5, 5, 2, 2); },
+  crown: (g) => { g.R(1, 8, 10, 3); g.P([[1, 8.5], [1, 3.5], [4.5, 7]]); g.P([[3.5, 7.5], [6, 2], [8.5, 7.5]]); g.P([[7.5, 7], [11, 3.5], [11, 8.5]]); g.D(1, 2, 0.8); g.D(6, 1, 0.8); g.D(11, 2, 0.8); g.X(5, 9, 2, 1); },
+  star: (g) => { g.P([[6, 0], [7.5, 4.5], [12, 4.5], [8.5, 7.5], [10, 12], [6, 9], [2, 12], [3.5, 7.5], [0, 4.5], [4.5, 4.5]]); },
+};
+GLYPHS.flurry2 = GLYPHS.flurry;
+const glyphCache = new Map();
+function glyphMask(type) { if (!glyphCache.has(type)) glyphCache.set(type, glyph(GLYPHS[type] || GLYPHS.star)); return glyphCache.get(type); }
+
 export function skillIcon(def, element) {
-  const el = element || def.element || 'physical';
-  const key = `k|${def.id}|${el}`;
+  const elId = element || def.element || 'physical';
+  const type = def.type === 'sig' || String(def.id || '').startsWith('sig_') ? 'crown' : def.type;
+  const baseHex = def.color || ICON_EL[elId] || ICON_EL.physical;
+  const key = `k2|${type}|${baseHex}`;
   let url = cache.get(key);
   if (url) return url;
-  const [c, g] = c2d();
-  const col = ELEMENTS[el]?.glow || '#c0b090';
-  // banded medallion: light top, element colour, dark base (reads as pixel shading once shrunk)
-  g.save();
-  g.beginPath(); g.rect(2, 2, 60, 60); g.clip();
-  g.fillStyle = '#0a0606'; g.fillRect(0, 0, S, S);
-  g.fillStyle = col; g.fillRect(6, 6, 52, 52);
-  g.fillStyle = 'rgba(255,255,255,0.35)'; g.fillRect(6, 6, 52, 13);
-  g.fillStyle = 'rgba(0,0,0,0.35)'; g.fillRect(6, 45, 52, 13);
-  g.restore();
-  g.font = 'bold 46px Georgia, serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillStyle = '#1a0c08'; g.fillText(GLYPH[def.type] || '✦', 35, 37);
-  g.fillStyle = '#fff8e8'; g.fillText(GLYPH[def.type] || '✦', 32, 34);
-  url = pixelize(c).toDataURL();
+  const N = 20, p = new Pix(N, N);
+  const base = hex(baseHex);
+  const hi = scaleC(base, 1.25, 30), mid = base, lo = scaleC(base, 0.62), deep = scaleC(base, 0.32), out = [16, 10, 8, 255];
+  // medallion: clipped corners, outline, bevel, banded fill with a dithered seam between bands
+  for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+    const cx = Math.min(x, N - 1 - x), cy = Math.min(y, N - 1 - y);
+    if (cx + cy < 2) continue;
+    if (cx === 0 || cy === 0 || cx + cy === 2) { p.set(x, y, out); continue; }
+    if (cx + cy === 3 || ((x === 1 || y === 1) && cx + cy > 3)) { p.set(x, y, x < N / 2 && y < N / 2 ? scaleC(hi, 1.1, 10) : x === 1 || y === 1 ? hi : lo); continue; }
+    if (x === N - 2 || y === N - 2) { p.set(x, y, deep); continue; }
+    const band = y < 7 ? hi : y < 13 ? mid : lo;
+    let c = band;
+    if (y === 7 && (x % 2)) c = hi;
+    if (y === 13 && (x % 2)) c = mid;
+    p.set(x, y, c);
+  }
+  // glyph: drop shadow, element-dark outline, bone-white face with a lit top edge
+  const m = glyphMask(type), ox = 4, oy = 4;
+  const on = (x, y) => x >= 0 && y >= 0 && x < 12 && y < 12 && m[y * 12 + x];
+  for (let y = -1; y <= 12; y++) for (let x = -1; x <= 12; x++) {
+    if (on(x, y)) continue;
+    if (on(x - 1, y - 1)) p.set(ox + x, oy + y, deep);
+  }
+  for (let y = -1; y <= 12; y++) for (let x = -1; x <= 12; x++) {
+    if (on(x, y)) continue;
+    if (on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1)) p.set(ox + x, oy + y, deep);
+  }
+  for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (on(x, y)) p.set(ox + x, oy + y, on(x, y - 1) ? [250, 240, 220, 255] : [255, 255, 250, 255]);
+  // shade the lower-right of the glyph a touch for volume
+  for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (on(x, y) && !on(x + 1, y + 1) && on(x, y - 1)) p.set(ox + x, oy + y, [214, 200, 178, 255]);
+  url = p.canvas().toDataURL();
   cache.set(key, url);
   return url;
 }

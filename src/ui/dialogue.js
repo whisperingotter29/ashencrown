@@ -404,7 +404,7 @@ export function openEnchanter(npc, tab = 'enchant') {
   for (const it of pool) {
     const on = tab === 'transmute' ? transSel.includes(it) : enchSel === it;
     const row = el('div', 'shop-row' + (on ? ' on' : ''), `<img src="${itemIcon(it)}" draggable="false"><span class="nm ${rarityCls(it)}">${esc(it.name)}</span>`);
-    bindTip(row, () => itemCard(it, { icon: itemIcon(it) }));
+    bindTip(row, () => (on ? '' : itemCard(it, { icon: itemIcon(it) })));
     row.onclick = () => {
       if (tab === 'transmute') { if (on) transSel = transSel.filter((x) => x !== it); else if (transSel.length < 3) transSel.push(it); }
       else enchSel = it;

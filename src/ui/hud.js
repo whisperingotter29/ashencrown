@@ -263,7 +263,7 @@ export function refreshSkillbar() {
     s._max = a?.def.cd || 1;
   });
   const cls = CLASS_BY_ID[c.cls];
-  setSrc(H.sig.ic, skillIcon({ id: 'sig_' + cls.id, type: 'buff' }, 'holy'));
+  setSrc(H.sig.ic, skillIcon({ id: 'sig_' + cls.id, type: 'sig', color: '#a8641c' }));
   H.sig.style.setProperty('--rc', cls.resource.color);
   tog(H.sig, 'discrete', !!cls.resource.discrete);
   if (cls.resource.discrete && H.sig.pips.children.length !== cls.resource.max) { H.sig.pips.innerHTML = ''; for (let i = 0; i < cls.resource.max; i++) H.sig.pips.appendChild(el('span', '')); }
