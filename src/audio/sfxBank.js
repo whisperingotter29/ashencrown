@@ -65,9 +65,10 @@ class B {
     p.setTargetAtTime(sus * peak, t + a + hold, Math.max(0.001, d / 5));
   }
   path(p, t, f) {
-    if (typeof f === 'number') { p.setValueAtTime(f, t); return; }
-    p.setValueAtTime(f[0][1], t + f[0][0]);
-    for (let i = 1; i < f.length; i++) p.exponentialRampToValueAtTime(Math.max(1, f[i][1]), t + f[i][0]);
+    const ny = this.sr * 0.49, cl = (v) => Math.min(ny, v);   // keep frequencies under Nyquist
+    if (typeof f === 'number') { p.setValueAtTime(cl(f), t); return; }
+    p.setValueAtTime(cl(f[0][1]), t + f[0][0]);
+    for (let i = 1; i < f.length; i++) p.exponentialRampToValueAtTime(Math.max(1, cl(f[i][1])), t + f[i][0]);
   }
   filt(type, f, Q = 0.707, dst = this.out, t = 0) {
     const n = this.c.createBiquadFilter(); n.type = type; this.path(n.frequency, t, f); n.Q.value = Q; n.connect(dst); return n;
