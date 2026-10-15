@@ -5,6 +5,7 @@ import { G } from '../game.js';
 import { bus } from './events.js';
 import { R } from '../render/renderer.js';
 import { cam, kick, addShake } from '../world/cameraRig.js';
+import { postKick } from '../render/post.js';
 
 // ---------------------------------------------------------------- rumble
 let lastRumble = 0, lastStrength = 0;
@@ -75,6 +76,7 @@ export function initFeel() {
       const dx = tgt.pos.x - src.pos.x, dz = tgt.pos.z - src.pos.z;
       if (kind === 'dot' || kind === 'hazard') return;
       if (!pendingHit || (big && !pendingHit.big)) pendingHit = { dx, dz, big: big || false };
+      if (crit) postKick({ punch: 0.35, aberr: 0.25 });
     }
   });
   bus.on('playerHit', ({ amount, src }) => {
@@ -83,6 +85,7 @@ export function initFeel() {
     const frac = amount / Math.max(1, p.maxHp);
     if (src && src !== p) kick(p.pos.x - src.pos.x, p.pos.z - src.pos.z, 2.5 + Math.min(4, frac * 30));
     R.damage = Math.min(1, Math.max(R.damage, 0.3 + frac * 3));
+    postKick({ roll: (Math.random() < 0.5 ? -1 : 1) * Math.min(0.5, 0.15 + frac * 3), aberr: Math.min(1, 0.3 + frac * 6) });
     hudJolt();
     rumble(Math.min(1, 0.45 + frac * 4), 0.5, 120 + Math.min(200, frac * 1500));
   });
@@ -119,17 +122,20 @@ export function initFeel() {
     if (victim.isPlayer) { rumble(1, 1, 600); addShake(0.6); return; }
     if (!killer?.isPlayer && killer?.owner !== G.player) return;
     if (victim.boss) {
+      postKick({ roll: 0.45, punch: 1, aberr: 1 });
       G.slowmo = Math.max(G.slowmo || 0, 0.9);
       addShake(0.9 * (G.settings.screenShake ?? 1));
       R.white = Math.max(R.white, 0.35);
       rumble(1, 1, 700);
-    } else if (victim.elite) { addShake(0.3 * (G.settings.screenShake ?? 1)); rumble(0.6, 0.5, 160); }
+    } else if (victim.elite) { addShake(0.3 * (G.settings.screenShake ?? 1)); rumble(0.6, 0.5, 160); postKick({ roll: (Math.random() < 0.5 ? -1 : 1) * 0.3, punch: 0.7, aberr: 0.5 }); }
     else rumble(0.25, 0.3, 60);
   });
   bus.on('tutorialStep', () => rumble(0.1, 0.4, 80));
   bus.on('tutorialDone', () => rumble(0.3, 0.6, 300));
-  bus.on('levelUp', () => { addShake(0.25 * (G.settings.screenShake ?? 1)); rumble(0.3, 0.7, 420); });
-  bus.on('explosion', ({ owner, radius }) => { if (owner?.isPlayer) rumble(Math.min(1, 0.4 + radius * 0.1), 0.4, 130); });
+  bus.on('levelUp', () => { addShake(0.25 * (G.settings.screenShake ?? 1)); rumble(0.3, 0.7, 420); postKick({ punch: 1, aberr: 0.4 }); });
+  bus.on('explosion', ({ owner, radius }) => { if (owner?.isPlayer) { rumble(Math.min(1, 0.4 + radius * 0.1), 0.4, 130); postKick({ punch: Math.min(1, 0.2 + radius * 0.1), aberr: Math.min(0.8, radius * 0.12), roll: (Math.random() - 0.5) * 0.3 }); } });
+  bus.on('streakShout', () => postKick({ punch: 1, aberr: 0.7, roll: (Math.random() < 0.5 ? -1 : 1) * 0.25 }));
+  bus.on('parry', () => postKick({ punch: 0.8, aberr: 0.6 }));
   bus.on('slam', ({ src }) => {
     const p = G.player;
     if (!p) return;

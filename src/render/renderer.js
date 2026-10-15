@@ -6,6 +6,7 @@ import { scene } from '../px/scene.js';
 import { view } from '../px/view.js';
 import { PPU, C } from '../px/pix.js';
 import { drawMagic } from './magic.js';
+import { initPost, presentPost } from './post.js';
 
 export const R = {
   canvas: null, ctx: null,         // screen canvas (device pixels)
@@ -47,6 +48,7 @@ export function initRenderer(container) {
   const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
   grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.35, 'rgba(255,255,255,0.55)'); grd.addColorStop(0.7, 'rgba(255,255,255,0.16)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
   g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+  initPost(container);
   window.addEventListener('resize', resize);
   resize();
   // compatibility shims for code that still reads these
@@ -105,7 +107,10 @@ function tintedLight(color) {
 const list = [];
 const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
+let lastT = 0;
 export function renderFrame(time) {
+  const fdt = Math.min(0.1, Math.max(0, (time - (lastT || time))));
+  lastT = time;
   R.time = time;
   const { lctx, W, H, ctx } = R;
   lctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -209,6 +214,8 @@ export function renderFrame(time) {
   // ---- GPU magic layer (spells, impacts, lightning), added over everything
   drawMagic(ctx, ox - s, oy - s);
   overlays(ctx);
+  // ---- camera lens: perspective tilt, depth of field, bloom, grade (WebGL)
+  presentPost(R.canvas, fdt);
   // per-frame lists
   scene.decals.length = 0; scene.pixels.length = 0; scene.glows.length = 0; scene.emissives.length = 0; scene.screen.length = 0;
   R.lights.length = 0;

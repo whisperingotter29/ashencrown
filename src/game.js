@@ -17,7 +17,7 @@ export const G = {
   interactables: [],
   dungeon: null,
   char: null,            // persistent character data (saved)
-  settings: { music: 0.5, sfx: 0.7, pixel: 'auto', glow: true, damageNumbers: true, screenShake: 1, vibration: true, magicFx: true },
+  settings: { music: 0.5, sfx: 0.7, pixel: 'auto', glow: true, damageNumbers: true, screenShake: 1, vibration: true, magicFx: true, camera: 'cinematic', dof: true },
   paused: false,
   menuOpen: null,
   biome: 'wastes',

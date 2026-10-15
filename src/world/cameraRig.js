@@ -6,6 +6,7 @@ import { input } from '../core/input.js';
 import { damp } from '../core/math.js';
 import { view } from '../px/view.js';
 import { PPU } from '../px/pix.js';
+import { lensToSource, sourceToLens } from '../render/post.js';
 
 export const cam = {
   target: new Vec3(),
@@ -84,8 +85,9 @@ function apply() {
 // screen (CSS px) -> world on the ground plane
 export function mouseWorld(y, out = cam.aim) {
   const s = view.scale, dpr = view.dpr;
-  const lx = (input.mouse.x * dpr + Math.round(view.fracX * s) + s) / s;
-  const ly = (input.mouse.y * dpr + Math.round(view.fracY * s) + s) / s;
+  const [mx, my] = lensToSource(input.mouse.x, input.mouse.y);
+  const lx = (mx * dpr + Math.round(view.fracX * s) + s) / s;
+  const ly = (my * dpr + Math.round(view.fracY * s) + s) / s;
   out.set((lx + view.x0) / PPU, y, (ly + view.y0) / PPU);
   return out;
 }
@@ -93,7 +95,8 @@ export function mouseWorld(y, out = cam.aim) {
 // cursor position in low-res pixels (same space as view.x0 / sprites)
 export function cursorLow() {
   const s = view.scale, dpr = view.dpr;
-  return [(input.mouse.x * dpr + Math.round(view.fracX * s) + s) / s, (input.mouse.y * dpr + Math.round(view.fracY * s) + s) / s];
+  const [mx, my] = lensToSource(input.mouse.x, input.mouse.y);
+  return [(mx * dpr + Math.round(view.fracX * s) + s) / s, (my * dpr + Math.round(view.fracY * s) + s) / s];
 }
 
 // movement basis: W = up the screen (-z), D = right (+x)
@@ -104,8 +107,7 @@ export function worldToScreen(v, out = { x: 0, y: 0, visible: false }) {
   const s = view.scale, dpr = view.dpr;
   const h = v.y - view.ground(v.x, v.z);
   const lx = v.x * PPU - view.x0, ly = v.z * PPU - view.y0 - h * PPU;
-  out.x = (lx * s - Math.round(view.fracX * s) - s) / dpr;
-  out.y = (ly * s - Math.round(view.fracY * s) - s) / dpr;
+  [out.x, out.y] = sourceToLens((lx * s - Math.round(view.fracX * s) - s) / dpr, (ly * s - Math.round(view.fracY * s) - s) / dpr);
   out.visible = out.x > -50 && out.y > -50 && out.x < window.innerWidth + 50 && out.y < window.innerHeight + 50;
   return out;
 }
