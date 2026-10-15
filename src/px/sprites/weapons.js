@@ -104,12 +104,12 @@ const GEN = {
     const b = s.base || 'Greatsword';
     const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
     const cfg = {
-      Greatsword: { L: 20, w: 5, fuller: true },
-      Zweihander: { L: 22, w: 5, fuller: true, hooks: true },
-      Claymore: { L: 20, w: 5, angled: true },
-      "Executioner's Blade": { L: 18, w: 7, square: true, blunt: true },
-      Flamberge: { L: 21, w: 5, wave: true, width: (t, h) => h + (Math.floor(t * 12) % 2 ? 0 : -1) + (t < 0.1 ? 0 : 0) },
-    }[b] || { L: 20, w: 5, fuller: true };
+      Greatsword: { L: 17, w: 5, fuller: true },
+      Zweihander: { L: 19, w: 5, fuller: true, hooks: true },
+      Claymore: { L: 17, w: 5, angled: true },
+      "Executioner's Blade": { L: 15, w: 7, square: true, blunt: true },
+      Flamberge: { L: 18, w: 5, wave: true, width: (t, h) => h + (Math.floor(t * 12) % 2 ? 0 : -1) + (t < 0.1 ? 0 : 0) },
+    }[b] || { L: 17, w: 5, fuller: true };
     const W = 3 + 6 + 1 + cfg.L + 2, H = 19;
     const cy = 9;
     const p = mk(W, H, 5, cy), e = mk(W, H, 5, cy);

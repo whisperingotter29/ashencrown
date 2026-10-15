@@ -670,10 +670,13 @@ export class Actor {
     if (!tr.length) return;
     if (Math.abs(angDiff(tr[0].a, a)) < 0.15) return;
     const col = wpn.element && ELEM_GLOW[wpn.element] ? ELEM_GLOW[wpn.element] : '#fff6e0';
-    const from = Math.max(2, Math.round((wspr.len || 8) * 0.35));
+    // only the outer part of the blade smears, so it reads as a crescent near the tip, not a fan
+    const from = Math.max(2, Math.round((wspr.len || 8) * 0.6));
     const sm = variant(wspr.pix, 'smear:' + col + ':' + from);
     const fan = (a0, a1, al) => {
-      const dd = angDiff(a0, a1), n = Math.min(16, Math.ceil(Math.abs(dd) / 0.08));
+      let dd = angDiff(a0, a1);
+      if (Math.abs(dd) > 1.1) { a0 = a1 - Math.sign(dd) * 1.1; dd = angDiff(a0, a1); }
+      const n = Math.min(14, Math.ceil(Math.abs(dd) / 0.08));
       ctx.globalAlpha = this.alpha * al;
       for (let i = 0; i < n; i++) {
         let r2 = a0 + dd * (i / n), f2 = false;
@@ -683,9 +686,9 @@ export class Actor {
     };
     // a fan back through the last few frames, the older sweep fainter
     let a1 = a;
-    for (let i = tr.length - 1, n = 0; i >= 0 && n < 3; i--, n++) {
+    for (let i = tr.length - 1, n = 0; i >= 0 && n < 2; i--, n++) {
       const a0 = tr[i].a;
-      if (Math.abs(angDiff(a0, a1)) >= 0.06) fan(a0, a1, n === 0 ? 0.9 : n === 1 ? 0.55 : 0.3);
+      if (Math.abs(angDiff(a0, a1)) >= 0.06) fan(a0, a1, n === 0 ? 0.8 : 0.38);
       a1 = a0;
     }
     ctx.globalAlpha = this.alpha;
