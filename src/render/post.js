@@ -6,6 +6,7 @@
 //   - punchy camera moves on big moments: a small roll, a quick zoom punch, chromatic split
 // Aiming maps through the same lens (lensToSource / sourceToLens), so the cursor stays exact.
 import { G } from '../game.js';
+import { bus } from '../core/events.js';
 
 const VS = `#version 300 es
 layout(location=0) in vec2 a;
@@ -65,6 +66,7 @@ export const post = {
   tilt: 0.16, dof: 1, bloom: 0.5, grade: 1,
   roll: 0, rollV: 0, punch: 0, aberr: 0,
   rays: 0, rayCol: [1, 0.92, 0.75], time: 0,
+  cost: 0, slowFrames: 0, autoOff: false,   // frame-cost guard for slow machines
 };
 
 export function initPost(container) {
@@ -119,7 +121,7 @@ function zoomFor(roll) {
 
 // Present the finished frame through the lens. src: the 2D canvas holding the frame.
 export function presentPost(src, dt) {
-  const want = post.ok && G.settings.camera !== 'flat';
+  const want = post.ok && G.settings.camera !== 'flat' && !post.autoOff;
   if (want !== post.on) {
     post.on = want;
     if (post.cv) post.cv.style.display = want ? 'block' : 'none';
@@ -133,6 +135,7 @@ export function presentPost(src, dt) {
   post.punch = Math.max(0, post.punch - dt * 3.5);
   post.aberr = Math.max(0, post.aberr - dt * 3);
   curRoll = post.roll; curZoom = zoomFor(curRoll);
+  const t0 = performance.now();
   const gl = post.gl, cv = post.cv;
   if (cv.width !== src.width || cv.height !== src.height) { cv.width = src.width; cv.height = src.height; }
   gl.viewport(0, 0, cv.width, cv.height);
@@ -157,7 +160,15 @@ export function presentPost(src, dt) {
   gl.uniform1f(u.time, post.time);
   gl.uniform3f(u.rayCol, ...post.rayCol);
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+  // if presenting through the lens keeps costing too much CPU (slow canvas upload), fall back to
+  // the flat camera rather than stutter
+  const cost = performance.now() - t0;
+  post.cost = post.cost * 0.95 + cost * 0.05;
+  post.slowFrames = post.cost > 7 ? post.slowFrames + 1 : Math.max(0, post.slowFrames - 2);
+  if (post.slowFrames > 240) { post.autoOff = true; bus.emit('toast', 'Cinematic camera switched off to keep things smooth. You can turn it back on in Settings.'); }
 }
+// called when the player changes the camera setting
+export function resetPostGuard() { post.autoOff = false; post.slowFrames = 0; post.cost = 0; }
 
 // screen CSS px -> source-frame CSS px (what the game sees under the cursor)
 export function lensToSource(x, y) {
