@@ -1,4 +1,4 @@
-// Twelve classes, rolled on a d12. Each has a starting kit and a signature mechanic (Q).
+// Twelve classes, rolled on a d12. Each has a starting kit and a signature mechanic (X).
 
 export const CLASSES = [
   {

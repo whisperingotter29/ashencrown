@@ -350,7 +350,7 @@ function interact(f) {
     }
     case 'dungeon': {
       const d = it.data;
-      if (d.level > c.level + 8 && !it.warned) { it.warned = true; toast(`${esc(d.name)} is level ${d.level}. Death waits within. Press E again to enter anyway.`); interactCooldown = 0.1; return; }
+      if (d.level > c.level + 8 && !it.warned) { it.warned = true; toast(`${esc(d.name)} is level ${d.level}. Death waits within. Press F again to enter anyway.`); interactCooldown = 0.1; return; }
       if (G.player.mounted) G.player.toggleMount();
       const back = new Vec3(it.x + Math.sin(it.entranceAngle) * 3, 0, it.z + Math.cos(it.entranceAngle) * 3);
       back.y = groundHeight(back.x, back.z);
@@ -379,7 +379,7 @@ function interact(f) {
     }
     case 'gate': {
       const g = it.data;
-      if (g.to === 'deep' && !isActive('q_main_3') && c.level < 45 && !it.warned) { it.warned = true; toast('The Hollow Deep swallows the unprepared (level 50+). Press E again to descend anyway.'); interactCooldown = 0.1; return; }
+      if (g.to === 'deep' && !isActive('q_main_3') && c.level < 45 && !it.warned) { it.warned = true; toast('The Hollow Deep swallows the unprepared (level 50+). Press F again to descend anyway.'); interactCooldown = 0.1; return; }
       transition(() => { switchRealm(g.to, g.tx, g.tz); });
       break;
     }

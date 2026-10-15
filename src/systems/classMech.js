@@ -1,4 +1,4 @@
-// Class signature mechanics (Q) and the passive hooks that make each class play differently.
+// Class signature mechanics (X) and the passive hooks that make each class play differently.
 import { G } from '../game.js';
 import { bus } from '../core/events.js';
 import { CLASS_BY_ID } from '../data/classes.js';
@@ -206,7 +206,7 @@ export function updateClassMech(dt) {
   if (p.derived.powers.frostAura) for (const e of G.entities) if (!e.dead && e.team === 'enemy' && Math.hypot(e.pos.x - p.pos.x, e.pos.z - p.pos.z) < 5) e.status.chill = Math.max(e.status.chill || 0, 0.5);
 }
 
-// ------------------------------------------------------------------ signatures (Q)
+// ------------------------------------------------------------------ signatures (X)
 export function useSignature(p) {
   const c = p.char.cls;
   const def = CLASS_BY_ID[c];
