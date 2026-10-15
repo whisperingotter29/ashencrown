@@ -17,6 +17,7 @@ import * as B from '../px/sprites/buildings.js';
 import * as LM from '../px/sprites/landmarks.js';
 import { propSprite } from '../px/sprites/props.js';
 import { shieldSprite } from '../px/sprites/weapons.js';
+import { castSprite } from '../px/shadow.js';
 
 const BUILD_R = 240, DROP_R = 300;
 export const sites = [];
@@ -115,6 +116,12 @@ function obj(b, spr, wx, wz, o = {}) {
     bounds() { const s = this.cur(); const [x, y] = this.pos(); return { x: x - s.pix.ox, y: y - s.pix.oy, w: s.pix.w, h: s.pix.h }; },
   };
   if (o.shadow) ob.shadow = (ctx) => { const [x, y] = ob.pos(); const w = o.shadow; ctx.fillStyle = 'rgba(10,6,12,0.28)'; ctx.fillRect(x - w, y - 1, w * 2 + 1, 3); ctx.fillRect(x - w + 2, y + 2, w * 2 - 3, 1); };
+  // directional cast shadow; houses cap the casting height so the roof's depth doesn't stretch it
+  if (!o.flat && o.cast !== false && spr.pix.oy > 6) {
+    const cap = o.shadowCap || (spr.footprint ? Math.round(spr.pix.h * 0.58) : 0);
+    const lift = Math.round((o.lift || 0) * PPU);
+    ob.castShadow = (sctx) => { const [x, y] = ob.pos(); castSprite(sctx, ob.cur().pix, x, y + lift, { cap, h: lift }); };
+  }
   if (o.glow) ob.glow = o.glow;
   if (o.extraEmissive) { const base = ob.emissive; ob.emissive = (ctx) => { base.call(ob, ctx); o.extraEmissive(ctx, ob.pos()); }; }
   b.objs.push(ob);

@@ -1,21 +1,37 @@
-// Sprite actors: the pixel "model" of an entity. Picks a view (down / side / up) and frame from
-// the entity's animation state, rotates the held weapon through snappy per-attack swing curves
-// (anticipation -> strike -> follow-through), and adds the juice: weapon smears, dodge
-// afterimages, white hit flashes, frozen tints, knock-back nudges, death falls and blinks.
+// Sprite actors: the pixel "model" of an entity.
+//
+// Humanoids are a small procedural rig: a baked body frame (legs, torso, head; see human.js) plus
+// two arms drawn at runtime from the shoulder anchors to the hands, so the hands can follow the
+// weapon. Every attack kind is a set of keyframes (anticipation -> strike -> impact hold ->
+// follow-through -> recover) for the hand's angle and reach around the chest, the blade's roll,
+// the lift and the body (stance, lunge, squash). Consecutive attacks blend from the pose the last
+// one ended in, so held-mouse combo chains loop smoothly at any attack speed.
+//
+// Locomotion: a 6-frame run cycle with bob, squash on footfalls and stretch at push-off, arm swing,
+// a leaning sprint, footstep dust, start lean and stop settle, idle breathing and blinking, dodge
+// rolls in pixel-exact quarter turns with a stretch and afterimages, hurt recoil and a fall-down
+// death. Creatures get squash/stretch, anticipation and lunges on their attack frames, recoil and
+// death falls. Everything casts a directional shadow (see shadow.js).
 import { R, glowPx } from '../render/renderer.js';
 import { view } from './view.js';
-import { Pix, PPU, C } from './pix.js';
-import { humanSprites, FEET } from './sprites/human.js';
+import { Pix, PPU, C, light } from './pix.js';
+import { humanSprites, FEET, CX } from './sprites/human.js';
 import { creatureSprites } from './sprites/creatures.js';
 import { weaponSprite, shieldSprite, tomeSprite, ELEM_GLOW } from './sprites/weapons.js';
 import { addObject, removeObject } from './scene.js';
+import { castSprite, castLine, contactBlob, sun } from './shadow.js';
+import { particle } from '../render/vfx.js';
 
 const TAU = Math.PI * 2;
 const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const lerp = (a, b, t) => a + (b - a) * t;
 const easeOut = (t) => 1 - (1 - t) * (1 - t) * (1 - t);
+const easeOut2 = (t) => 1 - (1 - t) * (1 - t);
 const easeIn = (t) => t * t;
 const easeIO = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
+const angDiff = (a, b) => { let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d; };
+const lerpAng = (a, b, t) => a + angDiff(a, b) * t;
+void R;
 
 // ------------------------------------------------------------------ pix variants (cached on the Pix)
 export function variant(p, kind) {
@@ -39,6 +55,13 @@ export function variant(p, kind) {
   else if (kind === 'stone') v = p.tinted('#8a8478', 0.9);
   else if (kind === 'ghost') v = p.silhouette('#8fd0ff');
   else if (kind === 'smear') v = p.silhouette('#fff6e0');
+  else if (kind.startsWith('smear:')) {
+    // pale silhouette of the outer part of a blade (the bit that whips through the air)
+    const [, col, from] = kind.split(':');
+    v = new Pix(p.w, p.h); v.ox = p.ox; v.oy = p.oy;
+    const c = C(col), x0 = p.ox + (+from || 0);
+    for (let y = 0; y < p.h; y++) for (let x = Math.max(0, x0); x < p.w; x++) if (p.d[(y * p.w + x) * 4 + 3] > 100) v.set(x, y, c);
+  } else if (kind.startsWith('rot')) v = p.rot90(+kind.slice(3));
   else if (kind.startsWith('aura:')) {
     v = new Pix(p.w + 2, p.h + 2); v.ox = p.ox + 1; v.oy = p.oy + 1;
     v.blit(p, 1, 1); v.outline(C(kind.slice(5)));
@@ -59,29 +82,47 @@ function blit(ctx, p, x, y, k, rot, flip) {
   } else ctx.drawImage(cv, x - p.ox * k, y - p.oy * k, p.w * k, p.h * k);
 }
 
-// soft ground shadows (cached ellipses)
-const shadows = new Map();
-function shadowCv(rx, ry) {
-  const key = rx + ':' + ry;
-  let c = shadows.get(key);
-  if (c) return c;
-  const p = new Pix(rx * 2 + 1, ry * 2 + 1);
-  p.ellipse(rx + 0.5, ry + 0.5, rx + 0.5, ry + 0.5, [12, 6, 16, 90]);
-  p.ellipse(rx + 0.5, ry + 0.5, rx * 0.65 + 0.5, ry * 0.6 + 0.5, [12, 6, 16, 60]);
-  c = p.canvas();
-  shadows.set(key, c);
-  return c;
+// draw a quarter-turned copy of a frame so that sprite point (cx, cy) lands on screen (X, Y)
+function rotFrame(p, q, cx, cy) {
+  const r = variant(p, 'rot' + q), sw = p.w, sh = p.h;
+  const at = q === 1 ? [sh - 1 - cy, cx] : q === 2 ? [sw - 1 - cx, sh - 1 - cy] : q === 3 ? [cy, sw - 1 - cx] : [cx, cy];
+  return { pix: r, dx: r.ox - at[0], dy: r.oy - at[1] };
 }
 
 // screen-space aim angle from a world facing (0 = +z = down the screen)
 const screenAngle = (f) => Math.atan2(Math.cos(f), Math.sin(f));
 const CASTS = new Set(['cast', 'castup', 'nova']);
 const POLES = new Set(['spear', 'halberd', 'staff']);
+const TWO_H = new Set(['greatsword', 'halberd', 'spear', 'staff', 'crossbow']);
+const HEAVY = new Set(['overhead', 'slam', 'sweep', 'spearthrust', 'nova']);
 
 // integer upscale for very large bodies, so big bosses stay pixel-crisp
 export function upscaleFor(s, humanoid) {
   if (humanoid) return s < 1.75 ? 1 : Math.min(5, Math.max(2, Math.round(s / 1.1)));
   return s <= 2.6 ? 1 : Math.min(4, Math.ceil(s / 2.6));
+}
+
+// ------------------------------------------------------------------ runtime limb colours
+// arm palettes per flash mode, as css strings (the arms are drawn with fillRect every frame)
+const css = (c) => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
+function tintC(c, t, k) { const l = (c[0] * 0.3 + c[1] * 0.55 + c[2] * 0.15) / 255; return [c[0] + (t[0] * (0.4 + l) - c[0]) * k, c[1] + (t[1] * (0.4 + l) - c[1]) * k, c[2] + (t[2] * (0.4 + l) - c[2]) * k]; }
+const MODES = { white: null, frozen: [C('#a8e0ff'), 0.7], hurt: [C('#ff6048'), 0.5], stone: [C('#8a8478'), 0.9] };
+function limbPal(pal, mode, aura) {
+  const key = '_lp_' + (mode || '') + (aura || '');
+  if (pal[key]) return pal[key];
+  const f = (c) => {
+    if (mode === 'white') return '#ffffff';
+    if (mode === 'ghost') return '#8fd0ff';
+    if (MODES[mode]) return css(tintC(c, MODES[mode][0], MODES[mode][1]));
+    return css(c);
+  };
+  const out = {
+    o: mode === 'white' ? '#ffffff' : mode === 'ghost' ? '#8fd0ff' : aura ? aura : css([pal.sleeve[0] * 0.3 + 6, pal.sleeve[1] * 0.28 + 4, pal.sleeve[2] * 0.32 + 8]),
+    ho: mode === 'white' ? '#ffffff' : aura ? aura : css([pal.hand[0] * 0.3 + 6, pal.hand[1] * 0.26 + 4, pal.hand[2] * 0.3 + 8]),
+    s: f(pal.sleeve), sl: f(pal.sleeveL), sd: f(pal.sleeveD), cf: f(pal.cuff), h: f(pal.hand), hl: f(pal.handL), hd: f(pal.handD), w: pal.w,
+  };
+  pal[key] = out;
+  return out;
 }
 
 // ================================================================== Actor
@@ -93,7 +134,7 @@ export class Actor {
     this.sortZ = 0;
     this.hidden = false;
     this.alpha = 1;
-    this.flash = null;           // 'white' | 'frozen' | 'stone'
+    this.flash = null;           // 'white' | 'frozen' | 'stone' | 'hurt'
     this.aura = null;            // elite outline colour
     this.t = Math.random() * 10;
     this.ph = 0;
@@ -102,11 +143,17 @@ export class Actor {
     this.ghosts = [];
     this.ghostT = 0;
     this.ops = [];               // emissive replay list
-    this.prevRot = null;
     this.segs = null;            // serpent segment world positions
     this.weapon = null; this.shield = null; this.tome = null;
-    this.mount = null;           // { spr, k, st }
-    this.lastTip = { x: 0, y: 0, z: 0 };
+    this.mount = null;           // { spr, k, ph }
+    // animation state
+    this.moving = false; this.settleT = 0; this.startT = 0; this.turn = 0; this.prevFacing = null;
+    this.blinkT = 2 + Math.random() * 3; this.blink = 0;
+    this.prevKind = null; this.prevU = 0; this.blend = null; this.atkT = 0;
+    this.pose = null;            // last rig pose (for blending into the next attack)
+    this.trail = [];             // recent blade states for the smear
+    this.stepFi = -1; this.dustT = 0; this.deathDust = false; this.dodgeDust = false;
+    this.shadowInfo = null;      // what to cast next frame
     this.build(spec);
   }
 
@@ -116,7 +163,8 @@ export class Actor {
       const s = spec.scale || 1;
       this.k = upscaleFor(s, true);
       const ms = Math.max(0.8, Math.min(1.55, s / this.k));
-      this.spr = humanSprites({ ...spec.look, scale: ms });
+      this.look = { ...spec.look, scale: ms };
+      this.spr = humanSprites(this.look);
       this.kind = spec.kind || 'humanoid';
       this.sideOnly = false; this.frontOnly = false;
       this.setWeapon(spec.weapon || null);
@@ -138,14 +186,23 @@ export class Actor {
     const keep = [this.weapon, this.shield, this.tome];
     this.build({ ...this.spec, look, weapon: null, shield: null, tome: null });
     [this.weapon, this.shield, this.tome] = keep;
+    this.refreshQuiver();
   }
-  setWeapon(spec) { this.weapon = spec && spec.type !== 'claws' ? spec : null; }
+  setWeapon(spec) { this.weapon = spec && spec.type !== 'claws' ? spec : null; this.refreshQuiver(); }
   setShield(spec) { this.shield = spec ? shieldSprite(spec) : null; }
   setTome(spec) { this.tome = spec ? tomeSprite(spec.color, spec.glow) : null; }
   setMount(spec) {
     if (!spec) { this.mount = null; return; }
     const k = upscaleFor(spec.s, false);
     this.mount = { spr: creatureSprites({ ...spec, s: spec.s / k }), k, ph: 0 };
+  }
+  // archers wear a quiver on the back
+  refreshQuiver() {
+    if (this.spec.type !== 'human' || !this.look) return;
+    const q = !!this.weapon && (this.weapon.type === 'bow' || this.weapon.type === 'crossbow');
+    if (!!this.look.quiver === q) return;
+    this.look = { ...this.look, quiver: q };
+    this.spr = humanSprites(this.look);
   }
 
   attach() { addObject(this); }
@@ -157,17 +214,78 @@ export class Actor {
     this.t += dt;
     this.sortZ = e.pos.z;
     const spd = st.moveSpeed || 0;
-    if (spd > 0.4) this.ph += dt * Math.max(6, Math.min(13, spd * 1.5));
+    const moving = spd > 0.5 && !e.dead;
+    // run cycle advances with distance so feet don't slide; 6 frames per stride
+    if (moving) {
+      const cyc = this.spec.type === 'human' ? Math.max(1.3, Math.min(4.4, spd / (st.sprint ? 2.5 : 1.95))) : Math.max(1.2, Math.min(4, spd / 2.6));
+      this.ph += dt * cyc * 6;
+    }
     if (this.mount && spd > 0.4) this.mount.ph += dt * Math.max(6, Math.min(14, spd * 0.9));
+    // footsteps: dust at each contact frame
+    const fi = Math.floor(this.ph) % 6;
+    if (moving && fi !== this.stepFi && (fi === 0 || fi === 3) && !st.ride && !this.mount) this.footDust(fi === 0 ? -1 : 1, st.sprint ? 1.6 : 1);
+    this.stepFi = fi;
+    // start lean, stop settle (with a little puff)
+    if (moving && !this.moving) this.startT = 0.14;
+    if (!moving && this.moving && !st.action && !e.dead) { this.settleT = 0.13; if (spd < 0.5) this.footDust(0, 0.8); }
+    this.moving = moving;
+    this.startT = Math.max(0, this.startT - dt); this.settleT = Math.max(0, this.settleT - dt);
+    // turning lean (side view)
+    if (this.prevFacing !== null && dt > 0) {
+      const dF = angDiff(this.prevFacing, e.facing) / dt;
+      const target = moving ? Math.max(-1, Math.min(1, dF * 0.12)) : 0;
+      this.turn += (target - this.turn) * Math.min(1, dt * 12);
+    }
+    this.prevFacing = e.facing;
+    // blinking
+    this.blinkT -= dt;
+    if (this.blinkT <= 0) { this.blink = 0.13; this.blinkT = 2.2 + Math.random() * 3.5; }
+    this.blink = Math.max(0, this.blink - dt);
+    // attack start detection -> blend from the previous pose
+    const kind = st.action ? st.kind : null, u = st.actionT || 0;
+    if (kind && (kind !== this.prevKind || u < this.prevU - 0.04)) { this.blend = this.pose ? { ...this.pose } : null; this.atkT = 0; this.trail.length = 0; }
+    if (kind) this.atkT += dt;
+    this.prevKind = kind; this.prevU = u;
+    // dodge: dust on take-off and landing
+    const dodging = st.dodgeT !== undefined && st.dodgeT >= 0;
+    if (dodging && !this.dodgeDust) { this.dodgeDust = true; this.footDust(0, 1.4); }
+    if (!dodging && this.dodgeDust) { this.dodgeDust = false; this.footDust(0, 1.2); this.settleT = 0.12; }
+    // death: a thump of dust when the body hits the ground
+    if (e.dead && !this.deathDust && (e.deathT || 0) > 0.34) { this.deathDust = true; this.footDust(0, 2); }
+    if (!e.dead) this.deathDust = false;
     // afterimages while rolling / dashing / charging
-    const dashing = (st.dodgeT !== undefined && st.dodgeT >= 0) || st.charging || st.dash;
+    const dashing = dodging || st.charging || st.dash;
     this.ghostT -= dt;
-    if (dashing && this.ghostT <= 0 && this._lastBody) {
-      this.ghostT = 0.03;
-      this.ghosts.push({ ...this._lastBody, life: 0.2, wx: e.pos.x, wz: e.pos.z, wh: e.pos.y - view.ground(e.pos.x, e.pos.z) });
-      if (this.ghosts.length > 8) this.ghosts.shift();
+    if (dashing && this.ghostT <= 0 && this._lastDraw) {
+      this.ghostT = 0.035;
+      this.ghosts.push({ parts: this._lastDraw, life: 0.22, wx: e.pos.x, wz: e.pos.z, wh: e.pos.y - view.ground(e.pos.x, e.pos.z) });
+      if (this.ghosts.length > 7) this.ghosts.shift();
     }
     for (let i = this.ghosts.length - 1; i >= 0; i--) { this.ghosts[i].life -= dt; if (this.ghosts[i].life <= 0) this.ghosts.splice(i, 1); }
+  }
+
+  // pixel dust puffs at the feet (lit, not additive); n scales the amount
+  footDust(side, n = 1) {
+    const e = this.ent;
+    if (e.flying || this.hidden || this.kind === 'wraith' || this.kind === 'eye' || this.kind === 'flyer' || this.kind === 'serpent' || this.kind === 'blob') return;
+    const sx = e.pos.x * PPU - view.x0, sy = e.pos.z * PPU - view.y0;
+    if (sx < -20 || sy < -20 || sx > view.W + 20 || sy > view.H + 20) return;
+    if (e.swimming || e.wading) return;
+    const gy = view.ground(e.pos.x, e.pos.z);
+    if (e.pos.y - gy > 0.4) return;
+    const f = e.facing, dx = Math.sin(f), dz = Math.cos(f);
+    const big = Math.min(2.4, (this.k || 1) * (this.kind === 'quadruped' || this.kind === 'dragon' ? 1.4 : 1));
+    const count = Math.max(1, Math.round((1 + Math.random()) * n));
+    for (let i = 0; i < count; i++) {
+      const a = Math.random() * TAU;
+      const ox = side ? -dz * side * 0.18 : 0, oz = side ? dx * side * 0.18 : 0;
+      particle({
+        x: e.pos.x + ox - dx * 0.15 + Math.cos(a) * 0.12 * big, y: gy + 0.05, z: e.pos.z + oz - dz * 0.15 + Math.sin(a) * 0.08 * big,
+        vx: -dx * (0.8 + Math.random()) + Math.cos(a) * 0.7, vy: 0.9 + Math.random() * 0.7, vz: -dz * (0.8 + Math.random()) + Math.sin(a) * 0.4,
+        life: 0.32 + Math.random() * 0.22, size: (0.24 + Math.random() * 0.12) * big, size1: 0.06,
+        color: '#d8ccb4', color2: '#a89c88', alpha: 0.75, additive: false, gravity: 2.5, drag: 4,
+      });
+    }
   }
 
   // view with hysteresis so diagonals don't flicker between sprites
@@ -186,39 +304,52 @@ export class Actor {
     return v;
   }
 
-  // -------------------------------------------------------------- drawing
+  // -------------------------------------------------------------- shadows
+  // contact blob under the feet (always), bigger and softer when there is no sun to cast from
   shadow(ctx) {
     if (this.hidden || this.ent.removed) return;
     const e = this.ent;
     const x = Math.round(e.pos.x * PPU - view.x0), y = Math.round(e.pos.z * PPU - view.y0);
-    let rx = this.spec.type === 'human' ? 5 * this.k : Math.max(3, Math.round(this.heightPx * (this.kind === 'serpent' ? 0.5 : 0.42)));
-    if (this.kind === 'quadruped' || this.kind === 'dragon' || this.kind === 'arachnid') rx = Math.round(rx * 1.45);
-    if (this.mount) rx = Math.round(9 * this.mount.k * (this.mount.spr.height / 16));
-    const h = e.pos.y - view.ground(e.pos.x, e.pos.z);
+    let rx = this.spec.type === 'human' ? 4.5 * this.k * (this.spr.m ? this.spr.m.torsoW / 8 : 1) : Math.max(3, this.heightPx * (this.kind === 'serpent' ? 0.5 : 0.42));
+    if (this.kind === 'quadruped' || this.kind === 'dragon' || this.kind === 'arachnid') rx *= 1.45;
+    if (this.mount) rx = 9 * this.mount.k * (this.mount.spr.height / 16);
+    const h = e.pos.y - view.ground(e.pos.x, e.pos.z) + (this.hoverPx || 0) / PPU;
     if (h < -0.3) return;
-    const fade = h > 0.5 ? Math.max(0.35, 1 - h * 0.12) : 1;
-    const ry = Math.max(2, Math.round(rx * 0.38));
-    const cv = shadowCv(Math.round(rx * fade), Math.round(ry * fade));
-    ctx.globalAlpha = (this.ent.dead ? Math.max(0, 1 - this.ent.deathT * 0.5) : 1) * this.alpha;
-    ctx.drawImage(cv, x - Math.round(rx * fade), y - Math.round(ry * fade));
-    ctx.globalAlpha = 1;
+    const fade = h > 0.3 ? Math.max(0.3, 1 - h * 0.14) : 1;
+    const noSun = !sun.cast || sun.a < 0.2;
+    const soft = noSun ? 1.25 : 0.9;
+    const a = (e.dead ? Math.max(0, 1 - e.deathT * 0.5) : 1) * this.alpha * (noSun ? 1 : 0.85);
+    contactBlob(ctx, x, y, rx * fade * soft, Math.max(1.5, rx * 0.36 * fade * soft), a);
   }
 
+  castShadow(sctx) {
+    const s = this.shadowInfo;
+    if (!s || this.hidden || this.ent.removed || !sun.cast) return;
+    if (this.ent.dead && this.ent.deathT > 2) return;
+    for (const b of s.bodies) castSprite(sctx, b.p, b.x, b.y, { h: b.h, k: b.k });
+    for (const l of s.lines) castLine(sctx, l[0], l[1], l[2], l[3], l[4], l[5], l[6]);
+  }
+
+  // -------------------------------------------------------------- drawing
   draw(ctx) {
     this.ops.length = 0;
+    this.shadowInfo = null;
     if (this.hidden) return;
     const e = this.ent;
     if (e.dead && e.deathT > (e.isPlayer ? 1e9 : 2.6) && Math.floor(e.deathT * 14) % 2) return;
     const x = Math.round(e.pos.x * PPU - view.x0);
     const h = e.pos.y - view.ground(e.pos.x, e.pos.z);
     const y = Math.round(e.pos.z * PPU - view.y0 - h * PPU);
-    // ghosts first (behind)
-    for (const g of this.ghosts) {
+    // afterimages first (behind), tinted cool and fading
+    if (!this._xray) for (const g of this.ghosts) {
       const gx = Math.round(g.wx * PPU - view.x0), gy = Math.round(g.wz * PPU - view.y0 - g.wh * PPU);
-      ctx.globalAlpha = (g.life / 0.2) * 0.45 * this.alpha;
-      blit(ctx, variant(g.p, 'ghost'), gx + g.dx, gy + g.dy, g.k, g.rot, g.flip);
+      ctx.globalAlpha = (g.life / 0.22) * 0.5 * this.alpha;
+      for (const pt of g.parts) blit(ctx, variant(pt.p, 'ghost'), gx + pt.dx, gy + pt.dy, pt.k, pt.rot, pt.flip);
     }
     ctx.globalAlpha = this.alpha;
+    this._draws = this._xray ? null : [];
+    this.shadowInfo = { bodies: [], lines: [] };
+    this._gx = x; this._gy = Math.round(e.pos.z * PPU - view.y0); this._gh = Math.round(h * PPU);
     if (h < -0.05) {
       // burrowing: only what is above the ground line shows
       ctx.save();
@@ -227,23 +358,25 @@ export class Actor {
       ctx.clip();
       if (this.spec.type === 'human') this.drawHuman(ctx, x, y); else this.drawCreature(ctx, x, y);
       ctx.restore();
+      this.shadowInfo = null;
     } else if (this.spec.type === 'human') this.drawHuman(ctx, x, y);
     else this.drawCreature(ctx, x, y);
     ctx.globalAlpha = 1;
+    if (this._draws && this._draws.length) this._lastDraw = this._draws;
   }
 
-  // body blit with flash / tint / aura handling, recording an emissive op
   // redraw the actor as an outline (used when something stands in front of the player)
   drawXray(ctx) {
     if (this.hidden || this.ent.dead) return;
-    const ops = this.ops, ghosts = this.ghosts, prev = this.prevRot;
+    const ops = this.ops, ghosts = this.ghosts, pose = this.pose, trail = this.trail.slice(), si = this.shadowInfo, ld = this._lastDraw, tip = this._tipPx, hand = this._hand;
     this.ops = []; this.ghosts = []; this._xray = true;
     ctx.globalAlpha = 0.85;
     this.draw(ctx);
     ctx.globalAlpha = 1;
-    this._xray = false; this.ops = ops; this.ghosts = ghosts; this.prevRot = prev;
+    this._xray = false; this.ops = ops; this.ghosts = ghosts; this.pose = pose; this.trail = trail; this.shadowInfo = si; this._lastDraw = ld; this._tipPx = tip; this._hand = hand;
   }
 
+  // sprite blit with flash / tint / aura handling; records emissive ops, ghost parts and shadow casters
   body(ctx, fr, x, y, k, rot, flip, opts = {}) {
     let p = fr.pix;
     if (this._xray) { blit(ctx, variant(p, 'xray'), x, y, k, rot, flip); return; }
@@ -254,7 +387,8 @@ export class Actor {
     else if (this.aura && !opts.noAura) p = variant(p, 'aura:' + this.aura);
     blit(ctx, p, x, y, k, rot, flip);
     if (fr.emis && this.flash !== 'stone' && this.flash !== 'frozen') this.ops.push([fr.emis, x, y, k, rot, flip, ctx.globalAlpha]);
-    if (opts.record) this._lastBody = { p: fr.pix, dx: x - this._ax, dy: y - this._ay, k, rot, flip };
+    if (opts.record !== false && this._draws) this._draws.push({ p: fr.pix, dx: x - this._ax, dy: y - this._ay, k, rot, flip });
+    if (opts.cast && this.shadowInfo && !rot) this.shadowInfo.bodies.push({ p: flip ? variant(fr.pix, 'flip') : fr.pix, x, y: opts.cast.y, h: opts.cast.h, k });
   }
 
   emissive(ctx) {
@@ -267,143 +401,209 @@ export class Actor {
 
   glow(ctx) {
     if (this.hidden || !this._glows) return;
-    const s = view.scale;
     for (const g of this._glows) glowPx(ctx, g[0], g[1], g[2], g[3], g[4] * this.alpha);
-    void s;
+  }
+
+  // ---------------------------------------------------------------- limbs (runtime arms)
+  // a 2-3px arm from the shoulder to the hand with an outline, a lit edge and a cuff
+  limb(ctx, x0, y0, x1, y1, k, P, w) {
+    if (this._xray) return;
+    const n = Math.max(1, Math.round(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) / k));
+    const hw = w >> 1;
+    const pts = [];
+    for (let i = 0; i <= n; i++) pts.push([Math.round(x0 + (x1 - x0) * i / n), Math.round(y0 + (y1 - y0) * i / n)]);
+    ctx.fillStyle = P.o;
+    for (const [x, y] of pts) ctx.fillRect(x - (hw + 1) * k, y - (hw + 1) * k, (w + 2) * k, (w + 2) * k);
+    ctx.fillStyle = P.s;
+    for (const [x, y] of pts) ctx.fillRect(x - hw * k, y - hw * k, w * k, w * k);
+    // shading: lit left edge, shadowed lower-right edge
+    ctx.fillStyle = P.sd;
+    for (const [x, y] of pts) ctx.fillRect(x + (w - 1 - hw) * k, y + (w - 1 - hw) * k, k, k);
+    ctx.fillStyle = P.sl;
+    for (let i = 0; i < pts.length - 1; i++) ctx.fillRect(pts[i][0] - hw * k, pts[i][1] - hw * k, k, k);
+    // cuff just before the hand
+    if (n >= 3) { const c = pts[n - 1]; ctx.fillStyle = P.cf; ctx.fillRect(c[0] - hw * k, c[1] - hw * k, w * k, k); }
+  }
+  hand(ctx, x, y, k, P, w) {
+    if (this._xray) return;
+    const s = Math.max(2, w);
+    const hx = x - (s >> 1) * k, hy = y - (s >> 1) * k;
+    ctx.fillStyle = P.ho; ctx.fillRect(hx - k, hy - k, (s + 2) * k, (s + 2) * k);
+    ctx.fillStyle = P.h; ctx.fillRect(hx, hy, s * k, s * k);
+    ctx.fillStyle = P.hd; ctx.fillRect(hx + (s - 1) * k, hy + (s - 1) * k, k, k);
+    ctx.fillStyle = P.hl; ctx.fillRect(hx, hy, k, k);
   }
 
   // ================================================================ humanoids
   drawHuman(ctx, x, y) {
-    const e = this.ent, st = e.st, k = this.k;
+    const e = this.ent, st = e.st, k = this.k, m = this.spr.m;
     this._ax = x; this._ay = y;
     this._glows = null;
-    const f = e.facing;
-    const vName = this.pickView(f);
-    const V = this.spr.views[vName];
-    const flip = vName === 'side' && this.flip;
-    const m = this.spr.m;
-    const dirx = Math.sin(f), dirz = Math.cos(f);
-    const alpha = screenAngle(f);
-    const sg = dirx < -0.05 || (Math.abs(dirx) <= 0.05 && dirz < 0) ? -1 : 1;     // which side the weapon rests on
     const kind = st.action ? st.kind : null;
     const u = clamp01(st.actionT || 0);
     const su = st.strikeU || 0.5;
+    const spd = st.moveSpeed || 0;
+    const moving = this.moving;
+    const wpn = this.weapon && !e.dead ? this.weapon : null;
+    const wtype = wpn ? wpn.type : null;
+    // spinning attacks turn the whole body through the views
+    let facing = e.facing;
+    if (st.spin) facing = this.t * 17;
+    const vName = this.pickView(facing);
+    const flip = vName === 'side' && this.flip;
+    const alpha = screenAngle(facing);
+    const dx = Math.cos(alpha), dy = Math.sin(alpha);
+    const side = { x: Math.cos(alpha + Math.PI / 2), y: Math.sin(alpha + Math.PI / 2) };   // the weapon-hand side
+    const dodging = st.dodgeT !== undefined && st.dodgeT >= 0;
+    const hurt = (st.hitT || 0) > 0.35 && !e.dead && !kind;
 
     // ---- mount underneath
-    let bx = x, by = y;
+    let bx = x, by = y, rideH = 0;
     if (this.mount && st.ride) {
       const M = this.mount, MV = M.spr.views.side;
-      const fr = (st.moveSpeed || 0) > 0.4 ? MV.run[Math.floor(M.ph) % 4] : MV.idle[Math.floor(this.t * 1.5) % 2];
-      this.body(ctx, fr, x, y, M.k, 0, this.flip, { noAura: true });
+      const fr = spd > 0.4 ? MV.run[Math.floor(M.ph) % 4] : MV.idle[Math.floor(this.t * 1.5) % 2];
+      this.body(ctx, fr, x, y, M.k, 0, this.flip, { noAura: true, cast: { y: this._gy, h: this._gh } });
       const seat = M.spr.seat || [0, -14];
       bx = x + (this.flip ? -seat[0] : seat[0]) * M.k;
-      by = y + seat[1] * M.k + (FEET - m.legTop) * k + ((st.moveSpeed || 0) > 0.4 && Math.floor(M.ph) % 2 ? -1 : 0);
+      by = y + seat[1] * M.k + (FEET - m.legTop) * k + (spd > 0.4 && Math.floor(M.ph) % 2 ? -1 : 0);
+      rideH = y - by;
     }
 
-    // ---- frame
-    let anim = 'idle', fi = Math.abs(Math.floor(this.t * 1.7 + (st.seed || 0))) % 2;
-    const casting = kind && CASTS.has(kind) && u > 0.18 && u < 0.88;
-    if (e.dead) anim = 'hurt';
-    else if (st.ride) anim = 'ride';
-    else if ((st.hitT || 0) > 0.55 && !kind) anim = 'hurt';
-    else if (casting) anim = 'cast';
-    else if ((st.moveSpeed || 0) > 0.4) { anim = 'run'; fi = Math.floor(this.ph) % 4; }
-    const frames = V[anim] || V.idle;
-    const fr = frames[fi % frames.length];
-
-    // ---- body motion: lunge along the aim, recoil when hit, roll, death fall
-    let lx = 0, ly = 0, rot = 0;
-    const lunge = kind ? lungeFor(kind, u, su) : 0;
-    lx += dirx * lunge * k; ly += dirz * lunge * k;
-    if ((st.hitT || 0) > 0.35 && !e.dead) { lx -= dirx * k; ly -= dirz * k; }
-    let pivotUp = 0;
-    if (st.dodgeT !== undefined && st.dodgeT >= 0) {
-      rot = easeIO(clamp01(st.dodgeT)) * TAU * (dirx < 0 ? -1 : 1);
-      pivotUp = Math.round((FEET - (m.legTop + m.headTop) / 2) * k);
+    // ---- body pose
+    const pose = { legs: 'stand', ph: 0, bob: 0, lean: 0, hdx: 0, hdy: 0, cape: Math.floor(this.t * 3.2) % 4, sway: 0, face: this.blink > 0 ? 1 : 0, wing: Math.floor(this.t * 9) % 2 };
+    let rot = 0, roll = 0, lift = 0, offX = 0, offY = 0;
+    let deathPhase = -1;
+    const atk = kind ? attackPose(kind, u, su, wtype) : null;
+    if (e.dead) {
+      const dt = e.deathT || 0;
+      deathPhase = dt < 0.12 ? 0 : dt < 0.3 ? 1 : 2;
+      if (deathPhase === 0) { pose.legs = 'stance'; pose.face = 2; pose.hdy = -1; offX = -dx * 2; offY = -dy * 2; }
+      else if (deathPhase === 1) { pose.legs = 'kneel'; pose.bob = 3; pose.face = 2; offX = -dx * 2; offY = -dy * 2; }
+      else { pose.legs = 'stand'; pose.face = 1; }
+    } else if (st.ride) {
+      pose.legs = 'ride';
+    } else if (dodging) {
+      const du = clamp01(st.dodgeT);
+      if (du < 0.14) { pose.legs = 'lunge'; pose.lean = 2; pose.bob = 1; }
+      else if (du < 0.84) { pose.legs = 'tuck'; pose.bob = 3; pose.hdy = 1; roll = Math.min(3, Math.floor((du - 0.14) / 0.7 * 4)) + 1; lift = Math.round(Math.sin((du - 0.14) / 0.7 * Math.PI) * 3); }
+      else { pose.legs = 'stance'; pose.bob = 2; }
+    } else if (atk) {
+      pose.legs = atk.legs; pose.bob = atk.bob; pose.lean = atk.lean; if (atk.face) pose.face = atk.face;
+      offX = dx * atk.lunge; offY = dy * atk.lunge;
+      if (moving) { pose.legs = 'run'; pose.ph = Math.floor(this.ph) % 6; }
+    } else if (st.spin) {
+      pose.legs = 'stance'; pose.bob = 1;
+    } else if (hurt) {
+      pose.legs = 'stance'; pose.face = 2; pose.hdy = -1; pose.lean = -1;
+      const r = Math.round(((st.hitT || 0) - 0.35) * 3);
+      offX = -dx * r; offY = -dy * r;
+    } else if (st.block) {
+      pose.legs = 'stance'; pose.bob = 1;
+    } else if (moving) {
+      const sprint = !!st.sprint;
+      pose.legs = sprint ? 'sprint' : 'run';
+      pose.ph = Math.floor(this.ph) % 6;
+      pose.bob = [0, 1, -1, 0, 1, -1][pose.ph];
+      pose.lean = sprint ? 2 : 1;
+      if (this.startT > 0) pose.lean += 1;
+      pose.sway = sprint ? 2 : 1;
+      pose.cape = Math.floor(this.ph / 1.5) % 4;
+      if (sprint) pose.hdy = 1;
+    } else if (this.settleT > 0) {
+      pose.legs = 'stance'; pose.bob = this.settleT > 0.06 ? 2 : 1;
+    } else if (st.combat) {
+      pose.legs = 'stance'; pose.bob = Math.floor(this.t * 2.2 + (st.seed || 0)) % 2;
+    } else {
+      // breathing: shoulders drop a pixel every other beat
+      pose.bob = Math.floor(this.t * 1.5 + (st.seed || 0)) % 2;
     }
-    if (e.dead) rot = (this._deathSide || (this._deathSide = (e.id % 2 ? 1 : -1))) * (Math.PI / 2) * easeOut(clamp01(e.deathT * 3.2));
-    // fully charged heavy attack: a 1px tremble
-    if (kind && (st.charge || 0) > 0.9) lx += Math.floor(this.t * 30) % 2;
-    lx = Math.round(lx); ly = Math.round(ly);
-    const px = bx + lx, py = by + ly;
+    if (vName !== 'side') pose.lean = 0;
+    else if (Math.abs(this.turn) > 0.5 && moving) pose.lean += 1;
+    if (pose.lean < -1) pose.lean = -1;
+    const fr = this.spr.frame(vName, pose);
+    const lx = Math.round(offX), ly = Math.round(offY);
+    const px = bx + lx * k, py = by + (ly - lift) * k;
 
-    // ---- weapon pose
-    const wpn = this.weapon;
-    let wspr = null, wrot = 0, reach = 0, lift = 0, smear = false;
-    const handPose = casting ? 'cast' : anim === 'ride' ? 'ride' : 'idle';
-    const hand = handOffset(m, vName, flip, handPose);
-    if (wpn && !e.dead) {
-      const type = wpn.type;
-      const pole = POLES.has(type);
-      const combat = st.combat || !!kind;
-      let rest = pole && !kind ? -Math.PI / 2 + sg * 0.3 - alpha : type === 'bow' ? 0 : sg * (combat ? 0.55 : 0.95);
-      if (type === 'wand') rest = sg * 0.6;
-      if (pole && combat && !kind) rest = sg * 0.35;
-      wrot = alpha + rest;
-      let draw = 0;
-      if (st.spin) { wrot = this.t * 28; smear = true; }
-      else if (st.block) { wrot = alpha - sg * 1.15; reach = 1; }
-      else if (kind) {
-        const P = swingFor(kind, u, su, sg, rest, alpha);
-        wrot = alpha + P.rot; reach = P.reach; lift = P.lift; smear = P.smear; draw = P.draw || 0;
-        if (P.abs !== undefined) wrot = P.abs;
+    // ---- rig: shoulders and hands in screen px relative to the pivot (before upscale)
+    const P = this.rig(vName, flip, pose, atk, kind, u, su, { dx, dy, side, alpha, moving, dodging, hurt, deathPhase });
+    this.pose = P.save;
+
+    // ---- compose (back-to-front)
+    const L = limbPal(this.spr.pal, this.flash === 'white' || this.flash === 'frozen' || this.flash === 'stone' || this.flash === 'hurt' ? this.flash : null, this.aura);
+    const w = this.spr.pal.w;
+    const S = (q) => [px + Math.round(q[0]) * k, py + Math.round(q[1]) * k];
+    // shadow anchoring: the ground line under the body and the pivot's height above it
+    const gY = this._gy + ly * k, gH = this._gh + rideH + lift * k;
+    const lines = this.shadowInfo ? this.shadowInfo.lines : null;
+    const castArm = (s0, h0) => { if (lines && !roll && deathPhase < 2) lines.push([px + s0[0] * k, gY, gH - s0[1] * k, px + h0[0] * k, gY, gH - h0[1] * k, w * k]); };
+    const drawArm = (s0, h0) => { const a = S(s0), b = S(h0); this.limb(ctx, a[0], a[1], b[0], b[1], k, L, w); castArm(s0, h0); };
+    const drawFist = (h0) => { const b = S(h0); this.hand(ctx, b[0], b[1], k, L, w); };
+    const body = () => {
+      const src = flip ? variant(fr.pix, 'flip') : fr.pix;
+      const ccx = CX + (flip ? -1 : 0), ccy = Math.round((m.torsoTop + m.legTop) / 2);
+      if (roll) {
+        // tucked roll: pixel-exact quarter turns around the body centre
+        const dir = dx < -0.05 || (Math.abs(dx) <= 0.05 && dy < 0) ? -1 : 1;
+        const q = ((dir > 0 ? roll : 4 - roll) % 4 + 4) % 4;
+        const R = rotFrame(src, q, ccx, ccy);
+        this.body(ctx, { pix: R.pix, emis: null }, px + R.dx * k, py - (FEET - ccy) * k + R.dy * k, k, 0, false, {});
+        return;
       }
-      if (type === 'bow') draw = kind === 'bowdraw' ? Math.round(u * 2) / 2 : 0;
-      if (type === 'crossbow') draw = kind === 'xbow' && u < 0.6 ? 0 : 1;
-      wspr = weaponSprite(type === 'bow' || type === 'crossbow' ? { ...wpn, draw } : wpn);
-    }
-    const wx = px + Math.round(hand[0] * k + dirx * reach * k);
-    const wy = py + Math.round((hand[1] - lift) * k + dirz * reach * k);
-    const weaponBehind = vName === 'up' || (vName === 'side' && wpn && POLES.has(wpn.type) && !kind && !st.combat);
-
-    // ---- shield & tome positions
-    const off = handOffset(m, vName, flip, 'off');
+      if (deathPhase === 2) {
+        // lying on the ground: the standing frame turned a quarter, with a small landing bounce
+        const dt = e.deathT;
+        const sideSgn = this._deathSide || (this._deathSide = (e.id % 2 ? 1 : -1));
+        const q = sideSgn > 0 ? 1 : 3;
+        const b = dt < 0.42 ? Math.round(Math.sin((dt - 0.3) / 0.12 * Math.PI) * 2) : 0;
+        const R = rotFrame(src, q, ccx, ccy);
+        const half = Math.ceil(m.torsoW / 2) + 1;
+        this.body(ctx, { pix: R.pix, emis: null }, px + R.dx * k, py - (half + b) * k + R.dy * k, k, 0, false, {});
+        return;
+      }
+      this.body(ctx, fr, px, py, k, 0, flip, { cast: { y: gY, h: gH } });
+    };
     const shieldUp = !!st.block || kind === 'bash';
     const drawShield = () => {
       if (!this.shield || e.dead) return;
       let sp = vName === 'up' ? this.shield.back : vName === 'side' ? this.shield.edge : this.shield.front;
-      let sx0 = off[0], sy0 = off[1] + 1;
-      // side view at rest: the shield arm is on the far side, so it hangs behind the back
-      if (vName === 'side' && !shieldUp) sx0 = flip ? 2 : -2;
-      if (st.block || kind === 'bash') {
-        sp = vName === 'up' ? this.shield.back : this.shield.front;
-        const r = kind === 'bash' ? lerp(2, 6, Math.sin(Math.PI * clamp01(u * 1.4))) : 3;
-        sx0 = vName === 'side' ? (flip ? -3 : 3) : 0; sy0 = -Math.round((FEET - m.torsoTop) * 0.6);
-        sx0 += Math.round(dirx * r); sy0 += Math.round(dirz * r);
-      }
-      this.body(ctx, { pix: sp, emis: null }, px + sx0 * k, py + sy0 * k, k, 0, false, { noAura: true });
+      if (shieldUp) sp = vName === 'up' ? this.shield.back : this.shield.front;
+      const h0 = P.off;
+      this.body(ctx, { pix: sp, emis: null }, px + Math.round(h0[0] + (shieldUp ? 0 : 0)) * k, py + Math.round(h0[1] + 1) * k, k, 0, false, { noAura: true });
     };
     const drawTome = () => {
       if (!this.tome || e.dead) return;
       const bob = Math.round(Math.sin(this.t * 2.6) * 1.5);
-      const tx = px + (off[0] + (off[0] >= 0 ? 4 : -4)) * k, ty = py + (off[1] - 8 + bob) * k;
-      this.body(ctx, this.tome, tx, ty, k, 0, off[0] < 0, { noAura: true });
+      const so = P.offS;
+      const sx = so[0] + (so[0] >= 0 ? 4 : -4), sy = so[1] - 6 + bob;
+      const tx = px + sx * k, ty = py + sy * k;
+      this.body(ctx, this.tome, tx, ty, k, 0, sx < 0, { noAura: true });
       this._glows = this._glows || [];
       this._glows.push([tx, ty - 4 * k, '#ffd080', 5 * k, 0.35]);
+      if (lines) lines.push([tx - 3 * k, gY, gH - sy * k + 4 * k, tx + 3 * k, gY, gH - sy * k + 4 * k, 2 * k]);
     };
+    // weapon sprite + smear trail
+    let wspr = null;
+    if (wpn) {
+      let draw = 0;
+      if (wtype === 'bow') draw = kind === 'bowdraw' ? Math.round(u * 2) / 2 : 0;
+      if (wtype === 'crossbow') draw = kind === 'xbow' && u < 0.6 ? 0 : 1;
+      wspr = weaponSprite(wtype === 'bow' || wtype === 'crossbow' ? { ...wpn, draw } : wpn);
+    }
+    const W = P.weapon;   // { x, y, a } grip position + angle, or null
     const drawWeapon = () => {
-      if (!wspr || wspr.none) return;
-      let rr = wrot, p = wspr.pix, em = wspr.emis, fl = false;
+      if (!wspr || wspr.none || !W) return;
+      const wx = px + Math.round(W.x) * k, wy = py + Math.round(W.y) * k;
+      let rr = W.a, fl = false;
       // keep blades right side up when pointing left
       if (Math.cos(rr) < 0) { fl = true; rr += Math.PI; }
-      // swing smear: two pale echoes trailing the blade through the strike
-      if (smear && this.prevRot !== null && !this._xray) {
-        let d = wrot - this.prevRot;
-        while (d > Math.PI) d -= TAU; while (d < -Math.PI) d += TAU;
-        if (Math.abs(d) > 0.08) for (let i = 1; i <= 3; i++) {
-          let r2 = wrot - d * (i / 3), f2 = false;
-          if (Math.cos(r2) < 0) { f2 = true; r2 += Math.PI; }
-          ctx.globalAlpha = this.alpha * (0.5 - i * 0.12);
-          blit(ctx, variant(p, 'smear'), wx, wy, k, r2, f2);
-        }
-        ctx.globalAlpha = this.alpha;
-      }
-      this.body(ctx, { pix: p, emis: em }, wx, wy, k, rr, fl, { noAura: true });
+      if (P.smear && !this._xray) this.drawSmear(ctx, wspr, wx, wy, W.a, k, wpn);
+      this.body(ctx, { pix: wspr.pix, emis: wspr.emis }, wx, wy, k, rr, fl, { noAura: true });
       const len = (wspr.len || 8) * k;
-      const tipx = wx + Math.cos(wrot) * len, tipy = wy + Math.sin(wrot) * len;
+      const tipx = wx + Math.cos(W.a) * len, tipy = wy + Math.sin(W.a) * len;
       this._tipPx = [tipx - x, tipy - y];
+      if (lines && deathPhase < 0 && !roll) lines.push([wx, gY, gH - W.y * k, tipx, gY, gH - W.y * k - Math.sin(W.a) * len, k]);
       if (wspr.orb) {
-        const ox = wx + Math.cos(wrot) * wspr.orb[0] * k, oy = wy + Math.sin(wrot) * wspr.orb[0] * k;
+        const ox = wx + Math.cos(W.a) * wspr.orb[0] * k, oy = wy + Math.sin(W.a) * wspr.orb[0] * k;
         this._tipPx = [ox - x, oy - y];
         this._glows = this._glows || [];
         this._glows.push([ox, oy, wspr.orbColor, (kind && CASTS.has(kind) ? 9 : 6) * k, kind && CASTS.has(kind) ? 0.75 : 0.45]);
@@ -411,27 +611,284 @@ export class Actor {
         this._glows = this._glows || [];
         this._glows.push([(wx + tipx) / 2, (wy + tipy) / 2, ELEM_GLOW[wpn.element], 6 * k, 0.3]);
       }
+      if (!this._xray) { this.trail.push({ a: W.a }); if (this.trail.length > 4) this.trail.shift(); }
     };
+    if (!P.smear && !this._xray) this.trail.length = 0;
 
-    // ---- compose (back-to-front)
-    this._tipPx = [hand[0] * k, hand[1] * k];
-    if (weaponBehind) drawWeapon();
-    if (vName === 'up') { drawShield(); drawTome(); }
-    else if (vName === 'side' && !shieldUp) drawShield();
-    const bodyY = py + (pivotUp && rot ? -pivotUp : 0);
-    if (rot && pivotUp) {
-      // roll around the body centre
-      ctx.save(); ctx.translate(px, bodyY); ctx.rotate(rot);
-      const n = this.ops.length;
-      this.body(ctx, fr, 0, pivotUp, k, 0, flip, { record: false });
-      this.ops.length = n;
-      ctx.restore();
-      this._lastBody = { p: fr.pix, dx: px - x, dy: py - y, k, rot: 0, flip };
-    } else this.body(ctx, fr, px, py, k, rot, flip, { record: true });
-    if (vName !== 'up') { if (vName !== 'side' || shieldUp) drawShield(); drawTome(); }
-    if (!weaponBehind) drawWeapon();
-    this.prevRot = wspr ? wrot : null;
-    this._hand = [hand[0] * k + lx, hand[1] * k + ly];
+    this._tipPx = [P.main[0] * k, P.main[1] * k];
+    const arms = !roll && deathPhase < 2;
+    const mainArm = () => { if (arms) drawArm(P.mainS, P.main); };
+    const offArm = () => { if (arms && !P.offHidden) drawArm(P.offS, P.off); };
+    const mainFist = () => { if (arms) drawFist(P.main); };
+    const offFist = () => { if (arms && !P.offHidden && !(this.shield && !e.dead)) drawFist(P.off); };
+    const shieldFirst = this.shield && !shieldUp;
+    if (vName === 'up') {
+      // facing away: weapon, hands and shield sit behind the body unless hanging at the sides
+      if (P.weaponBehind !== false) drawWeapon();
+      mainArm(); mainFist();
+      offArm(); offFist();
+      drawShield(); drawTome();
+      body();
+      if (P.weaponBehind === false) drawWeapon();
+    } else if (vName === 'side') {
+      // far (off) arm and resting shield behind, near (weapon) arm in front
+      offArm(); offFist();
+      if (shieldFirst) drawShield();
+      if (P.weaponBehind) drawWeapon();
+      body();
+      if (!shieldFirst) drawShield();
+      drawTome();
+      mainArm();
+      if (!P.weaponBehind) drawWeapon();
+      mainFist();
+      if (P.twoHand) { offFist(); }
+    } else {
+      // facing the camera: arms hanging at the sides tuck behind the torso edge
+      if (P.weaponBehind) drawWeapon();
+      if (P.mainBack) mainArm();
+      if (P.offBack) offArm();
+      body();
+      if (!P.offBack) offArm();
+      drawShield(); drawTome();
+      offFist();
+      if (!P.mainBack) mainArm();
+      if (!P.weaponBehind) drawWeapon();
+      mainFist();
+    }
+    // dropped weapon after death
+    if (e.dead && this.weapon && !this._xray) this.drawDropped(ctx, x, y, k);
+    this._hand = [P.main[0] * k + lx * k, P.main[1] * k + ly * k];
+  }
+
+  // pale crescent between the last few blade positions: a solid smear frame, not ghosts
+  drawSmear(ctx, wspr, wx, wy, a, k, wpn) {
+    const tr = this.trail;
+    if (!tr.length) return;
+    const prev = tr[tr.length - 1].a;
+    if (Math.abs(angDiff(prev, a)) < 0.12) return;
+    const col = wpn.element && ELEM_GLOW[wpn.element] ? ELEM_GLOW[wpn.element] : '#fff6e0';
+    const from = Math.max(2, Math.round((wspr.len || 8) * 0.35));
+    const sm = variant(wspr.pix, 'smear:' + col + ':' + from);
+    const fan = (a0, a1, al) => {
+      const dd = angDiff(a0, a1), n = Math.min(16, Math.ceil(Math.abs(dd) / 0.08));
+      ctx.globalAlpha = this.alpha * al;
+      for (let i = 0; i < n; i++) {
+        let r2 = a0 + dd * (i / n), f2 = false;
+        if (Math.cos(r2) < 0) { f2 = true; r2 += Math.PI; }
+        blit(ctx, sm, wx, wy, k, r2, f2);
+      }
+    };
+    if (tr.length > 1) fan(tr[tr.length - 2].a, prev, 0.4);
+    fan(prev, a, 0.9);
+    ctx.globalAlpha = this.alpha;
+  }
+
+  drawDropped(ctx, x, y, k) {
+    const e = this.ent;
+    const wspr = weaponSprite(this.weapon.type === 'bow' || this.weapon.type === 'crossbow' ? { ...this.weapon, draw: 0 } : this.weapon);
+    if (!wspr || wspr.none) return;
+    const t = clamp01((e.deathT || 0) / 0.4);
+    const sideSgn = this._deathSide || 1;
+    const gx = x + (sideSgn * -7) * k, gy = y + 2 * k;
+    const hx = x + (this._hand ? this._hand[0] : 0), hy = y + (this._hand ? this._hand[1] : -10);
+    const arcH = Math.sin(t * Math.PI) * 6 * k;
+    const wx = Math.round(lerp(hx, gx, t)), wy = Math.round(lerp(hy, gy, t) - arcH);
+    const a = lerp(-1.2 * sideSgn, sideSgn > 0 ? 0.25 : Math.PI - 0.25, easeOut(t)) + (t < 1 ? t * 6 * sideSgn : 0);
+    let rr = a, fl = false;
+    if (Math.cos(rr) < 0) { fl = true; rr += Math.PI; }
+    this.body(ctx, { pix: wspr.pix, emis: null }, wx, wy, k, rr, fl, { noAura: true, record: false });
+  }
+
+  // ---------------------------------------------------------------- the humanoid rig
+  // returns shoulders, hands and the weapon grip (px relative to the pivot) for this frame
+  rig(vName, flip, pose, atk, kind, u, su, c) {
+    const st = this.ent.st, m = this.spr.m, wpn = this.weapon && !this.ent.dead ? this.weapon : null;
+    const wtype = wpn ? wpn.type : null;
+    const { dx, dy, side, alpha, moving } = c;
+    const tw = vName === 'side' ? Math.max(5, m.torsoW - 2) : m.torsoW;
+    const bob = pose.bob | 0, lean = vName === 'side' ? pose.lean | 0 : 0;
+    const tyR = m.torsoTop - FEET + bob;
+    const tl = -Math.floor(tw / 2) + lean, tr = tl + tw - 1;
+    const fx = (r) => (flip ? -r - 1 : r);
+    // shoulder anchors (pixel centres of the arm's top)
+    let mainS, offS;
+    const sy = tyR + 1 + m.pad;
+    if (vName === 'down') { mainS = [tl - 1, sy]; offS = [tr + 2, sy]; }
+    else if (vName === 'up') { mainS = [tr + 2, sy]; offS = [tl - 1, sy]; }
+    else { mainS = [fx(lean), sy]; offS = [fx(lean - 2), sy]; }
+    const chest = [fx(lean) + (flip ? 0.5 : -0.5) * 0, tyR + 2];
+    const armL = m.armL;
+    const swingPh = moving ? Math.sin((this.ph / 6) * TAU) : 0;
+    const sprint = !!st.sprint;
+    const A = sprint ? 3 : 2;
+    // relaxed hands: hang under the shoulder, swing along the facing while running
+    const hang = (s, sw) => [s[0] + dx * sw * A * 0.9 + (vName === 'side' ? 0 : 0), s[1] + armL - 1 - Math.abs(sw) * (sprint ? 1.5 : 0.7) + dy * sw * A * 0.5];
+    let main = hang(mainS, -swingPh), off = hang(offS, swingPh);
+    if (vName !== 'side') { main[0] += (vName === 'down' ? -0.4 : 0.4); off[0] += (vName === 'down' ? 0.4 : -0.4); }
+    let weapon = null, smear = false, weaponBehind = vName === 'up', twoHand = false, offHidden = false;
+    let mainBehind = false, offBehind = false;
+    const vec = (a, r) => [Math.cos(a) * r, Math.sin(a) * r];
+    const norm = (v) => { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; };
+    const ang = (v) => Math.atan2(v[1], v[0]);
+    const pole = wtype && POLES.has(wtype);
+    const combat = st.combat || !!kind;
+
+    // ---- weapon at rest / guard
+    if (wpn) {
+      if (wtype === 'bow') {
+        // bow in the off hand; drawn toward the aim when fighting
+        if (combat) { off = [chest[0] + dx * (armL + 1), chest[1] + dy * (armL + 1) - 1]; weapon = { x: off[0], y: off[1], a: alpha, off: true }; main = [off[0] - dx * 3, off[1] - dy * 3]; }
+        else weapon = { x: off[0], y: off[1], a: Math.abs(dx) > 0.3 ? alpha : (vName === 'down' ? 0 : Math.PI), off: true };
+      } else if (wtype === 'crossbow') {
+        const g = combat ? [chest[0] + dx * 3, chest[1] + dy * 3 + 1] : [main[0], main[1]];
+        main = g; weapon = { x: g[0], y: g[1], a: combat ? alpha : ang(norm([dx * 0.6, 1])) };
+        off = [g[0] + dx * 5, g[1] + dy * 5]; twoHand = true;
+      } else if (pole) {
+        if (combat && wtype !== 'staff') {
+          main = [chest[0] - dx * 1 + side.x * 2, chest[1] - dy * 1 + 2 + side.y * 1];
+          const a = ang(norm([dx, dy - 0.25]));
+          weapon = { x: main[0], y: main[1], a };
+          off = [main[0] + Math.cos(a) * 5, main[1] + Math.sin(a) * 5]; twoHand = true;
+        } else {
+          // walking staff / spear held upright at the side
+          main = [mainS[0] + (vName === 'side' ? dx * 2 : 0), mainS[1] + armL - 3];
+          weapon = { x: main[0], y: main[1], a: -Math.PI / 2 + (vName === 'down' ? -0.12 : vName === 'up' ? 0.12 : dx * 0.18) };
+          weaponBehind = vName === 'up' || vName === 'side' && !combat;
+        }
+      } else if (TWO_H.has(wtype)) {
+        // greatsword: two-handed guard forward, or resting on the shoulder
+        if (combat) {
+          main = [chest[0] + dx * 3 + side.x, chest[1] + dy * 2 + 2];
+          const a = ang(norm([dx * 1.0 + side.x * 0.3, dy * 0.8 - 0.75]));
+          weapon = { x: main[0], y: main[1], a };
+          off = [main[0] - Math.cos(a) * 2, main[1] - Math.sin(a) * 2]; twoHand = true;
+        } else {
+          main = [mainS[0] + side.x * 0.5, mainS[1] + 2];
+          const a = ang(norm([-dx * 0.55 + side.x * 0.45, -1 - dy * 0.2]));
+          weapon = { x: main[0], y: main[1], a };
+          weaponBehind = vName === 'up' || (vName === 'down' && false);
+        }
+      } else {
+        // one-handed: relaxed at the side, raised in a guard when fighting
+        if (combat) {
+          main = [mainS[0] + dx * 2.5, mainS[1] + armL - 3 + dy * 1.5];
+          weapon = { x: main[0], y: main[1], a: ang(norm([dx * 0.8 + side.x * 0.7, dy * 0.2 - 0.75 + side.y * 0.3])) };
+        } else {
+          weapon = { x: main[0], y: main[1], a: ang(norm([dx * 0.45 + side.x * 0.3, 1 + side.y * 0.3])) };
+        }
+        if (wtype === 'wand' && combat) weapon.a = ang(norm([dx, dy - 0.4]));
+      }
+      if (weapon && !weapon.off) { weapon.x = main[0]; weapon.y = main[1]; }
+    }
+    // shield arm: held a little forward in a fight, up in front of the chest when blocking
+    if (this.shield) {
+      if (st.block) off = [chest[0] + dx * 4, chest[1] + dy * 3 - 1];
+      else if (combat) off = [offS[0] + dx * 2, offS[1] + armL - 2 + dy];
+    }
+    if (st.block && wpn && !twoHand) { main = [mainS[0] - dx * 1, mainS[1] + armL - 3]; if (weapon) { weapon.x = main[0]; weapon.y = main[1]; weapon.a = ang(norm([side.x * 0.5 + dx * 0.3, -1])); } }
+
+    // ---- attacks
+    if (kind && atk) {
+      const K = atk;
+      const cA = [chest[0], chest[1]];
+      if (K.mode === 'arc' || K.mode === 'thrust') {
+        const ha = alpha + K.phi;
+        let hp = [cA[0] + Math.cos(ha) * K.r, cA[1] + Math.sin(ha) * K.r * 0.85 - K.lift];
+        let wa = ha + K.psi;
+        if (K.mode === 'thrust') wa = alpha + K.psi;
+        if (pole || twoHand || TWO_H.has(wtype)) { twoHand = true; }
+        main = hp;
+        weapon = wpn ? { x: hp[0], y: hp[1], a: wa } : null;
+        if (twoHand && wtype !== 'bow') off = [hp[0] - Math.cos(wa) * (pole ? -4 : 2), hp[1] - Math.sin(wa) * (pole ? -4 : 2)];
+        smear = K.smear && !!wpn && K.mode === 'arc';
+        if (!wpn) {
+          // claws: both hands rake, the off hand trailing the main one
+          const oa = alpha - K.phi * 0.6;
+          off = [cA[0] + Math.cos(oa) * K.r * 0.8, cA[1] + Math.sin(oa) * K.r * 0.7 - K.lift];
+        }
+      } else if (K.mode === 'overhead') {
+        main = [cA[0] + dx * K.r, cA[1] + dy * K.r * 0.85 - K.lift];
+        const vw = norm([-dx * 0.7 + side.x * 0.3, -1 - dy * 0.3]), vm = norm([side.x * 0.9, -0.8 + side.y * 0.4]), ve = [dx, dy];
+        const t = K.wt;
+        const v = norm([(1 - t) * (1 - t) * vw[0] + 2 * t * (1 - t) * vm[0] + t * t * ve[0], (1 - t) * (1 - t) * vw[1] + 2 * t * (1 - t) * vm[1] + t * t * ve[1]]);
+        weapon = wpn ? { x: main[0], y: main[1], a: ang(v) } : null;
+        twoHand = TWO_H.has(wtype) || pole || K.slam;
+        if (twoHand) off = [main[0] - v[0] * 2, main[1] - v[1] * 2];
+        else off = [offS[0] - dx, offS[1] + armL - 2];
+        smear = K.smear && !!wpn;
+        if (vName === 'down' && v[1] < -0.55 && K.lift > 3) weaponBehind = true; else if (vName !== 'up') weaponBehind = false;
+      } else if (K.mode === 'cast') {
+        // staff / wand forward, the free hand raised toward the aim
+        main = [cA[0] + dx * K.r + side.x * 1.5, cA[1] + dy * K.r * 0.8 - K.lift + 1];
+        if (wpn) weapon = { x: main[0], y: main[1], a: K.up ? -Math.PI / 2 + side.x * 0.12 : alpha + K.psi };
+        off = K.up ? [cA[0] - side.x * 3, cA[1] - 7] : [cA[0] + dx * (K.r + 1) - side.x * 2, cA[1] + dy * (K.r + 1) * 0.8 - 3];
+        if (K.nova) { off = [cA[0] - side.x * K.spread, cA[1] - K.olift]; main = [cA[0] + side.x * K.spread, cA[1] - K.olift]; if (weapon) { weapon.x = main[0]; weapon.y = main[1]; weapon.a = K.wa; } }
+        if (vName === 'up') weaponBehind = true;
+      } else if (K.mode === 'bow') {
+        off = [cA[0] + dx * (armL + 1), cA[1] + dy * (armL + 1) - 1];
+        const pull = K.pull;
+        main = [off[0] - dx * (2 + pull * 6), off[1] - dy * (2 + pull * 6) - (1 - pull)];
+        weapon = wpn ? { x: off[0], y: off[1], a: alpha, off: true } : null;
+        if (K.recoil) { main = [main[0] - dx * K.recoil, main[1] - dy * K.recoil - K.recoil * 0.5]; }
+      } else if (K.mode === 'xbow') {
+        const kick = K.kick;
+        main = [cA[0] + dx * (3 - kick), cA[1] + dy * (3 - kick) + 1 - kick * 0.5];
+        weapon = wpn ? { x: main[0], y: main[1], a: alpha - (dx >= 0 ? 1 : -1) * kick * 0.12 } : null;
+        off = [main[0] + dx * 5, main[1] + dy * 5]; twoHand = true;
+      } else if (K.mode === 'bash') {
+        off = [cA[0] + dx * K.r, cA[1] + dy * K.r * 0.8 - 1];
+        main = [mainS[0] - dx * 2, mainS[1] + armL - 3];
+        if (weapon) { weapon.x = main[0]; weapon.y = main[1]; }
+      }
+      // blend in from the previous pose so chained attacks don't pop
+      if (this.blend && this.atkT < K.blendDur) {
+        const t = easeOut2(clamp01(this.atkT / K.blendDur));
+        const b = this.blend;
+        main = [lerp(b.main[0], main[0], t), lerp(b.main[1], main[1], t)];
+        off = [lerp(b.off[0], off[0], t), lerp(b.off[1], off[1], t)];
+        if (weapon && b.wa !== null) weapon = { ...weapon, x: main[0], y: main[1], a: lerpAng(b.wa, weapon.a, t) };
+        if (weapon && weapon.off) { weapon.x = off[0]; weapon.y = off[1]; }
+      }
+    } else if (st.spin && wpn) {
+      // whirlwind: blade sweeps around the body, smearing all the way
+      const a = this.t * 17 + Math.PI / 2;
+      main = [chest[0] + Math.cos(a) * 6, chest[1] + Math.sin(a) * 5];
+      weapon = { x: main[0], y: main[1], a };
+      smear = true; weaponBehind = Math.sin(a) < -0.2;
+      if (TWO_H.has(wtype) || pole) { twoHand = true; off = [main[0] - Math.cos(a) * 2, main[1] - Math.sin(a) * 2]; }
+    }
+
+    // ---- states that override the arms
+    if (c.hurt) {
+      main = [mainS[0] + (mainS[0] < 0 ? -2 : 2), mainS[1] + armL - 3];
+      off = [offS[0] + (offS[0] < 0 ? -2 : 2), offS[1] + armL - 3];
+      if (weapon) { weapon = { ...weapon, x: weapon.off ? off[0] : main[0], y: weapon.off ? off[1] : main[1], a: weapon.a + 0.5 }; }
+    }
+    if (pose.legs === 'ride' && !kind) {
+      main = [mainS[0] + dx * 3, mainS[1] + armL - 2]; off = [offS[0] + dx * 3, offS[1] + armL - 2];
+      if (weapon && !weapon.off) { weapon.x = main[0]; weapon.y = main[1]; }
+    }
+    if (c.deathPhase >= 0) { weapon = null; main = [mainS[0] - 1, mainS[1] + armL - 1]; off = [offS[0] + 1, offS[1] + armL - 1]; }
+    // weapon swap flourish: a quick twirl in the hand
+    if (wpn && weapon && !kind && st.swapT !== undefined && st.swapT < 0.36) {
+      const t = clamp01(st.swapT / 0.36);
+      weapon = { ...weapon, a: weapon.a + easeOut(t) * TAU * (dx >= 0 ? 1 : -1) - TAU * (dx >= 0 ? 1 : -1) };
+      main = [main[0], main[1] - Math.sin(t * Math.PI) * 3];
+      if (!weapon.off) { weapon.x = main[0]; weapon.y = main[1]; }
+      smear = t < 0.8;
+    }
+    // up view: hands raised forward or inside the torso go behind the body
+    if (vName === 'up') {
+      mainBehind = main[1] < sy + 1 || (main[0] > tl && main[0] < tr);
+      offBehind = off[1] < sy + 1 || (off[0] > tl && off[0] < tr) || !!this.shield;
+      if (weapon && !weapon.off) weaponBehind = mainBehind || POLES.has(wtype) || TWO_H.has(wtype) ? true : (Math.sin(weapon.a) < 0.2);
+      else if (weapon && weapon.off) weaponBehind = true;
+    }
+    // down view: hands hanging outside the torso keep their arm behind it
+    const mainBack = vName === 'down' && main[0] < tl - 0.5 && main[1] > sy + 1;
+    const offBack = vName === 'down' && off[0] > tr + 0.5 && off[1] > sy + 1;
+    const save = { main: [main[0], main[1]], off: [off[0], off[1]], wa: weapon ? weapon.a : null };
+    return { mainS, offS, main, off, weapon, smear, weaponBehind, twoHand, offHidden, mainBehind, offBehind, mainBack, offBack, save };
   }
 
   // ================================================================ creatures
@@ -445,6 +902,7 @@ export class Actor {
     const kind = st.action ? st.kind : null;
     const u = clamp01(st.actionT || 0);
     const su = st.strikeU || 0.6;
+    const fx = Math.sin(e.facing), fz = Math.cos(e.facing);
     let fr;
     if (e.dead) fr = V.hurt[0];
     else if (st.breathing || st.charging) fr = V.atk[1];
@@ -452,17 +910,39 @@ export class Actor {
     else if ((st.hitT || 0) > 0.55) fr = V.hurt[0];
     else if (st.flying && V.fly) fr = V.fly[Math.floor(this.t * 6) % 2];
     else if (this.spr.flapFps) fr = V.run[Math.floor(this.t * this.spr.flapFps) % V.run.length];
-    else if ((st.moveSpeed || 0) > 0.4) fr = V.run[Math.floor(this.ph) % V.run.length];
+    else if (this.moving) fr = V.run[Math.floor(this.ph * (V.run.length / 6)) % V.run.length];
     else fr = V.idle[Math.abs(Math.floor(this.t * (this.kind === 'wraith' ? 5 : 1.8) + (st.seed || 0))) % V.idle.length];
-    // hovering bodies bob; knock-back nudge; death
-    let oy = 0, ox = 0, rot = 0;
-    if (this.kind === 'wraith' || this.kind === 'eye') oy = -Math.round((3 + Math.sin(this.t * 2.2 + (st.seed || 0)) * 1.5) * k);
-    if ((st.hitT || 0) > 0.35 && !e.dead) { ox -= Math.round(Math.sin(e.facing) * k); oy -= Math.round(Math.cos(e.facing) * k); }
+    // hovering bodies bob; anticipation pulls back, the strike lunges; knock-back; death.
+    // gx/gz move the body over the ground (its shadow follows), lift raises it off the ground
+    let gx = 0, gz = 0, lift = 0, rot = 0;
+    const hover = this.kind === 'wraith' || this.kind === 'eye';
+    if (hover) lift = Math.round((3 + Math.sin(this.t * 2.2 + (st.seed || 0)) * 1.5) * k);
+    if (kind && !e.dead) {
+      const ph = phases(u, su);
+      const big = this.kind === 'quadruped' || this.kind === 'dragon' || this.kind === 'arachnid' ? 3 : 2;
+      const l = ph.inWind ? -easeOut(ph.w) * 1.5 : ph.inStrike ? lerp(-1.5, big, easeOut(ph.s)) : ph.inHold ? big : ph.inFollow ? big : lerp(big, 0, easeIO(ph.r));
+      gx += fx * l * k; gz += fz * l * k * 0.6;
+      // crouch before the pounce, rise into it
+      if (ph.inWind && (this.kind === 'quadruped' || this.kind === 'arachnid')) lift -= Math.round(easeOut(ph.w) * k);
+      if (ph.inStrike && this.kind === 'quadruped') lift += Math.round(Math.sin(ph.s * Math.PI) * 2 * k);
+    }
+    if (this.moving && !hover && !e.dead && this.kind !== 'serpent' && this.kind !== 'blob' && this.kind !== 'flyer') {
+      // gallop bob: down on the footfalls
+      lift -= [0, 1, 0, 0, 1, 0][Math.floor(this.ph) % 6] * k;
+    }
+    if ((st.hitT || 0) > 0.35 && !e.dead) { const r = Math.round(((st.hitT || 0) - 0.35) * 3) * k; gx -= fx * r; gz -= fz * r * 0.6; }
     if (e.dead) {
       const d = easeOut(clamp01(e.deathT * 3));
-      if (this.kind === 'quadruped' || this.kind === 'arachnid' || this.kind === 'dragon') rot = (flip ? -1 : 1) * d * Math.PI * 0.5;
-      if (this.kind === 'wraith' || this.kind === 'eye' || this.kind === 'flyer') oy += Math.round(d * 4 * k);
+      if (this.kind === 'quadruped' || this.kind === 'arachnid' || this.kind === 'dragon') {
+        if (e.deathT > 0.3) this._dead90 = true;
+        else lift += Math.round(Math.sin(e.deathT / 0.3 * Math.PI) * 2);
+      }
+      if (this.kind === 'wraith' || this.kind === 'eye' || this.kind === 'flyer') lift -= Math.round(d * 4 * k);
     }
+    gx = Math.round(gx); gz = Math.round(gz);
+    this.hoverPx = Math.max(0, lift);
+    const ox = gx, oy = gz - lift;
+    const cast = { y: this._gy + gz, h: this._gh + Math.max(0, lift) };
     const px = x + ox, py = y + oy;
     // serpent body segments, sorted back-to-front with the head
     if (this.kind === 'serpent' && this.segs) {
@@ -470,14 +950,21 @@ export class Actor {
       const headZ = e.pos.z;
       let headDrawn = false;
       for (const [s, i] of order) {
-        if (!headDrawn && s.z > headZ) { this.body(ctx, fr, px, py, k, rot, flip, { record: true }); headDrawn = true; }
+        if (!headDrawn && s.z > headZ) { this.body(ctx, fr, px, py, k, rot, flip, { cast }); headDrawn = true; }
         const sp = this.spr.segs[Math.min(i, this.spr.segs.length - 1)];
         const sh = s.y - view.ground(s.x, s.z);
         if (sh < -0.2) continue;
-        this.body(ctx, sp, Math.round(s.x * PPU - view.x0), Math.round(s.z * PPU - view.y0 - sh * PPU) - Math.round(sp.pix.oy * 0.75) * k, k, 0, false);
+        const sx = Math.round(s.x * PPU - view.x0), sy = Math.round(s.z * PPU - view.y0 - sh * PPU) - Math.round(sp.pix.oy * 0.75) * k;
+        this.body(ctx, sp, sx, sy, k, 0, false, { record: false });
+        if (this.shadowInfo && k === 1) this.shadowInfo.bodies.push({ p: sp.pix, x: sx, y: Math.round(s.z * PPU - view.y0) + Math.round(sp.pix.oy * 0.25), h: Math.round(sp.pix.oy * 0.75) });
       }
-      if (!headDrawn) this.body(ctx, fr, px, py, k, rot, flip, { record: true });
-    } else this.body(ctx, fr, px, py, k, rot, flip, { record: true });
+      if (!headDrawn) this.body(ctx, fr, px, py, k, rot, flip, { cast });
+    } else if (e.dead && this._dead90 && e.deathT > 0.3) {
+      const q = flip ? 3 : 1;
+      const rp = variant(flip ? variant(fr.pix, 'flip') : fr.pix, 'rot' + q);
+      this.body(ctx, { pix: rp, emis: null }, px, py - Math.round(fr.pix.oy * 0.25) * k + 2 * k, k, 0, false, {});
+    } else this.body(ctx, fr, px, py, k, rot, flip, { cast });
+    if (!e.dead) this._dead90 = false;
     // floating eye iris tracks its target
     if (this.spr.iris && !e.dead) {
       const tg = e.target;
@@ -520,70 +1007,81 @@ export class Actor {
   }
 }
 
-// ------------------------------------------------------------------ hand anchors (sprite px from the feet)
-function handOffset(m, v, flip, pose) {
-  const hy = pose === 'cast' ? m.torsoTop - FEET - 3 : pose === 'ride' ? m.legTop - FEET - 2 : m.legTop - FEET - 1;
-  const half = Math.floor(m.torsoW / 2) + m.armW;
-  let hx;
-  if (pose === 'off') {
-    if (v === 'down') hx = half; else if (v === 'up') hx = -half; else hx = flip ? -2 : 2;
-    return [hx, m.legTop - FEET - 2];
-  }
-  if (v === 'down') hx = -half + 1; else if (v === 'up') hx = half - 1; else hx = flip ? -1 : 1;
-  return [hx, hy];
-}
-
-// ------------------------------------------------------------------ swing curves
-// Phases relative to the strike point su: wind-up [0, su-0.1], strike [su-0.1, su+0.08], recover.
+// ------------------------------------------------------------------ attack choreography
+// Phases relative to the strike point su: anticipation [0, A], strike [A, su], impact hold
+// [su, B], follow-through [B, F], recover [F, 1].
 function phases(u, su) {
-  const a = Math.max(0.05, su - 0.1), b = Math.min(0.95, su + 0.08);
-  return { w: clamp01(u / a), s: clamp01((u - a) / (b - a)), r: clamp01((u - b) / (1 - b)), inWind: u < a, inStrike: u >= a && u < b };
+  const A = Math.max(0.05, su * 0.72), B = Math.min(0.93, su + 0.1), F = Math.max(B + 0.05, Math.min(0.97, 0.78));
+  return {
+    A, B, F,
+    w: clamp01(u / A), s: clamp01((u - A) / Math.max(0.01, su - A)), h: clamp01((u - su) / Math.max(0.01, B - su)), f: clamp01((u - B) / Math.max(0.01, F - B)), r: clamp01((u - F) / Math.max(0.01, 1 - F)),
+    inWind: u < A, inStrike: u >= A && u < su, inHold: u >= su && u < B, inFollow: u >= B && u < F, inRec: u >= F,
+  };
 }
-function arc(from, to, rest, ph) {
-  if (ph.inWind) return lerp(rest, from, easeOut(ph.w));
-  if (ph.inStrike) return lerp(from, to, easeOut(ph.s));
-  return lerp(to, rest, easeIO(ph.r));
+// key poses: [wind, strike, hold, follow]; rest = guard (the rig blends back to it)
+const ARC = {
+  slash: { phi: [-1.9, 1.25, 1.45, 1.75], r: [4, 7, 7, 5.5], psi: [-0.85, 0, 0.15, 0.55], lift: [2, 0, 0, -1] },
+  sweep: { phi: [-2.5, 1.6, 1.85, 2.3], r: [5, 8, 8, 6], psi: [-0.7, 0, 0.1, 0.5], lift: [1, 0, 0, -1] },
+  claw: { phi: [-1.3, 1.0, 1.15, 1.35], r: [3, 7, 7, 5], psi: [-0.5, 0, 0, 0.3], lift: [2, 0, 0, 0] },
+  throw: { phi: [2.6, 0, -0.1, -0.3], r: [4, 7, 7, 6], psi: [0.6, 0, 0, 0], lift: [4, 1, 0, 0] },
+  thrust: { phi: [0.35, 0, 0, 0.05], r: [0, 8, 8, 6], psi: [-0.15, 0, 0, 0], lift: [1, 0, 0, 0], thrust: true },
+  stab: { phi: [0.3, 0, 0, 0.05], r: [1, 7, 7, 5], psi: [-0.12, 0, 0, 0], lift: [1, 0, 0, 0], thrust: true },
+  spearthrust: { phi: [0.2, 0, 0, 0], r: [-2, 10, 10, 7], psi: [-0.1, 0, 0, 0], lift: [1, 0, 0, 0], thrust: true },
+};
+function seg(ph, keys, rest, ease = easeOut) {
+  // keys: [wind, strike, hold, follow]
+  if (ph.inWind) return lerp(rest, keys[0], easeOut(ph.w));
+  if (ph.inStrike) return lerp(keys[0], keys[1], easeIn(ph.s) * 0.35 + ease(ph.s) * 0.65);
+  if (ph.inHold) return lerp(keys[1], keys[2], ph.h);
+  if (ph.inFollow) return lerp(keys[2], keys[3], easeOut(ph.f));
+  return lerp(keys[3], rest, easeIO(ph.r));
 }
-function swingFor(kind, u, su, sg, rest, alpha) {
+function attackPose(kind, u, su, wtype) {
   const ph = phases(u, su);
-  const strikeReach = (r) => (ph.inWind ? lerp(0, -1, ph.w) : ph.inStrike ? lerp(-1, r, easeOut(ph.s)) : lerp(r, 0, easeIO(ph.r)));
-  switch (kind) {
-    case 'slash': return { rot: arc(-1.9 * sg, 1.7 * sg, rest, ph), reach: strikeReach(2), lift: 0, smear: ph.inStrike };
-    case 'backslash': return { rot: arc(1.9 * sg, -1.7 * sg, rest, ph), reach: strikeReach(2), lift: 0, smear: ph.inStrike };
-    case 'sweep': return { rot: arc(-2.5 * sg, 2.4 * sg, rest, ph), reach: strikeReach(3), lift: 0, smear: ph.inStrike };
-    case 'claw': return { rot: arc(-1.4 * sg, 1.4 * sg, rest, ph), reach: strikeReach(3), lift: 0, smear: ph.inStrike };
-    case 'throw': return { rot: arc(-2.3 * sg, 0.7 * sg, rest, ph), reach: strikeReach(2), lift: ph.inWind ? 2 * ph.w : 0, smear: ph.inStrike };
-    case 'thrust': case 'stab': case 'spearthrust': {
-      const far = kind === 'spearthrust' ? 11 : kind === 'thrust' ? 8 : 6;
-      const back = kind === 'spearthrust' ? -5 : -3;
-      const reach = ph.inWind ? lerp(0, back, easeOut(ph.w)) : ph.inStrike ? lerp(back, far, easeOut(ph.s)) : lerp(far, 0, easeIO(ph.r));
-      return { rot: ph.inWind ? lerp(rest, 0.12 * sg, ph.w) : ph.inStrike ? 0 : lerp(0, rest, ph.r), reach, lift: 0, smear: false };
-    }
-    case 'overhead': case 'slam': {
-      const up = kind === 'slam' ? 6 : 4;
-      const rot = arc(-2.7 * sg, 0.15 * sg, rest, ph);
-      const lift = ph.inWind ? up * easeOut(ph.w) : ph.inStrike ? up * (1 - easeIn(ph.s)) : 0;
-      return { rot, reach: strikeReach(kind === 'slam' ? 3 : 4), lift, smear: ph.inStrike };
-    }
-    case 'cast': return { rot: ph.inWind ? lerp(rest, -0.7 * sg, ph.w) : ph.inStrike ? lerp(-0.7 * sg, 0, ph.s) : lerp(0, rest, ph.r), reach: strikeReach(4), lift: ph.inWind ? 2 * ph.w : 0, smear: false };
-    case 'castup': return { rot: 0, abs: -Math.PI / 2 + sg * 0.15, reach: 0, lift: u < 0.8 ? 4 * easeOut(clamp01(u * 3)) : 4 * (1 - (u - 0.8) * 5), smear: false };
-    case 'nova': {
-      if (ph.inWind) return { rot: 0, abs: -Math.PI / 2, reach: 0, lift: 5 * easeOut(ph.w), smear: false };
-      return { rot: ph.inStrike ? lerp(-Math.PI / 2 - alpha, 0.4 * sg, easeOut(ph.s)) : lerp(0.4 * sg, rest, ph.r), reach: strikeReach(2), lift: 0, smear: ph.inStrike };
-    }
-    case 'bowdraw': return { rot: 0, reach: -Math.round(u * 2), lift: 0, draw: u };
-    case 'bowrelease': return { rot: 0, reach: u < 0.18 ? -2 + u * 6 : 0, lift: 0 };
-    case 'xbow': return { rot: 0, reach: u < 0.12 ? -3 : u < 0.3 ? lerp(-3, 0, (u - 0.12) / 0.18) : 0, lift: 0 };
-    case 'bash': return { rot: rest * 0.5, reach: 0, lift: 0 };
-    default: return { rot: arc(-1.6 * sg, 1.5 * sg, rest, ph), reach: strikeReach(2), lift: 0, smear: ph.inStrike };
+  const heavy = HEAVY.has(kind);
+  // body: lean back in the wind-up, lunge and squash on the strike, settle after
+  const big = kind === 'spearthrust' || kind === 'thrust' || kind === 'sweep' || kind === 'bash' || kind === 'overhead' || kind === 'slam' ? 3 : kind === 'xbow' ? -1 : 2;
+  let lunge = 0, legs = 'stance', bob = 1, lean = 0, face = 0;
+  if (ph.inWind) { lunge = -Math.round(easeOut(ph.w)); lean = -1; bob = heavy ? 0 : 1; if (heavy) face = 0; }
+  else if (ph.inStrike) { lunge = Math.round(lerp(-1, big, easeOut(ph.s))); legs = 'lunge'; bob = heavy ? 2 : 1; lean = 1; }
+  else if (ph.inHold) { lunge = big; legs = 'lunge'; bob = heavy ? 2 : 1; lean = 1; face = heavy ? 3 : 0; }
+  else if (ph.inFollow) { lunge = Math.round(lerp(big, big * 0.5, ph.f)); legs = 'lunge'; bob = 1; }
+  else { lunge = Math.round(lerp(big * 0.5, 0, easeIO(ph.r))); bob = ph.r < 0.5 ? 1 : 0; }
+  if (kind === 'bowdraw' || kind === 'bowrelease' || kind === 'castup') lunge = 0;
+  const blendDur = 0.07;
+  const base = { lunge, legs, bob, lean, face, blendDur, smear: false };
+  if (ARC[kind]) {
+    const K = ARC[kind];
+    const rest = { phi: K.phi[0] * 0.4, r: 4, psi: 0, lift: 0 };
+    return { ...base, mode: K.thrust ? 'thrust' : 'arc', phi: seg(ph, K.phi, rest.phi), r: seg(ph, K.r, rest.r), psi: seg(ph, K.psi, rest.psi), lift: seg(ph, K.lift, 0), smear: ph.inStrike || (ph.inHold && ph.h < 0.5) };
   }
+  if (kind === 'backslash') {
+    const K = ARC.slash;
+    const neg = (a) => a.map((v) => -v);
+    return { ...base, mode: 'arc', phi: seg(ph, neg(K.phi), -K.phi[0] * 0.4), r: seg(ph, K.r, 4), psi: seg(ph, neg(K.psi), 0), lift: seg(ph, K.lift, 0), smear: ph.inStrike || (ph.inHold && ph.h < 0.5) };
+  }
+  if (kind === 'overhead' || kind === 'slam') {
+    const up = kind === 'slam' ? 10 : 8;
+    const lift = ph.inWind ? up * easeOut(ph.w) : ph.inStrike ? up * (1 - easeIn(ph.s)) : 0;
+    const r = ph.inWind ? lerp(3, -1, easeOut(ph.w)) : ph.inStrike ? lerp(-1, 6, easeOut(ph.s)) : ph.inRec ? lerp(5, 3, ph.r) : 6;
+    const wt = ph.inWind ? 0 : ph.inStrike ? easeIn(ph.s) * 0.4 + easeOut(ph.s) * 0.6 : 1;
+    return { ...base, mode: 'overhead', r, lift, wt, slam: kind === 'slam', smear: ph.inStrike || (ph.inHold && ph.h < 0.4), bob: ph.inWind ? -1 : base.bob, face: ph.inHold || ph.inStrike ? 3 : 0 };
+  }
+  if (kind === 'cast') {
+    const r = ph.inWind ? lerp(3, 1, easeOut(ph.w)) : ph.inStrike || ph.inHold ? lerp(1, 6, easeOut(Math.min(1, ph.s + ph.h))) : lerp(6, 3, easeIO(Math.max(ph.f, ph.r)));
+    return { ...base, mode: 'cast', r, lift: ph.inWind ? 2 * ph.w : 0, psi: ph.inWind ? -0.6 * ph.w : 0, legs: 'stance', lunge: ph.inWind ? 0 : base.lunge > 0 ? 1 : 0 };
+  }
+  if (kind === 'castup') return { ...base, mode: 'cast', up: true, r: 1, lift: u < 0.8 ? 6 * easeOut(clamp01(u * 3)) : 6 * (1 - (u - 0.8) * 5), psi: 0, legs: 'stance', lunge: 0, bob: 0 };
+  if (kind === 'nova') {
+    const raise = ph.inWind ? easeOut(ph.w) : ph.inStrike ? 1 - easeIn(ph.s) : 0;
+    return { ...base, mode: 'cast', nova: true, r: 1, lift: 0, psi: 0, spread: lerp(7, 3, raise), olift: lerp(-2, 9, raise), wa: ph.inWind ? -Math.PI / 2 : Math.PI / 2, legs: ph.inWind ? 'stance' : 'stance', bob: ph.inWind ? -1 : 2, lunge: 0, face: ph.inHold ? 3 : 0 };
+  }
+  if (kind === 'bowdraw') return { ...base, mode: 'bow', pull: u, recoil: 0, lunge: 0, legs: 'stance', bob: 1 };
+  if (kind === 'bowrelease') return { ...base, mode: 'bow', pull: 0, recoil: u < 0.3 ? Math.round((1 - u / 0.3) * 3) : 0, lunge: u < 0.2 ? -1 : 0, legs: 'stance', bob: 1 };
+  if (kind === 'xbow') return { ...base, mode: 'xbow', kick: u < 0.12 ? 2 : u < 0.3 ? lerp(2, 0, (u - 0.12) / 0.18) : 0, legs: 'stance', bob: 1 };
+  if (kind === 'bash') return { ...base, mode: 'bash', r: ph.inWind ? lerp(3, 1, ph.w) : ph.inStrike || ph.inHold ? lerp(1, 7, easeOut(Math.min(1, ph.s + ph.h))) : lerp(7, 3, easeIO(Math.max(ph.f, ph.r))) };
+  void wtype;
+  const K = ARC.slash;
+  return { ...base, mode: 'arc', phi: seg(ph, K.phi, 0), r: seg(ph, K.r, 4), psi: seg(ph, K.psi, 0), lift: seg(ph, K.lift, 0), smear: ph.inStrike };
 }
-// whole-body lunge (px) along the aim: small anticipation, big punchy step on the strike
-function lungeFor(kind, u, su) {
-  if (kind === 'bowdraw' || kind === 'bowrelease' || kind === 'castup') return 0;
-  const ph = phases(u, su);
-  const big = kind === 'spearthrust' || kind === 'thrust' || kind === 'overhead' || kind === 'slam' || kind === 'sweep' || kind === 'bash' ? 3 : kind === 'xbow' ? -1 : 2;
-  if (ph.inWind) return -Math.round(easeOut(ph.w) * (big > 0 ? 1 : 0));
-  if (ph.inStrike) return Math.round(lerp(-1, big, easeOut(ph.s)));
-  return Math.round(lerp(big, 0, easeIO(ph.r)));
-}
+void light; void CX; void lerpAng;

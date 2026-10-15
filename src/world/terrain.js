@@ -8,6 +8,7 @@ import { view } from '../px/view.js';
 import { PPU } from '../px/pix.js';
 import { propSprite } from '../px/sprites/props.js';
 import { glowAt } from '../render/renderer.js';
+import { castSprite } from '../px/shadow.js';
 import { G } from '../game.js';
 import TerrainWorker from './terrainWorker.js?worker&inline';
 
@@ -82,11 +83,14 @@ function makeProp(type, x, y, z, rot, scale) {
     x, z, sortZ: z, id, def, sp, phase: x * 0.37 + z * 0.23,
     occlude: tall,
     bounds() { const f = sp.frames[0]; return { x: Math.round(x * PPU - view.x0) - f.ox, y: Math.round(z * PPU - view.y0) - f.oy, w: f.w, h: f.h }; },
+    frame() { const n = sp.frames.length; return n > 1 ? sp.frames[((Math.floor(G.realTime * (def.sway ? 2.2 : 4) + o.phase) % n) + n) % n] : sp.frames[0]; },
     draw(ctx) {
-      const n = sp.frames.length, f = n > 1 ? sp.frames[((Math.floor(G.realTime * (def.sway ? 2.2 : 4) + o.phase) % n) + n) % n] : sp.frames[0];
+      const f = o.frame();
       ctx.drawImage(f.canvas(), Math.round(x * PPU - view.x0) - f.ox, Math.round(z * PPU - view.y0) - f.oy);
     },
   };
+  // directional ground shadow (src/px/shadow.js) for anything taller than a pebble
+  if (sp.frames[0].oy > 7) o.castShadow = (sctx) => castSprite(sctx, o.frame(), Math.round(x * PPU - view.x0), Math.round(z * PPU - view.y0));
   if (sp.emis) o.emissive = (ctx) => { const f = sp.emis; ctx.drawImage(f.canvas(), Math.round(x * PPU - view.x0) - f.ox, Math.round(z * PPU - view.y0) - f.oy); };
   if (def.glow) o.glow = (ctx) => glowAt(ctx, x, z, (sp.frames[0].oy * 0.55) / PPU, def.glow, 1.4 + scale * 0.6, 0.45 + 0.15 * Math.sin(G.realTime * 2 + o.phase));
   return o;
