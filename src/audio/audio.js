@@ -251,7 +251,7 @@ function debugApi() {
     return { peak: pk, rms: Math.sqrt(ss / buf.length) };
   };
   return {
-    E, CATS, play, stop, duck, activeVoices, meter,
+    E, CATS, play, stop, duck, activeVoices, meter, setMusic,
     get ready() { return E.ready; },
     bake: () => E.bake,
     list: () => Object.keys(E.sounds),

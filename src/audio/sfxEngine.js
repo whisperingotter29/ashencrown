@@ -14,18 +14,20 @@ const dbToLin = (db) => Math.pow(10, db / 20);
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 
 // per: max voices that may START within `win` seconds (louder ones steal quieter ones);
-// max: max voices of the category sounding at once.
+// max: max voices of the category sounding at once;
+// fatigue: up to this many dB softer while the category is being spammed (keeps long fights from
+// turning into a wall of noise, while an isolated hit stays full-size).
 export const CATS = {
-  swing: { per: 2, win: 0.05, max: 4 },
-  hit: { per: 3, win: 0.05, max: 8 },
-  crit: { per: 2, win: 0.07, max: 3 },
-  sub: { per: 1, win: 0.09, max: 2 },
-  elem: { per: 3, win: 0.05, max: 8 },
-  dot: { per: 1, win: 0.12, max: 2 },
-  kill: { per: 2, win: 0.06, max: 5 },
+  swing: { per: 2, win: 0.05, max: 4, fatigue: 4 },
+  hit: { per: 3, win: 0.05, max: 8, fatigue: 6 },
+  crit: { per: 2, win: 0.07, max: 3, fatigue: 3 },
+  sub: { per: 1, win: 0.09, max: 2, fatigue: 4 },
+  elem: { per: 3, win: 0.05, max: 8, fatigue: 6 },
+  dot: { per: 1, win: 0.12, max: 2, fatigue: 6 },
+  kill: { per: 2, win: 0.06, max: 5, fatigue: 4 },
   tick: { per: 3, win: 0.03, max: 6 },
   boom: { per: 2, win: 0.08, max: 4 },
-  cast: { per: 3, win: 0.05, max: 6 },
+  cast: { per: 3, win: 0.05, max: 6, fatigue: 4 },
   ability: { per: 4, win: 0.05, max: 8 },
   loop: { per: 2, win: 0.05, max: 3 },
   hurt: { per: 1, win: 0.09, max: 2 },
@@ -41,6 +43,7 @@ export const CATS = {
   sting: { per: 2, win: 0.1, max: 3 },
   amb: { per: 2, win: 0.1, max: 3 },
   far: { per: 2, win: 0.06, max: 4 },
+  step: { per: 1, win: 0.06, max: 2 },
   misc: { per: 3, win: 0.05, max: 6 },
 };
 for (const c of Object.values(CATS)) c.list = [];
@@ -51,6 +54,7 @@ export const E = {
   ready: false, ctx: null, sounds: {}, groups: {}, bake: null,
   listener: null,           // () => {x, z} of the listener in world units, for pan / distance
   stats: { plays: 0, drops: 0, steals: 0, groupSteals: 0, missing: 0, maxActive: 0 },
+  counts: {},               // plays per sound id (inspection / tests)
   duckState: { t0: 0, v0: 1, t1: 0, v1: 1, t2: 0, t3: 0 },
 };
 
@@ -122,7 +126,7 @@ export function initEngine(ctx) {
   E.bake = bakeAll((rec, res) => {
     const S = E.sounds[rec.id];
     S.bufs = res.map((x) => x.buf); S.meta = res.map((x) => ({ peak: x.peak, rms: x.rms, dur: x.buf.duration }));
-  }, { baseSr: Math.min(48000, ctx.sampleRate || 44100) }).then((s) => { E.bakeStats = s; return s; });
+  }, { baseSr: 32000 }).then((s) => { E.bakeStats = s; return s; });
 }
 
 export function setSfxVolume(lin) { if (E.ready) E.sfxVol.gain.setTargetAtTime(lin, E.ctx.currentTime, 0.03); }
@@ -173,9 +177,13 @@ export function play(id, o = {}) {
     }
   }
   if (db < -55) { E.stats.drops++; return null; }
-  const lin = dbToLin(db);
   const ck = o.cat || S.cat || 'misc';
   const C = CATS[ck] || CATS.misc;
+  if (C.fatigue) {
+    C.fc = (C.fc || 0) * Math.exp(-(tn - (C.ft || 0)) / 0.6); C.ft = tn;   // decaying count of recent starts
+    db -= Math.min(C.fatigue, Math.log2(1 + C.fc / 3) * 2) * ((o.prio || 1) >= 2 ? 0.5 : 1);
+  }
+  const lin = dbToLin(db);
   const prio = lin * (o.prio || 1);
   const list = C.list;
   for (let i = list.length - 1; i >= 0; i--) if (list[i].dead || list[i].end <= tn) list.splice(i, 1);
@@ -226,7 +234,9 @@ export function play(id, o = {}) {
   src.onended = () => { try { src.disconnect(); } catch (e) { /* gone */ } };
   st.v = v; st.busy = v.end;
   list.push(v);
+  if (C.fatigue) C.fc += 1;
   E.stats.plays++;
+  E.counts[id] = (E.counts[id] || 0) + 1;
   return v;
 }
 
