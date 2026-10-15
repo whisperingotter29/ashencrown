@@ -1,0 +1,27 @@
+{
+  "name": "ashen-crown",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5173",
+    "build": "vite build",
+    "preview": "vite preview --port 4173",
+    "check": "node tools/check-sites.mjs",
+    "sheets": "node tools/sprite-sheet.mjs sheets",
+    "build:single": "vite build -c vite.single.config.js && node tools/artifact-page.mjs"
+  },
+  "dependencies": {
+    "@fontsource/jersey-10": "^5.3.0",
+    "@fontsource/pixelify-sans": "^5.3.0",
+    "@fontsource/silkscreen": "^5.3.0",
+    "tone": "15.1.22"
+  },
+  "devDependencies": {
+    "vite": "8.3.1",
+    "vite-plugin-singlefile": "^2.3.3"
+  },
+  "engines": {
+    "node": ">=20.19"
+  }
+}
