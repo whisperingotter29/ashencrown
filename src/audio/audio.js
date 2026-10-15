@@ -1,9 +1,12 @@
-// Generative score, ambience and synthesized sound effects (Tone.js).
+// Generative score and ambience (Tone.js), plus the wiring for the procedural SFX engine
+// (sfxBank.js: baked recipes, sfxEngine.js: voices / limiting / ducking, sfxEvents.js: game hooks).
 import * as Tone from 'tone';
 import { G } from '../game.js';
 import { bus } from '../core/events.js';
+import { E, initEngine, play, stop, duck, setSfxVolume, activeVoices, CATS } from './sfxEngine.js';
+import { hookSfxEvents, sfxTick } from './sfxEvents.js';
 
-const A = { ready: false, music: null, sfx: null, themes: {}, current: null, last: {}, ambience: {}, intensity: 0 };
+const A = { ready: false, music: null, themes: {}, current: null, ambience: {}, intensity: 0, initP: null };
 
 const NOTE = (m) => Tone.Frequency(m, 'midi').toNote();
 const SCALES = {
@@ -20,32 +23,62 @@ const SCALES = {
 };
 const CHORDS = [[0, 2, 4], [5, 0, 2], [3, 5, 0], [4, 6, 1], [0, 2, 4], [6, 1, 3]];
 
+// Builds the whole audio graph right away (sound baking runs in the background) and resolves once
+// the context is running, or shortly after if the browser is still waiting for a user gesture.
 export function initAudio() {
-  if (A.ready) return Promise.resolve();
-  return Tone.start().then(() => {
-    const ctx = Tone.getContext();
-    ctx.lookAhead = 0.08;
-    const verb = new Tone.Reverb({ decay: 7, wet: 0.42, preDelay: 0.03 }).toDestination();
-    A.music = new Tone.Volume(-6).connect(verb);
-    const sverb = new Tone.Reverb({ decay: 1.8, wet: 0.18 }).toDestination();
-    A.sfx = new Tone.Volume(-4).connect(sverb);
-    A.sfxDry = new Tone.Volume(-4).toDestination();
-    A.comp = null;
-    buildSfx();
-    buildAmbience();
-    applyVolume();
-    A.ready = true;
-    hookEvents();
-    setInterval(tick, 40);
+  if (A.initP) return A.initP;
+  A.initP = new Promise((resolve) => {
+    try {
+      useNativeContext();
+      const ctx = Tone.getContext();
+      ctx.lookAhead = 0.08;
+      initEngine(ctx.rawContext);
+      const verb = new Tone.Reverb({ decay: 7, wet: 0.42, preDelay: 0.03 }).connect(E.musicIn);
+      A.music = new Tone.Volume(-6).connect(verb);
+      A.sfxDry = new Tone.Volume(-4).connect(E.ambIn);
+      buildAmbience();
+      applyVolume();
+      A.ready = true;
+      hookSfxEvents();
+      bus.on('volume', applyVolume);
+      setInterval(tick, 40);
+      resumeOnGesture();
+      if (typeof window !== 'undefined') window.__sfx = debugApi();
+    } catch (e) {
+      console.warn('[audio] init failed', e);
+      resolve();
+      return;
+    }
+    const started = Tone.start().catch(() => {});
+    Promise.race([started, new Promise((r) => setTimeout(r, 400))]).then(() => resolve());
   });
+  return A.initP;
+}
+
+// Run Tone (and the SFX engine) on a plain AudioContext: native nodes are ~10x cheaper to create
+// than the standardized-audio-context wrappers, which matters when every hit spawns a source node.
+function useNativeContext() {
+  const AC = typeof window !== 'undefined' && (window.AudioContext || window.webkitAudioContext);
+  if (!AC) return;
+  try { Tone.setContext(new AC({ latencyHint: 'interactive' }), true); } catch (e) { /* keep Tone's default context */ }
+}
+
+function resumeOnGesture() {
+  if (typeof document === 'undefined') return;
+  const kick = () => {
+    if (Tone.getContext().state === 'running') { document.removeEventListener('pointerdown', kick, true); document.removeEventListener('keydown', kick, true); return; }
+    Tone.start().catch(() => {});
+  };
+  document.addEventListener('pointerdown', kick, true);
+  document.addEventListener('keydown', kick, true);
 }
 
 export function applyVolume() {
   if (!A.music) return;
   const m = G.settings.music, s = G.settings.sfx;
   A.music.volume.rampTo(m <= 0.001 ? -80 : -24 + m * 20, 0.3);
-  A.sfx.volume.rampTo(s <= 0.001 ? -80 : -22 + s * 20, 0.1);
   A.sfxDry.volume.rampTo(s <= 0.001 ? -80 : -22 + s * 20, 0.1);
+  setSfxVolume(s <= 0.001 ? 0 : Math.pow(s, 1.6));
   for (const amb of Object.values(A.ambience)) amb.base = s;
 }
 
@@ -140,6 +173,7 @@ function tickInner() {
   A.intensity += (target - A.intensity) * 0.04;
   if (A.current?.active) stepTheme(A.current, now);
   updateAmbience();
+  sfxTick();
 }
 
 // ------------------------------------------------------------------ ambience
@@ -176,102 +210,53 @@ function updateAmbience() {
   set('cave', indoor ? 0.18 : 0);
 }
 
-// ------------------------------------------------------------------ sfx
-const SFX = {};
-function buildSfx() {
-  const o = A.sfx;
-  SFX.noise = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.002, decay: 0.12, sustain: 0 } });
-  SFX.swingF = new Tone.Filter(1800, 'bandpass').connect(o);
-  SFX.noise.connect(SFX.swingF);
-  SFX.thud = new Tone.MembraneSynth({ pitchDecay: 0.02, octaves: 3, envelope: { attack: 0.001, decay: 0.18, sustain: 0 }, volume: -4 }).connect(o);
-  SFX.ping = new Tone.MetalSynth({ envelope: { attack: 0.001, decay: 0.25, release: 0.1 }, harmonicity: 5.1, modulationIndex: 20, resonance: 3000, octaves: 1.2, volume: -18 }).connect(o);
-  SFX.ping.frequency.value = 400;
-  SFX.chime = new Tone.PolySynth(Tone.FMSynth, { maxPolyphony: 8, harmonicity: 3, modulationIndex: 5, envelope: { attack: 0.002, decay: 0.8, sustain: 0, release: 1 }, volume: -12 }).connect(o);
-  SFX.tone = new Tone.PolySynth(Tone.Synth, { maxPolyphony: 8, oscillator: { type: 'triangle' }, envelope: { attack: 0.005, decay: 0.3, sustain: 0.1, release: 0.4 }, volume: -10 }).connect(o);
-  SFX.boom = new Tone.NoiseSynth({ noise: { type: 'brown' }, envelope: { attack: 0.005, decay: 0.8, sustain: 0 }, volume: -2 });
-  SFX.boomF = new Tone.Filter(400, 'lowpass').connect(o);
-  SFX.boom.connect(SFX.boomF);
-  SFX.hiss = new Tone.NoiseSynth({ noise: { type: 'pink' }, envelope: { attack: 0.05, decay: 0.4, sustain: 0 }, volume: -8 });
-  SFX.hissF = new Tone.Filter(900, 'lowpass').connect(o);
-  SFX.hiss.connect(SFX.hissF);
-  SFX.growl = new Tone.FMSynth({ harmonicity: 0.5, modulationIndex: 12, envelope: { attack: 0.1, decay: 0.8, sustain: 0.2, release: 0.6 }, volume: -8 }).connect(o);
-  SFX.click = new Tone.NoiseSynth({ noise: { type: 'white' }, envelope: { attack: 0.001, decay: 0.03, sustain: 0 }, volume: -14 }).connect(A.sfxDry);
-}
-
-function rl(key, gap = 0.04) { const t = Tone.now(); if (A.last[key] && t - A.last[key] < gap) return false; A.last[key] = t; return true; }
-// Tone requires strictly increasing start times per voice; keep a global monotonic clock for sfx
-let lastT = 0;
-const tnow = () => { const t = Math.max(Tone.now() + 0.01, lastT + 0.012); lastT = t; return t; };
-
+// ------------------------------------------------------------------ sfx facade
+// Kept for callers of the old API; new code can use playSound(id, opts) directly.
+const clampR = (r) => Math.max(0, Math.min(5, r | 0));
 export const sfx = {
-  swing(heavy) { if (!rl('swing', 0.05)) return; SFX.swingF.frequency.setValueAtTime(heavy ? 900 : 2200, tnow()); SFX.swingF.frequency.exponentialRampToValueAtTime(heavy ? 300 : 700, tnow() + 0.15); SFX.noise.envelope.decay = heavy ? 0.22 : 0.12; SFX.noise.triggerAttackRelease(heavy ? 0.22 : 0.12, tnow(), heavy ? 0.6 : 0.35); },
-  hit(crit, el) { if (!rl('hit', 0.03)) return; SFX.thud.triggerAttackRelease(crit ? 'A1' : 'D2', '16n', tnow(), crit ? 1 : 0.7); if (crit) SFX.ping.triggerAttackRelease('16n', tnow(), 0.4); },
-  playerHurt() { if (!rl('hurt', 0.15)) return; SFX.thud.triggerAttackRelease('F1', '8n', tnow(), 0.9); SFX.hiss.triggerAttackRelease(0.15, tnow(), 0.4); },
-  parry() { SFX.ping.triggerAttackRelease('8n', tnow(), 1); SFX.chime.triggerAttackRelease(['E6', 'B6'], '8n', tnow(), 0.5); },
-  block() { if (!rl('block', 0.08)) return; SFX.ping.frequency.value = 220; SFX.ping.triggerAttackRelease('32n', tnow(), 0.4); SFX.ping.frequency.value = 400; SFX.thud.triggerAttackRelease('G1', '16n', tnow(), 0.5); },
-  dodge() { if (!rl('dodge', 0.1)) return; SFX.hissF.frequency.setValueAtTime(400, tnow()); SFX.hissF.frequency.exponentialRampToValueAtTime(2000, tnow() + 0.2); SFX.hiss.triggerAttackRelease(0.25, tnow(), 0.5); },
-  bow() { if (!rl('bow', 0.05)) return; SFX.tone.triggerAttackRelease('G2', '32n', tnow(), 0.5); SFX.noise.triggerAttackRelease(0.06, tnow(), 0.25); },
-  spell(el) {
-    if (!rl('spell' + el, 0.08)) return;
-    const t = tnow();
-    switch (el) {
-      case 'fire': SFX.hissF.frequency.setValueAtTime(300, t); SFX.hissF.frequency.exponentialRampToValueAtTime(1800, t + 0.3); SFX.hiss.triggerAttackRelease(0.4, t, 0.8); break;
-      case 'frost': SFX.chime.triggerAttackRelease(['B5', 'F#6', 'D7'], '16n', t, 0.35); break;
-      case 'lightning': SFX.noise.triggerAttackRelease(0.08, t, 0.9); SFX.ping.triggerAttackRelease('32n', t, 0.5); break;
-      case 'void': SFX.growl.triggerAttackRelease('C2', 0.4, t, 0.5); break;
-      case 'holy': SFX.chime.triggerAttackRelease(['D5', 'F#5', 'A5', 'D6'], '4n', t, 0.3); break;
-      case 'rot': SFX.tone.triggerAttackRelease(['C3', 'C#3'], '16n', t, 0.5); break;
-      case 'nature': SFX.tone.triggerAttackRelease(['G4', 'D5'], '16n', t, 0.4); break;
-      case 'water': SFX.hissF.frequency.setValueAtTime(800, t); SFX.hissF.frequency.exponentialRampToValueAtTime(200, t + 0.4); SFX.hiss.triggerAttackRelease(0.4, t, 0.6); break;
-      case 'sound': SFX.chime.triggerAttackRelease(['A4', 'E5', 'A5'], '8n', t, 0.4); break;
-      case 'blood': SFX.growl.triggerAttackRelease('F2', 0.25, t, 0.4); break;
-      default: SFX.tone.triggerAttackRelease('E5', '32n', t, 0.3);
-    }
-  },
-  explosion() { if (!rl('boom', 0.12)) return; SFX.boom.triggerAttackRelease(0.8, tnow(), 0.9); SFX.thud.triggerAttackRelease('C1', '8n', tnow(), 1); },
-  thunder(dist) { const d = Math.min(3, dist / 40); SFX.boomF.frequency.value = 300; setTimeout(() => SFX.boom.triggerAttackRelease(1.8, tnow(), Math.max(0.3, 1 - d * 0.2)), d * 600); },
-  levelUp() { const t = tnow(); ['D5', 'F#5', 'A5', 'D6', 'F#6'].forEach((n, i) => SFX.chime.triggerAttackRelease(n, '8n', t + i * 0.09, 0.5)); },
-  loot(r) { if (!rl('loot', 0.08)) return; const t = tnow(); const notes = [['C6'], ['E6'], ['G6', 'C7'], ['A5', 'E6', 'A6'], ['D5', 'A5', 'D6', 'F#6'], ['C5', 'G5', 'C6', 'E6', 'G6']][r] || ['C6']; notes.forEach((n, i) => SFX.chime.triggerAttackRelease(n, '8n', t + i * 0.07, 0.4)); },
-  coin() { if (!rl('coin', 0.06)) return; SFX.chime.triggerAttackRelease(['B6', 'E7'], '32n', tnow(), 0.25); },
-  click() { SFX.click.triggerAttackRelease(0.03, tnow(), 0.6); },
-  dice(s = 0.6) { if (!rl('dice', 0.04)) return; SFX.click.triggerAttackRelease(0.04, tnow(), s); SFX.thud.triggerAttackRelease('E3', '64n', tnow(), s * 0.4); },
-  death() { if (!rl('death', 0.1)) return; SFX.thud.triggerAttackRelease('A0', '8n', tnow(), 0.7); },
-  roar() { SFX.growl.triggerAttackRelease('A1', 1.2, tnow(), 0.9); SFX.boom.triggerAttackRelease(1.2, tnow(), 0.5); },
-  quest() { const t = tnow(); [['D4', 'A4'], ['F#4', 'D5'], ['A4', 'E5', 'A5']].forEach((n, i) => SFX.tone.triggerAttackRelease(n, '8n', t + i * 0.18, 0.5)); },
-  shrine() { const t = tnow(); ['A4', 'C#5', 'E5', 'A5', 'C#6', 'E6'].forEach((n, i) => SFX.chime.triggerAttackRelease(n, '4n', t + i * 0.12, 0.35)); },
-  waystone() { const t = tnow(); ['E5', 'B5', 'E6'].forEach((n, i) => SFX.chime.triggerAttackRelease(n, '4n', t + i * 0.15, 0.4)); },
-  beat() { SFX.click.triggerAttackRelease(0.02, tnow(), 0.25); },
+  swing(heavy) { play(heavy ? 'swing_heavy' : 'swing_light'); },
+  hit(crit, el) { play('hit_flesh'); if (el && el !== 'physical') play(el + '_hit', { vol: -4 }); if (crit) { play('crit_crack'); play('sub_thump'); } },
+  playerHurt() { play('hurt'); },
+  parry() { play('parry'); },
+  block() { play('block'); },
+  dodge() { play('dodge'); },
+  bow() { play('bow_twang'); },
+  spell(el) { play((el && E.sounds[el + '_cast'] ? el : 'physical') + '_cast'); },
+  explosion() { play('boom_small'); },
+  thunder(dist = 40) { const d = Math.min(3, dist / 40); play('thunder', { delay: d * 0.6, vol: -d * 4 }); },
+  levelUp() { play('levelup'); },
+  loot(r) { play('loot_' + clampR(r)); },
+  coin() { play('coin'); },
+  click() { play('ui_click'); },
+  dice(s = 0.6) { play('dice', { vol: -10 + s * 10 }); },
+  death() { play('kill_flesh'); },
+  roar() { play('roar'); },
+  quest() { play('quest'); },
+  shrine() { play('shrine'); },
+  waystone() { play('waystone'); },
+  beat() { play('beat'); },
 };
-
-function safe(fn) { return (...a) => { try { fn(...a); } catch (e) { /* audio glitches must never break the game */ } }; }
-for (const k of Object.keys(sfx)) sfx[k] = safe(sfx[k]);
-
-function hookEvents() {
-  bus.on('swing', ({ heavy }) => sfx.swing(heavy));
-  bus.on('hit', ({ src, tgt, crit, element, kind }) => { if (tgt.isPlayer) sfx.playerHurt(); else if (src?.isPlayer || src?.team === 'player') { sfx.hit(crit, element); } });
-  bus.on('parrySound', () => sfx.parry());
-  bus.on('block', () => sfx.block());
-  bus.on('dodge', () => sfx.dodge());
-  bus.on('shot', () => sfx.bow());
-  bus.on('bolt', ({ el }) => sfx.spell(el));
-  bus.on('spellCast', ({ element }) => sfx.spell(element));
-  bus.on('thunder', ({ dist }) => sfx.thunder(dist));
-  bus.on('levelUp', () => sfx.levelUp());
-  bus.on('pickup', (pk) => { if (pk.kind === 'gold') sfx.coin(); else if (pk.kind === 'item') sfx.loot(['common', 'uncommon', 'rare', 'epic', 'legendary', 'mythic'].indexOf(pk.data.rarity)); });
-  bus.on('kill', ({ victim }) => { if (!victim.isPlayer) sfx.death(); });
-  bus.on('worldBossAppears', () => sfx.roar());
-  bus.on('bossPhase', () => sfx.roar());
-  bus.on('questComplete', () => sfx.quest());
-  bus.on('tutorialStep', () => sfx.waystone());
-  bus.on('tutorialDone', () => sfx.quest());
-  bus.on('shrineBlessed', () => sfx.shrine());
-  bus.on('waystone', () => sfx.waystone());
-  bus.on('diceClack', ({ strength }) => sfx.dice(strength));
-  bus.on('diceRoll', () => sfx.dice(0.8));
-  bus.on('rareFate', () => sfx.levelUp());
-  bus.on('menuOpen', () => sfx.click());
-  bus.on('onBeat', () => sfx.beat());
-  bus.on('volume', applyVolume);
-}
+export { play as playSound, stop as stopSound, duck as duckMusic };
 
 export function audioReady() { return A.ready; }
+
+// window.__sfx: inspection hooks for tests / tuning (cheap; nothing runs until called)
+function debugApi() {
+  let an = null, buf = null;
+  const meter = () => {
+    if (!an) { an = E.ctx.createAnalyser(); an.fftSize = 2048; E.limPost.connect(an); buf = new Float32Array(an.fftSize); }
+    an.getFloatTimeDomainData(buf);
+    let pk = 0, ss = 0;
+    for (let i = 0; i < buf.length; i++) { const a = Math.abs(buf[i]); if (a > pk) pk = a; ss += buf[i] * buf[i]; }
+    return { peak: pk, rms: Math.sqrt(ss / buf.length) };
+  };
+  return {
+    E, CATS, play, stop, duck, activeVoices, meter,
+    get ready() { return E.ready; },
+    bake: () => E.bake,
+    list: () => Object.keys(E.sounds),
+    info: (id) => E.sounds[id] && { ...E.sounds[id], bufs: E.sounds[id].bufs.length },
+    state: () => Tone.getContext().state,
+  };
+}
+
