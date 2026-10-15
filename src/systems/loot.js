@@ -13,8 +13,11 @@ import { burst, particle, floatText, flash, ring } from '../render/vfx.js';
 import { bus } from '../core/events.js';
 import { groundHeight } from '../world/terrain.js';
 import { primaryBiome } from '../world/terrainGen.js';
+import { magicOn } from '../render/magic.js';
+import { lootBeamFx, setPickupProbe } from '../render/spellfx.js';
 
 const lootRng = new RNG(Date.now() & 0xffff);
+setPickupProbe((pk) => G.pickups.includes(pk));
 
 function groundY(x, z) { return G.realm === 'dungeon' ? 0 : groundHeight(x, z); }
 
@@ -26,6 +29,7 @@ export function spawnPickup(kind, x, z, data) {
   const pk = { kind, data, x, z, y, t: 0, vy: 4 + Math.random() * 2, h: 0.6, color };
   pk.g = addObject(pickupDrawable(pk));
   G.pickups.push(pk);
+  if (kind === 'item' && RARITY[data.rarity].index >= 2 && magicOn()) pk.gl = lootBeamFx(pk, color, RARITY[data.rarity].index);
   if (kind === 'item' && RARITY[data.rarity].index >= 3) { bus.emit('rareDrop', data); flash(x, y + 2, z, color, 20, 10, 1); }
   return pk;
 }
@@ -51,7 +55,7 @@ function pickupDrawable(pk) {
     emissive(ctx) {
       const [x, y, h] = place();
       if (spr.emis) ctx.drawImage(spr.emis.canvas(), x - spr.emis.ox, y - h - spr.emis.oy);
-      if (ri >= 1) {
+      if (ri >= 1 && !pk.gl) {
         // light column: crisp dithered pixels thinning upward
         const H = 14 + ri * 9;
         for (let k = 2; k < H; k++) {

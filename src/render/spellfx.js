@@ -817,3 +817,36 @@ export function abilityFlourish(p, elOrColor, big = false) {
   gburst(h.x, h.y, h.z, { count: big ? 14 : 8, speed: 6, kind: 'spark', size: 0.07, color: P.hot, color2: P.c1, life: 0.25, gravity: 0, drag: 3, hot: 1 });
   ringFx(p.pos.x, ground(p.pos.x, p.pos.z), p.pos.z, { radius: big ? 2.6 : 1.8, color: P.c1, color2: P.c2, dur: 0.24, th: 0.18, noise: 0.35, r0: 0.3 });
 }
+
+// ================================================================== loot
+// A light pillar over dropped gear, coloured and sized by rarity (rare and up), with a slow ring
+// at its base and motes drifting up. Lives as long as the pickup is on the ground.
+export function lootBeamFx(pk, colorHex, rarityIndex) {
+  const c = col(colorHex), hot = [255, 255, 255];
+  const H = 4 + rarityIndex * 2.2, seed = Math.random();
+  const gy = ground(pk.x, pk.z);
+  if (rarityIndex >= 4) {
+    flareFx(pk.x, gy + 1, pk.z, { size: 2.4, color: colorHex, color2: colorHex, dur: 0.5, star: true });
+    ringFx(pk.x, gy, pk.z, { radius: 4, color: colorHex, color2: colorHex, dur: 0.6, th: 0.2 });
+  }
+  let acc = 0;
+  return addMagic({
+    update(f, dt) {
+      f.t += dt;
+      acc += dt * (2 + rarityIndex * 2);
+      while (acc > 1) { acc -= 1; gpart({ x: pk.x + rnd(-0.3, 0.3), y: gy + 0.2, z: pk.z + rnd(-0.2, 0.2), gy, vy: rnd(1.5, 3), life: rnd(0.8, 1.4), size: rnd(0.08, 0.14), size1: 0.02, color: '#ffffff', color2: colorHex, kind: 'glow', hot: 1, drag: 0.3 }); }
+      return !pk.gone && !!G_pickupAlive(pk);
+    },
+    draw(f) {
+      const X = mx(pk.x), Yb = my(pk.z, 0);
+      const grow = easeOut(Math.min(1, f.t / 0.35));
+      const w = UPX * (0.32 + rarityIndex * 0.05), hh = H * UPX * grow;
+      const pulse = 0.85 + 0.15 * Math.sin(f.t * 3 + seed * 6);
+      quad(X, Yb - hh / 2, w, hh / 2, 0, K.SHAFT, 0.75 * pulse, c, c, 1.5, 34, 0, 0, 0.3, seed);
+      quad(X, Yb, UPX * 0.9, UPX * 0.9 * 0.45, 0, K.RING, 0.8, hot, c, 0.3, 0.4, 1, 0.4, 1, seed);
+      quad(X, Yb - UPX * (Math.max(0, pk.h) + 0.3), UPX * 0.9, UPX * 0.9, f.t * 0.7, K.STAR, 0.55 * pulse, c, c, 40, 4, 0.3);
+    },
+  });
+}
+let G_pickupAlive = () => true;
+export function setPickupProbe(fn) { G_pickupAlive = fn; }
