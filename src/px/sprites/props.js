@@ -12,7 +12,7 @@ export function propSprite(id, variant = 0, scale = 1) {
     const sz = [0.75, 1, 1.35][bucket];
     const fn = GEN[id] || GEN.rock;
     s = fn(srand(hashKey(id) * 31 + variant * 977 + bucket), sz, variant);
-    for (const f of new Set(s.frames)) f.outline();
+    for (const f of new Set(s.frames)) f.outlineSel();
     cache.set(key, s);
   }
   return s;

@@ -12,9 +12,9 @@
 // rolls in pixel-exact quarter turns with a stretch and afterimages, hurt recoil and a fall-down
 // death. Creatures get squash/stretch, anticipation and lunges on their attack frames, recoil and
 // death falls. Everything casts a directional shadow (see shadow.js).
-import { R, glowPx } from '../render/renderer.js';
+import { glowPx } from '../render/renderer.js';
 import { view } from './view.js';
-import { Pix, PPU, C, light } from './pix.js';
+import { Pix, PPU, C } from './pix.js';
 import { humanSprites, FEET, CX } from './sprites/human.js';
 import { creatureSprites } from './sprites/creatures.js';
 import { weaponSprite, shieldSprite, tomeSprite, ELEM_GLOW } from './sprites/weapons.js';
@@ -31,7 +31,6 @@ const easeIn = (t) => t * t;
 const easeIO = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 const angDiff = (a, b) => { let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d; };
 const lerpAng = (a, b, t) => a + angDiff(a, b) * t;
-void R;
 
 // ------------------------------------------------------------------ pix variants (cached on the Pix)
 export function variant(p, kind) {
@@ -564,14 +563,14 @@ export class Actor {
     };
     const shieldUp = !!st.block || kind === 'bash';
     const drawShield = () => {
-      if (!this.shield || e.dead) return;
+      if (!this.shield || e.dead || roll) return;
       let sp = vName === 'up' ? this.shield.back : vName === 'side' ? this.shield.edge : this.shield.front;
       if (shieldUp) sp = vName === 'up' ? this.shield.back : this.shield.front;
       const h0 = P.off;
       this.body(ctx, { pix: sp, emis: null }, px + Math.round(h0[0] + (shieldUp ? 0 : 0)) * k, py + Math.round(h0[1] + 1) * k, k, 0, false, { noAura: true });
     };
     const drawTome = () => {
-      if (!this.tome || e.dead) return;
+      if (!this.tome || e.dead || roll) return;
       const bob = Math.round(Math.sin(this.t * 2.6) * 1.5);
       const so = P.offS;
       const sx = so[0] + (so[0] >= 0 ? 4 : -4), sy = so[1] - 6 + bob;
@@ -591,12 +590,18 @@ export class Actor {
     }
     const W = P.weapon;   // { x, y, a } grip position + angle, or null
     const drawWeapon = () => {
-      if (!wspr || wspr.none || !W) return;
+      if (!wspr || wspr.none || !W || roll) return;
       const wx = px + Math.round(W.x) * k, wy = py + Math.round(W.y) * k;
       let rr = W.a, fl = false;
       // keep blades right side up when pointing left
       if (Math.cos(rr) < 0) { fl = true; rr += Math.PI; }
       if (P.smear && !this._xray) this.drawSmear(ctx, wspr, wx, wy, W.a, k, wpn);
+      if (P.streak && !this._xray) {
+        // thrust: pale speed copies trailing the blade
+        const sm = variant(wspr.pix, 'smear:' + (wpn.element && ELEM_GLOW[wpn.element] ? ELEM_GLOW[wpn.element] : '#fff6e0') + ':' + Math.round((wspr.len || 8) * 0.3));
+        for (let i = 2; i >= 1; i--) { ctx.globalAlpha = this.alpha * (i === 1 ? 0.7 : 0.35); blit(ctx, sm, wx - Math.round(Math.cos(W.a) * 3 * i * k), wy - Math.round(Math.sin(W.a) * 3 * i * k), k, rr, fl); }
+        ctx.globalAlpha = this.alpha;
+      }
       this.body(ctx, { pix: wspr.pix, emis: wspr.emis }, wx, wy, k, rr, fl, { noAura: true });
       const len = (wspr.len || 8) * k;
       const tipx = wx + Math.cos(W.a) * len, tipy = wy + Math.sin(W.a) * len;
@@ -613,7 +618,6 @@ export class Actor {
       }
       if (!this._xray) { this.trail.push({ a: W.a }); if (this.trail.length > 4) this.trail.shift(); }
     };
-    if (!P.smear && !this._xray) this.trail.length = 0;
 
     this._tipPx = [P.main[0] * k, P.main[1] * k];
     const arms = !roll && deathPhase < 2;
@@ -664,8 +668,7 @@ export class Actor {
   drawSmear(ctx, wspr, wx, wy, a, k, wpn) {
     const tr = this.trail;
     if (!tr.length) return;
-    const prev = tr[tr.length - 1].a;
-    if (Math.abs(angDiff(prev, a)) < 0.12) return;
+    if (Math.abs(angDiff(tr[0].a, a)) < 0.15) return;
     const col = wpn.element && ELEM_GLOW[wpn.element] ? ELEM_GLOW[wpn.element] : '#fff6e0';
     const from = Math.max(2, Math.round((wspr.len || 8) * 0.35));
     const sm = variant(wspr.pix, 'smear:' + col + ':' + from);
@@ -678,8 +681,13 @@ export class Actor {
         blit(ctx, sm, wx, wy, k, r2, f2);
       }
     };
-    if (tr.length > 1) fan(tr[tr.length - 2].a, prev, 0.4);
-    fan(prev, a, 0.9);
+    // a fan back through the last few frames, the older sweep fainter
+    let a1 = a;
+    for (let i = tr.length - 1, n = 0; i >= 0 && n < 3; i--, n++) {
+      const a0 = tr[i].a;
+      if (Math.abs(angDiff(a0, a1)) >= 0.06) fan(a0, a1, n === 0 ? 0.9 : n === 1 ? 0.55 : 0.3);
+      a1 = a0;
+    }
     ctx.globalAlpha = this.alpha;
   }
 
@@ -689,7 +697,7 @@ export class Actor {
     if (!wspr || wspr.none) return;
     const t = clamp01((e.deathT || 0) / 0.4);
     const sideSgn = this._deathSide || 1;
-    const gx = x + (sideSgn * -7) * k, gy = y + 2 * k;
+    const gx = x + (sideSgn * 3) * k, gy = y + 6 * k;
     const hx = x + (this._hand ? this._hand[0] : 0), hy = y + (this._hand ? this._hand[1] : -10);
     const arcH = Math.sin(t * Math.PI) * 6 * k;
     const wx = Math.round(lerp(hx, gx, t)), wy = Math.round(lerp(hy, gy, t) - arcH);
@@ -725,7 +733,7 @@ export class Actor {
     const hang = (s, sw) => [s[0] + dx * sw * A * 0.9 + (vName === 'side' ? 0 : 0), s[1] + armL - 1 - Math.abs(sw) * (sprint ? 1.5 : 0.7) + dy * sw * A * 0.5];
     let main = hang(mainS, -swingPh), off = hang(offS, swingPh);
     if (vName !== 'side') { main[0] += (vName === 'down' ? -0.4 : 0.4); off[0] += (vName === 'down' ? 0.4 : -0.4); }
-    let weapon = null, smear = false, weaponBehind = vName === 'up', twoHand = false, offHidden = false;
+    let weapon = null, smear = false, streak = false, weaponBehind = vName === 'up', twoHand = false, offHidden = false;
     let mainBehind = false, offBehind = false;
     const vec = (a, r) => [Math.cos(a) * r, Math.sin(a) * r];
     const norm = (v) => { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; };
@@ -801,6 +809,7 @@ export class Actor {
         weapon = wpn ? { x: hp[0], y: hp[1], a: wa } : null;
         if (twoHand && wtype !== 'bow') off = [hp[0] - Math.cos(wa) * (pole ? -4 : 2), hp[1] - Math.sin(wa) * (pole ? -4 : 2)];
         smear = K.smear && !!wpn && K.mode === 'arc';
+        streak = K.smear && !!wpn && K.mode === 'thrust' && atk.streak;
         if (!wpn) {
           // claws: both hands rake, the off hand trailing the main one
           const oa = alpha - K.phi * 0.6;
@@ -808,7 +817,7 @@ export class Actor {
         }
       } else if (K.mode === 'overhead') {
         main = [cA[0] + dx * K.r, cA[1] + dy * K.r * 0.85 - K.lift];
-        const vw = norm([-dx * 0.7 + side.x * 0.3, -1 - dy * 0.3]), vm = norm([side.x * 0.9, -0.8 + side.y * 0.4]), ve = [dx, dy];
+        const vw = norm([-dx * 0.7 + side.x * 0.3, -1 - dy * 0.3]), vm = norm([side.x * 0.9 + dx * 0.3, -0.8 + side.y * 0.4]), ve = norm([dx, dy + 0.75]);
         const t = K.wt;
         const v = norm([(1 - t) * (1 - t) * vw[0] + 2 * t * (1 - t) * vm[0] + t * t * ve[0], (1 - t) * (1 - t) * vw[1] + 2 * t * (1 - t) * vm[1] + t * t * ve[1]]);
         weapon = wpn ? { x: main[0], y: main[1], a: ang(v) } : null;
@@ -822,7 +831,7 @@ export class Actor {
         main = [cA[0] + dx * K.r + side.x * 1.5, cA[1] + dy * K.r * 0.8 - K.lift + 1];
         if (wpn) weapon = { x: main[0], y: main[1], a: K.up ? -Math.PI / 2 + side.x * 0.12 : alpha + K.psi };
         off = K.up ? [cA[0] - side.x * 3, cA[1] - 7] : [cA[0] + dx * (K.r + 1) - side.x * 2, cA[1] + dy * (K.r + 1) * 0.8 - 3];
-        if (K.nova) { off = [cA[0] - side.x * K.spread, cA[1] - K.olift]; main = [cA[0] + side.x * K.spread, cA[1] - K.olift]; if (weapon) { weapon.x = main[0]; weapon.y = main[1]; weapon.a = K.wa; } }
+        if (K.nova) { main = [cA[0] + side.x * K.spread + dx * 2, cA[1] - K.olift]; off = [main[0], main[1] + 3]; if (weapon) { weapon.x = main[0]; weapon.y = main[1]; weapon.a = K.wa; } }
         if (vName === 'up') weaponBehind = true;
       } else if (K.mode === 'bow') {
         off = [cA[0] + dx * (armL + 1), cA[1] + dy * (armL + 1) - 1];
@@ -888,7 +897,7 @@ export class Actor {
     const mainBack = vName === 'down' && main[0] < tl - 0.5 && main[1] > sy + 1;
     const offBack = vName === 'down' && off[0] > tr + 0.5 && off[1] > sy + 1;
     const save = { main: [main[0], main[1]], off: [off[0], off[1]], wa: weapon ? weapon.a : null };
-    return { mainS, offS, main, off, weapon, smear, weaponBehind, twoHand, offHidden, mainBehind, offBehind, mainBack, offBack, save };
+    return { mainS, offS, main, off, weapon, smear, streak, weaponBehind, twoHand, offHidden, mainBehind, offBehind, mainBack, offBack, save };
   }
 
   // ================================================================ creatures
@@ -1020,13 +1029,13 @@ function phases(u, su) {
 }
 // key poses: [wind, strike, hold, follow]; rest = guard (the rig blends back to it)
 const ARC = {
-  slash: { phi: [-1.9, 1.25, 1.45, 1.75], r: [4, 7, 7, 5.5], psi: [-0.85, 0, 0.15, 0.55], lift: [2, 0, 0, -1] },
-  sweep: { phi: [-2.5, 1.6, 1.85, 2.3], r: [5, 8, 8, 6], psi: [-0.7, 0, 0.1, 0.5], lift: [1, 0, 0, -1] },
+  slash: { phi: [-1.9, 0.5, 0.85, 1.7], r: [4, 7, 7, 5.5], psi: [-0.85, 0.05, 0.2, 0.6], lift: [2, 0, 0, -1] },
+  sweep: { phi: [-2.5, 0.6, 1.0, 2.2], r: [5, 8, 8, 6], psi: [-0.7, 0.05, 0.15, 0.5], lift: [1, 0, 0, -1] },
   claw: { phi: [-1.3, 1.0, 1.15, 1.35], r: [3, 7, 7, 5], psi: [-0.5, 0, 0, 0.3], lift: [2, 0, 0, 0] },
   throw: { phi: [2.6, 0, -0.1, -0.3], r: [4, 7, 7, 6], psi: [0.6, 0, 0, 0], lift: [4, 1, 0, 0] },
-  thrust: { phi: [0.35, 0, 0, 0.05], r: [0, 8, 8, 6], psi: [-0.15, 0, 0, 0], lift: [1, 0, 0, 0], thrust: true },
+  thrust: { phi: [0.5, 0, 0, 0.05], r: [-2, 8, 8, 6], psi: [-0.2, 0, 0, 0], lift: [2, 0, 0, 0], thrust: true },
   stab: { phi: [0.3, 0, 0, 0.05], r: [1, 7, 7, 5], psi: [-0.12, 0, 0, 0], lift: [1, 0, 0, 0], thrust: true },
-  spearthrust: { phi: [0.2, 0, 0, 0], r: [-2, 10, 10, 7], psi: [-0.1, 0, 0, 0], lift: [1, 0, 0, 0], thrust: true },
+  spearthrust: { phi: [0.3, 0, 0, 0], r: [-4, 10, 10, 7], psi: [-0.15, 0, 0, 0], lift: [2, 0, 0, 0], thrust: true },
 };
 function seg(ph, keys, rest, ease = easeOut) {
   // keys: [wind, strike, hold, follow]
@@ -1053,7 +1062,7 @@ function attackPose(kind, u, su, wtype) {
   if (ARC[kind]) {
     const K = ARC[kind];
     const rest = { phi: K.phi[0] * 0.4, r: 4, psi: 0, lift: 0 };
-    return { ...base, mode: K.thrust ? 'thrust' : 'arc', phi: seg(ph, K.phi, rest.phi), r: seg(ph, K.r, rest.r), psi: seg(ph, K.psi, rest.psi), lift: seg(ph, K.lift, 0), smear: ph.inStrike || (ph.inHold && ph.h < 0.5) };
+    return { ...base, mode: K.thrust ? 'thrust' : 'arc', phi: seg(ph, K.phi, rest.phi), r: seg(ph, K.r, rest.r), psi: seg(ph, K.psi, rest.psi), lift: seg(ph, K.lift, 0), smear: ph.inStrike || (ph.inHold && ph.h < 0.5), streak: ph.inStrike || (ph.inHold && ph.h < 0.35) };
   }
   if (kind === 'backslash') {
     const K = ARC.slash;
@@ -1074,7 +1083,7 @@ function attackPose(kind, u, su, wtype) {
   if (kind === 'castup') return { ...base, mode: 'cast', up: true, r: 1, lift: u < 0.8 ? 6 * easeOut(clamp01(u * 3)) : 6 * (1 - (u - 0.8) * 5), psi: 0, legs: 'stance', lunge: 0, bob: 0 };
   if (kind === 'nova') {
     const raise = ph.inWind ? easeOut(ph.w) : ph.inStrike ? 1 - easeIn(ph.s) : 0;
-    return { ...base, mode: 'cast', nova: true, r: 1, lift: 0, psi: 0, spread: lerp(7, 3, raise), olift: lerp(-2, 9, raise), wa: ph.inWind ? -Math.PI / 2 : Math.PI / 2, legs: ph.inWind ? 'stance' : 'stance', bob: ph.inWind ? -1 : 2, lunge: 0, face: ph.inHold ? 3 : 0 };
+    return { ...base, mode: 'cast', nova: true, r: 1, lift: 0, psi: 0, spread: lerp(2, 1, raise), olift: lerp(-3, 8, raise), wa: -Math.PI / 2, legs: 'stance', bob: ph.inWind ? -1 : 2, lunge: 0, face: ph.inHold ? 3 : 0 };
   }
   if (kind === 'bowdraw') return { ...base, mode: 'bow', pull: u, recoil: 0, lunge: 0, legs: 'stance', bob: 1 };
   if (kind === 'bowrelease') return { ...base, mode: 'bow', pull: 0, recoil: u < 0.3 ? Math.round((1 - u / 0.3) * 3) : 0, lunge: u < 0.2 ? -1 : 0, legs: 'stance', bob: 1 };
@@ -1084,4 +1093,3 @@ function attackPose(kind, u, su, wtype) {
   const K = ARC.slash;
   return { ...base, mode: 'arc', phi: seg(ph, K.phi, 0), r: seg(ph, K.r, 4), psi: seg(ph, K.psi, 0), lift: seg(ph, K.lift, 0), smear: ph.inStrike };
 }
-void light; void CX; void lerpAng;

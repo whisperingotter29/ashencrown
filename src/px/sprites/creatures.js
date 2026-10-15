@@ -26,7 +26,7 @@ function ball(p, cx, cy, rx, ry, R, o = {}) {
   return p;
 }
 function finish(p, e) {
-  p.outline();
+  p.outlineSel();
   for (let i = 3; i < e.d.length; i += 4) if (e.d[i]) return { pix: p, emis: e };
   return { pix: p, emis: null };
 }

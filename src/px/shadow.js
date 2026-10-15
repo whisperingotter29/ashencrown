@@ -33,7 +33,7 @@ let lastT = -1;
 export function updateSun() {
   sun.frame++;
   const t = atmo.timeOfDay;
-  if (t === lastT && sun.key && sun._ind === atmo.indoor) return;
+  if (t === lastT && sun.key && sun._ind === atmo.indoor && shadowOpts.enabled) return;
   lastT = t; sun._ind = atmo.indoor;
   if (atmo.indoor) { sun.cast = false; sun.a = 0; return; }
   const elev = sunElevation();
@@ -147,9 +147,11 @@ export function castLine(sctx, x0, y0, h0, x1, y1, h1, w = 1) {
 
 // ------------------------------------------------------------------ the shadow stage
 let layer = null, lc = null;
+export const shadowOpts = { enabled: true };   // cast shadows on / off (contact blobs stay)
 export function drawCastShadows(ctx, list) {
   updateSun();
   budget = BUDGET;
+  if (!shadowOpts.enabled) sun.cast = false;
   if (!sun.cast) return;
   const W = view.W, H = view.H;
   if (!layer) { layer = document.createElement('canvas'); lc = layer.getContext('2d'); }

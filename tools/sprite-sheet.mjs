@@ -66,11 +66,12 @@ RACES.forEach((r, i) => tryit('race ' + r.id, () => {
   const bare = humanSprites(raceLook(r.look, { skin: i, hair: i }, { shirt: cls.color, pants: '#3a3028' }));
   const dressed = humanSprites({ ...raceLook(r.look, { skin: i + 1, hair: i + 2 }, { shirt: cls.color, pants: '#3a3028' }), ...armorLook(eq) });
   const row = [];
-  for (const v of ['down', 'side', 'up']) row.push(bare.views[v].idle[0].pix);
-  for (const f of bare.views.down.run) row.push(f.pix);
-  row.push(bare.views.down.cast[0].pix, bare.views.down.hurt[0].pix);
-  for (const v of ['down', 'side', 'up']) row.push(dressed.views[v].idle[0].pix);
-  for (const f of dressed.views.side.run) row.push(f.pix);
+  // body frames only: arms, weapons and shields are drawn at runtime by the actor rig
+  for (const v of ['down', 'side', 'up']) row.push(bare.frame(v, {}).pix);
+  for (let ph = 0; ph < 6; ph++) row.push(bare.frame('down', { legs: 'run', ph, bob: [0, 1, -1, 0, 1, -1][ph] }).pix);
+  row.push(bare.frame('down', { legs: 'stance', face: 2 }).pix, bare.frame('down', { legs: 'tuck', bob: 3 }).pix);
+  for (const v of ['down', 'side', 'up']) row.push(dressed.frame(v, {}).pix);
+  for (let ph = 0; ph < 6; ph++) row.push(dressed.frame('side', { legs: 'run', ph, bob: [0, 1, -1, 0, 1, -1][ph], lean: 1, sway: 1, cape: ph % 4 }).pix);
   rows.push(row);
 }));
 writeFileSync(out + '/races.png', png(sheet(rows), 3));
@@ -98,7 +99,7 @@ for (const [body, list] of Object.entries(byBody)) {
     if (sp.type === 'human') {
       k = upscaleFor(sp.scale, true);
       const hs = humanSprites({ ...sp.look, scale: Math.max(0.8, Math.min(1.55, sp.scale / k)) });
-      frames = [hs.views.down.idle[0], hs.views.side.run[1], hs.views.up.idle[0]];
+      frames = [hs.frame('down', {}), hs.frame('side', { legs: 'run', ph: 1, bob: 1, lean: 1 }), hs.frame('up', {})];
       if (sp.weapon) { const w = weaponSprite(sp.weapon); frames.push(w); }
     } else {
       k = upscaleFor(sp.scale, false);

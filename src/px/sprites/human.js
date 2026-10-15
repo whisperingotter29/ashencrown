@@ -32,10 +32,17 @@ export function humanSprites(look) {
     frame(view, pose = {}) {
       const k = view + ':' + (pose.legs || 'stand') + (pose.ph | 0) + ':' + (pose.bob | 0) + ':' + (pose.lean | 0) + ':' + (pose.hdx | 0) + ':' + (pose.hdy | 0) + ':' + (pose.cape | 0) + ':' + (pose.sway | 0) + ':' + (pose.face | 0) + ':' + (pose.wing | 0);
       let f = frames.get(k);
-      if (!f) { f = fig(L, m, view, pose); frames.set(k, f); }
+      if (!f) {
+        // poses are generated lazily; a hard cap keeps odd pose combinations from piling up
+        if (frames.size > 480) frames.delete(frames.keys().next().value);
+        f = fig(L, m, view, pose); frames.set(k, f);
+      }
       return f;
     },
   };
+  // looks are shared by every actor wearing them; drop the oldest once there are many (actors keep
+  // their own reference, so nothing in use is lost)
+  if (cache.size > 360) cache.delete(cache.keys().next().value);
   cache.set(key, s);
   return s;
 }
