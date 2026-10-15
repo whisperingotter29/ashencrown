@@ -287,7 +287,10 @@ export class Player extends Entity {
       if (!this.action && !this.blocking && !this.drawing) this.facing = dampAngle(this.facing, Math.atan2(mx, mz), 16, dt);
       if (this.wading && Math.random() < dt * 10) particle({ x: this.pos.x, y: wl + 0.05, z: this.pos.z, vx: (Math.random() - 0.5) * 2, vy: 2, vz: (Math.random() - 0.5) * 2, life: 0.4, size: 0.25, color: '#d8f0ff', gravity: -9 });
     } else { this.moveSpeedNow = 0; this.vel.set(0, 0, 0); }
-    if ((this.action && this.action.faceAim) || this.blocking || this.drawing) this.facing = dampAngle(this.facing, Math.atan2(this.aim.x - this.pos.x, this.aim.z - this.pos.z), 20, dt);
+    if ((this.action && this.action.faceAim) || this.blocking || this.drawing) {
+      const lk = this.action?.lock, f = lk && !lk.dead ? lk.pos : this.aim;
+      this.facing = dampAngle(this.facing, Math.atan2(f.x - this.pos.x, f.z - this.pos.z), 20, dt);
+    }
 
     // camera look-ahead toward aim when in combat
     const la = inCombat ? 2.5 : 0;
@@ -348,11 +351,22 @@ export class Player extends Entity {
     const dur = (w.hands === 2 ? 0.56 : 0.36) / speed * (final ? 1.15 : 1);
     const su = w.hands === 2 ? 0.36 : 0.28;
     const kind = attackKindFor(w.type, idx);
-    this.action = { type: 'attack', t: 0, dur, strikeAt: dur * su, cancelAt: dur * (final ? 0.78 : 0.62), kind, combo: idx, faceAim: true, hit: false, final };
+    // swing step + soft lock: pick the closest enemy near the aim line and step into it during the
+    // wind-up, so a held attack chain keeps connecting instead of whiffing just out of reach
+    const range = w.range || 2;
+    const aimAng = Math.atan2(this.aim.x - this.pos.x, this.aim.z - this.pos.z);
+    let lock = null, lockD = range + 3.2;
+    for (const e of entitiesNear(this.pos.x, this.pos.z, range + 3.2, (e) => !e.dead && hostile(this, e))) {
+      const dist = Math.hypot(e.pos.x - this.pos.x, e.pos.z - this.pos.z);
+      if (dist < lockD && Math.abs(angleDiff(aimAng, Math.atan2(e.pos.x - this.pos.x, e.pos.z - this.pos.z))) < 0.9) { lock = e; lockD = dist; }
+    }
+    const maxStep = w.hands === 2 ? 1.7 : 2.4;
+    const step = lock ? clamp(lockD - range * 0.7, 0, maxStep) : 0.3;
+    this.action = { type: 'attack', t: 0, dur, strikeAt: dur * su, cancelAt: dur * (final ? 0.78 : 0.62), kind, combo: idx, faceAim: true, hit: false, final, lock, step };
     this.st.action = 'attack'; this.st.kind = kind; this.st.actionT = 0; this.st.strikeU = su;
     this.combo++;
     this.comboTimer = dur + 0.5;
-    this.facing = Math.atan2(this.aim.x - this.pos.x, this.aim.z - this.pos.z);
+    this.facing = lock ? Math.atan2(lock.pos.x - this.pos.x, lock.pos.z - this.pos.z) : aimAng;
     bus.emit('swing', { kind, weapon: w.type });
   }
 
@@ -533,6 +547,10 @@ export class Player extends Entity {
     switch (a.type) {
       case 'attack':
         this.st.actionT = Math.min(1, a.t / a.dur);
+        if (a.step > 0 && a.t <= a.strikeAt + 0.03) {
+          const s = a.step * Math.min(dt, a.strikeAt + 0.03 - (a.t - dt)) / (a.strikeAt + 0.03);
+          if (s > 0) this.move(Math.sin(this.facing) * s, Math.cos(this.facing) * s, dt);
+        }
         if (!a.hit && a.t >= a.strikeAt) { a.hit = true; this.strike(a); }
         speedMult = a.t < a.strikeAt + 0.06 ? 0.45 : 0.75;
         if (a.t >= a.dur) { this.action = null; this.st.action = null; }
