@@ -104,8 +104,7 @@ function render(justDone = false) {
   T.padShown = pad();
   // highlight the relevant hotbar slot
   document.querySelectorAll('#hud .slot.tut-glow').forEach((e) => e.classList.remove('tut-glow'));
-  const slots = document.querySelectorAll('#hud .skillbar .slot');
-  if (s.slot !== undefined && slots[s.slot]) slots[s.slot].classList.add('tut-glow');
+  if (s.slot !== undefined) document.querySelector(`#hud [data-ability-key="${ABILITY_KEYS[s.slot]}"]`)?.classList.add('tut-glow');
   if (s.sig) document.querySelector('#hud .slot.sig')?.classList.add('tut-glow');
 }
 

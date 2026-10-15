@@ -6,6 +6,7 @@ import { bus } from './events.js';
 import { R } from '../render/renderer.js';
 import { cam, kick, addShake } from '../world/cameraRig.js';
 import { postKick } from '../render/post.js';
+import { keyForAbility } from '../systems/loadout.js';
 
 // ---------------------------------------------------------------- rumble
 let lastRumble = 0, lastStrength = 0;
@@ -34,8 +35,8 @@ function hudJolt() {
   void hud.offsetWidth;
   hud.classList.add('hurt-shake');
 }
-export function slotFired(index) {
-  const s = document.querySelectorAll('#hud .skillbar .slot')[index];
+export function slotFired(key) {
+  const s = document.querySelector(`#hud [data-ability-key="${key}"]`);
   if (!s) return;
   s.classList.remove('fired'); void s.offsetWidth; s.classList.add('fired');
 }
@@ -115,8 +116,8 @@ export function initFeel() {
     const a = Math.atan2(p.aim.x - p.pos.x, p.aim.z - p.pos.z);
     kick(Math.sin(a), Math.cos(a), 1);
     rumble(0.15, 0.3, 50);
-    const i = G.char.skillBar.indexOf(id);
-    if (i >= 0) slotFired(i);
+    const k = keyForAbility(id);
+    if (k) slotFired(k);
   });
   bus.on('kill', ({ victim, killer }) => {
     if (victim.isPlayer) { rumble(1, 1, 600); addShake(0.6); return; }
