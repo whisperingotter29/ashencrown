@@ -647,7 +647,7 @@ function playFrame(dt, rawDt) {
     if (e.target === p && e.state === 'chase') inCombat = true;
     if (e.boss && e.target && Math.hypot(e.pos.x - p.pos.x, e.pos.z - p.pos.z) < 50) boss = e;
   }
-  if (boss && G.bossActive !== boss) { setMusic('boss'); cam.contextZoom = 0.12; }
+  if (boss && G.bossActive !== boss) { setMusic('boss'); cam.contextZoom = 0.12; if (!boss._introduced) { boss._introduced = true; bus.emit('bossEngaged', boss); } }
   if (!boss && G.bossActive) { cam.contextZoom = 0; lastBiome = null; if (G.realm === 'dungeon') setMusic('dungeon'); }
   G.bossActive = boss;
   G.combatTimer = inCombat ? 4 : Math.max(0, G.combatTimer - dt);

@@ -6,6 +6,7 @@ import { bus } from './events.js';
 import { R } from '../render/renderer.js';
 import { cam, kick, addShake } from '../world/cameraRig.js';
 import { postKick } from '../render/post.js';
+import { banner } from '../ui/ui.js';
 import { keyForAbility } from '../systems/loadout.js';
 
 // ---------------------------------------------------------------- rumble
@@ -41,12 +42,26 @@ export function slotFired(key) {
   s.classList.remove('fired'); void s.offsetWidth; s.classList.add('fired');
 }
 
+// ---------------------------------------------------------------- boss intro
+// Letterbox slides in, time slows for a breath, the camera punches and the name card lands.
+let lbT = 0;
+function bossIntro(boss) {
+  lbT = 2.6;
+  G.slowmo = Math.max(G.slowmo || 0, 0.35);
+  postKick({ punch: 1, aberr: 0.6, roll: (Math.random() < 0.5 ? -1 : 1) * 0.25 });
+  addShake(0.35 * (G.settings.screenShake ?? 1));
+  rumble(0.8, 0.6, 500);
+  banner(boss.world ? 'World Boss' : 'Boss', boss.name || boss.tpl?.name || 'Unknown', boss.tpl?.title || boss.tpl?.desc || '');
+}
+
 // ---------------------------------------------------------------- per-frame
 let beatT = 0;
 // strongest player hit this frame (AoE swings hit many things at once; feel the best one)
 let pendingHit = null;
 export function updateFeel(dt) {
   cam.shakeScale = G.settings.screenShake ?? 1;
+  if (lbT > 0) { lbT -= dt; R.letterbox = Math.min(0.09, R.letterbox + dt * 0.4) * (lbT > 0.4 ? 1 : lbT / 0.4); }
+  else if (R.letterbox > 0) R.letterbox = Math.max(0, R.letterbox - dt * 0.3);
   R.damage = Math.max(0, R.damage - dt * 1.6);
   if (pendingHit) {
     const h = pendingHit; pendingHit = null;
@@ -131,6 +146,7 @@ export function initFeel() {
     } else if (victim.elite) { addShake(0.3 * (G.settings.screenShake ?? 1)); rumble(0.6, 0.5, 160); postKick({ roll: (Math.random() < 0.5 ? -1 : 1) * 0.3, punch: 0.7, aberr: 0.5 }); }
     else rumble(0.25, 0.3, 60);
   });
+  bus.on('bossEngaged', bossIntro);
   bus.on('tutorialStep', () => rumble(0.1, 0.4, 80));
   bus.on('tutorialDone', () => rumble(0.3, 0.6, 300));
   bus.on('levelUp', () => { addShake(0.25 * (G.settings.screenShake ?? 1)); rumble(0.3, 0.7, 420); postKick({ punch: 1, aberr: 0.4 }); });
