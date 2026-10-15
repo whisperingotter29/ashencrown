@@ -21,6 +21,10 @@ export const SKILLS = {
   throwflask: { id: 'throwflask', name: 'Throw Flask', type: 'flask', cd: 0.8, stamina: 8, dmg: 1.4, radius: 3.5, desc: 'Lob a volatile flask (uses a Flask charge).', source: 'Alchemist starting skill.' },
   totem: { id: 'totem', name: 'Thorn Totem', type: 'totem', cd: 10, stamina: 20, duration: 15, radius: 6, desc: 'Plant a totem that roots and pricks nearby foes.', source: 'Warden starting skill.' },
   crafting: { id: 'crafting', name: 'Crafting Mastery', type: 'passive', passive: { craftBonus: 1 }, desc: 'Passive: crafting yields an extra affix, salvaging yields more, upgrades cost less.', source: 'Trainers at Kharak Dun and Lanternfall.' },
+  impale: { id: 'impale', name: 'Impale', type: 'melee', cd: 3, stamina: 12, dmg: 2.1, range: 4.6, angle: 34, knock: 7, thrust: true, weapons: ['spear', 'halberd'], desc: 'A driving thrust that skewers everything in a line and hurls it back.', source: 'Spear and halberd technique.' },
+  arcanenova: { id: 'arcanenova', name: 'Arcane Pulse', type: 'nova', cd: 3.5, stamina: 0, mana: 8, dmg: 1.7, radius: 5, element: 'void', caster: true, weapons: ['staff', 'wand'], desc: 'Release a pulse of raw arcana that blasts nearby foes away.', source: 'Staff and wand technique.' },
+  manaward: { id: 'manaward', name: 'Mana Ward', type: 'buff', cd: 12, stamina: 0, mana: 15, duration: 6, buff: { shieldPct: 22 }, element: 'void', weapons: ['staff', 'wand'], desc: 'Wrap yourself in a ward that absorbs 22% of your max health.', source: 'Staff technique.' },
+  arcanebarrage: { id: 'arcanebarrage', name: 'Arcane Barrage', type: 'barrage', cd: 2.5, stamina: 0, mana: 6, dmg: 0.9, count: 5, element: 'void', weapons: ['wand', 'staff'], desc: 'Fire a burst of seeking arcane missiles.', source: 'Wand technique.' },
   trap: { id: 'trap', name: 'Snare Trap', type: 'trap', cd: 10, stamina: 14, dmg: 1.5, radius: 2.5, status: { root: 3 }, desc: 'Set a trap that roots and wounds the first foe to touch it.', source: 'Reward: Sylvanhold quest "The Poacher\'s Trap".' },
 };
 
