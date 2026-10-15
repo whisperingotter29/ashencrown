@@ -110,3 +110,6 @@ world (`src/render/magic.js`, recipes in `src/render/spellfx.js`, element palett
   potions Z/V). Windows reuse their DOM node so clicks no longer flash the UI.
 - Characters: reworked human sprite (hair, faces, gear shading), better run and swing poses, and
   directional cast shadows (`src/px/shadow.js`) that follow the sun and fade at night and indoors.
+- Follow-up: melee swing step + soft target lock; blade smear limited to a crescent near the tip;
+  greatswords ~15% shorter; UI windows morph in place (no flicker), drag/drop equip, fast travel
+  list by region; audio bake down to ~2.5s / 20MB with footsteps, streak shouts and more layers.
