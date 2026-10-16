@@ -32,6 +32,19 @@ const easeIO = (t) => (t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2);
 const angDiff = (a, b) => { let d = (b - a) % TAU; if (d > Math.PI) d -= TAU; if (d < -Math.PI) d += TAU; return d; };
 const lerpAng = (a, b, t) => a + angDiff(a, b) * t;
 
+// which way the rim light comes from right now: the sun by day (the side facing away from the
+// shadows), cool moonlight from above at night, warm lantern light indoors and underground
+let rimF = -1, rimS = null;
+function rimNow() {
+  if (rimF === sun.frame && rimS) return rimS;
+  rimF = sun.frame;
+  const dx = sun.lx > 0.2 ? -1 : sun.lx < -0.2 ? 1 : 0;
+  if (sun._ind) rimS = { kind: 'rim:0:-1:#ffc890', a: 0.32 };
+  else if (sun.a > 0.08) rimS = { kind: `rim:${dx}:-1:#fff2cc`, a: Math.min(0.75, 0.25 + sun.a * 1.2) };
+  else rimS = { kind: 'rim:0:-1:#a8c0ff', a: 0.42 };
+  return rimS;
+}
+
 // ------------------------------------------------------------------ pix variants (cached on the Pix)
 export function variant(p, kind) {
   if (!p) return null;
@@ -49,6 +62,17 @@ export function variant(p, kind) {
     for (let y = -1; y <= p.h; y++) for (let x = -1; x <= p.w; x++) {
       if (A(x, y) > 40) continue;
       if (A(x - 1, y) > 100 || A(x + 1, y) > 100 || A(x, y - 1) > 100 || A(x, y + 1) > 100) v.set(x + 1, y + 1, [255, 204, 72, 255]);
+    }
+  }
+  else if (kind.startsWith('rim:')) {
+    // rim light: the outline pixels that face the light pick up its colour, so bodies read as round
+    const [, sdx, sdy, col] = kind.split(':'), dx = +sdx, dy = +sdy, L = C(col);
+    v = new Pix(p.w, p.h); v.ox = p.ox; v.oy = p.oy;
+    const A = (x, y) => (x < 0 || y < 0 || x >= p.w || y >= p.h ? 0 : p.d[(y * p.w + x) * 4 + 3]);
+    for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) {
+      if (A(x, y) < 100 || A(x + dx, y + dy) > 40) continue;
+      const i = (y * p.w + x) * 4;
+      v.set(x, y, [Math.round(p.d[i] * 0.35 + L[0] * 0.65), Math.round(p.d[i + 1] * 0.35 + L[1] * 0.65), Math.round(p.d[i + 2] * 0.35 + L[2] * 0.65), 255]);
     }
   }
   else if (kind === 'stone') v = p.tinted('#8a8478', 0.9);
@@ -385,6 +409,12 @@ export class Actor {
     else if (this.flash === 'hurt') p = variant(p, 'hurt');
     else if (this.aura && !opts.noAura) p = variant(p, 'aura:' + this.aura);
     blit(ctx, p, x, y, k, rot, flip);
+    if (!rot && !this.flash && !opts.noRim) {
+      const rim = rimNow(), a0 = ctx.globalAlpha;
+      ctx.globalAlpha = a0 * rim.a;
+      blit(ctx, variant(flip ? variant(fr.pix, 'flip') : fr.pix, rim.kind), x, y, k, 0, false);
+      ctx.globalAlpha = a0;
+    }
     if (fr.emis && this.flash !== 'stone' && this.flash !== 'frozen') this.ops.push([fr.emis, x, y, k, rot, flip, ctx.globalAlpha]);
     if (opts.record !== false && this._draws) this._draws.push({ p: fr.pix, dx: x - this._ax, dy: y - this._ay, k, rot, flip });
     if (opts.cast && this.shadowInfo && !rot) this.shadowInfo.bodies.push({ p: flip ? variant(fr.pix, 'flip') : fr.pix, x, y: opts.cast.y, h: opts.cast.h, k });

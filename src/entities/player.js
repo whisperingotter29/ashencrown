@@ -1,5 +1,6 @@
 // The player: input-driven movement, continuous melee combos (hold to keep swinging), auto-firing
 // bows and crossbows, casting, dodge, block/parry. Weapons come from the loadout (keys 1-4).
+import { rarityOfRace, rarityOfClass } from '../data/fateRarity.js';
 import { Vec3 } from '../core/vec3.js';
 import { G } from '../game.js';
 import { Entity } from './entity.js';
@@ -305,6 +306,12 @@ export class Player extends Entity {
     this.st.combat = inCombat || this.drawing || this.blocking;
     // lights
     if (this.lantern || G.realm !== 'surface' || G.dungeon) requestLight(this.pos.x, this.pos.y + 3, this.pos.z, G.realm === 'deep' ? '#c0d8ff' : '#ffc890', G.realm === 'surface' && !this.lantern ? 0 : G.realm === 'deep' ? 14 : 10, G.realm === 'deep' ? 21 : 16);
+    // Mythic and rarer fates shed a few motes of their rarity colour
+    const fr = G.char && (rarityOfRace(G.char.race).index >= rarityOfClass(G.char.cls).index ? rarityOfRace(G.char.race) : rarityOfClass(G.char.cls));
+    if (fr && fr.index >= 3 && !this.stealthed && Math.random() < dt * (fr.index * 2.2)) {
+      const a = Math.random() * Math.PI * 2;
+      particle({ x: this.pos.x + Math.cos(a) * 0.45, y: this.pos.y + 0.3 + Math.random() * 1.4, z: this.pos.z + Math.sin(a) * 0.3, vy: 0.9 + Math.random() * 0.6, life: 0.9, size: 0.13, color: fr.id === 'supreme' ? ['#fff0a0', '#a0f0ff', '#ffa0f0'][Math.floor(Math.random() * 3)] : fr.color, gl: true });
+    }
     this.syncModel(dt);
   }
 

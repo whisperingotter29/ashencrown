@@ -11,6 +11,7 @@ import { G } from '../game.js';
 import { el, esc, kc, root, bindTip, fmtTime, uiUnit, pxTitle } from './ui.js';
 import { CLASS_BY_ID } from '../data/classes.js';
 import { RACE_BY_ID } from '../data/races.js';
+import { rarityOfRace, rarityOfClass } from '../data/fateRarity.js';
 import { abilityDef } from '../systems/abilities.js';
 import { skillIcon, simpleIcon, itemIcon } from './icons.js';
 import { xpToNext } from '../systems/stats.js';
@@ -360,7 +361,7 @@ export function updateHud(dt) {
     if (signature() !== sigKey) refreshSkillbar();
     setText(H.lvl, c.level);
     setText(H.npN, c.name + (c.title ? ' ' + c.title : ''));
-    setHTML(H.npS, `${esc(race.name)} ${esc(cls.name)}${c.statPoints ? ` · <span class="pts">${c.statPoints} points ${kc('C')}</span>` : ''}`);
+    setHTML(H.npS, `<span style="color:${rarityOfRace(c.race).color}">${esc(race.name)}</span> <span style="color:${rarityOfClass(c.cls).color}">${esc(cls.name)}</span>${c.statPoints ? ` · <span class="pts">${c.statPoints} points ${kc('C')}</span>` : ''}`);
     // buffs
     let bh = '';
     for (const [id, t] of Object.entries(p.buffTimers || {})) bh += `<div class="buff"><span>${esc(id.replace(/_/g, ' ').slice(0, 10))}</span><b>${fmtTime(t)}</b></div>`;

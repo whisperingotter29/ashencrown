@@ -270,26 +270,58 @@ function buildChunk(m) {
 
 // World map image for the map screen & minimap
 function buildMap(m) {
+  // A cartographer's map: soft relief lit from the north-west, contour lines, height tint, water
+  // graded by depth with a foam edge, and an inked coastline.
   const { N, half, realm, row0, rows } = m;
   const data = new Uint8ClampedArray(N * rows * 4);
   const c = [0, 0, 0];
   const s = (half * 2) / N;
+  const CONTOUR = realm === 'deep' ? 5 : 7;
+  // sample height and water once on a grid one cell wider than the rows, then read neighbours
+  const GW = N + 2, GH = rows + 2;
+  const HG = new Float32Array(GW * GH), WL = new Float32Array(GW * GH), WT = new Array(GW * GH);
+  for (let jj = 0; jj < GH; jj++) for (let ii = 0; ii < GW; ii++) {
+    const x = -half + (ii - 0.5) * s, z = -half + (row0 + jj - 0.5) * s, k = jj * GW + ii;
+    HG[k] = heightAt(x, z, realm);
+    const w = waterAt(x, z, realm);
+    WT[k] = w.type; WL[k] = w.type === 'none' ? -1e9 : w.level;
+  }
+  const under = (k) => HG[k] < WL[k];
   for (let j = 0; j < rows; j++) for (let i = 0; i < N; i++) {
     const x = -half + (i + 0.5) * s, z = -half + (row0 + j + 0.5) * s;
-    const h = heightAt(x, z, realm);
-    const hx = heightAt(x + s, z, realm), hz = heightAt(x, z + s, realm);
+    const k = (j + 1) * GW + (i + 1);
+    const h = HG[k], hx = HG[k + 1], hxm = HG[k - 1], hz = HG[k + GW], hzm = HG[k - GW];
     const slope = Math.min(1, Math.hypot(hx - h, hz - h) / s);
     colorAt(x, z, h, slope, realm, c);
-    const shade = Math.max(0.45, Math.min(1.35, 1 + ((h - hx) * 0.35 + (h - hz) * 0.2)));
+    // relief: central-difference normal lit from the north-west, plus a touch of slope darkening
+    const dx = (hx - hxm) / (2 * s), dz = (hz - hzm) / (2 * s);
+    const lit = (dx * 0.62 + dz * 0.62 + 0.9) / Math.sqrt(dx * dx + dz * dz + 0.81) / 1.25;
+    const shade = 0.55 + 0.6 * Math.max(0, Math.min(1.2, lit)) - slope * 0.08;
+    // height tint: high ground pales toward the snowline, low ground stays rich
+    const ht = Math.max(0, Math.min(1, (h - 10) / 60));
     let r = c[0] * shade, g = c[1] * shade, b = c[2] * shade;
-    const w = waterAt(x, z, realm);
-    if (h < w.level && w.type !== 'none') {
-      const t = Math.min(1, (w.level - h) / 5);
-      const wc = w.type === 'lava' ? [0.9, 0.25, 0.02] : w.type === 'glow' ? [0.05, 0.25, 0.3] : [0.03, 0.13, 0.2];
-      r = r * (1 - t) * 0.5 + wc[0] * (0.5 + t * 0.5); g = g * (1 - t) * 0.5 + wc[1] * (0.5 + t * 0.5); b = b * (1 - t) * 0.5 + wc[2] * (0.5 + t * 0.5);
+    r += (0.82 - r) * ht * 0.25; g += (0.8 - g) * ht * 0.25; b += (0.76 - b) * ht * 0.25;
+    // contour lines
+    const band = Math.floor(h / CONTOUR);
+    if (band !== Math.floor(hx / CONTOUR) || band !== Math.floor(hz / CONTOUR)) { r *= 0.78; g *= 0.76; b *= 0.74; }
+    const wt = WT[k];
+    if (under(k)) {
+      const t = Math.min(1, (WL[k] - h) / 9);
+      const shallow = wt === 'lava' ? [1, 0.55, 0.1] : wt === 'glow' ? [0.2, 0.6, 0.55] : [0.16, 0.5, 0.55];
+      const deep = wt === 'lava' ? [0.75, 0.12, 0.02] : wt === 'glow' ? [0.03, 0.16, 0.22] : [0.03, 0.12, 0.24];
+      const wr = shallow[0] + (deep[0] - shallow[0]) * t, wg = shallow[1] + (deep[1] - shallow[1]) * t, wb = shallow[2] + (deep[2] - shallow[2]) * t;
+      const kk = 0.2 * (1 - t);
+      r = r * kk + wr * (1 - kk); g = g * kk + wg * (1 - kk); b = b * kk + wb * (1 - kk);
+      // faint wave hatching on open water
+      if (t > 0.35 && ((i + (row0 + j) * 3) % 11 === 0)) { r *= 1.12; g *= 1.12; b *= 1.12; }
+      // foam where the water meets land
+      if (!under(k + 1) || !under(k - 1) || !under(k + GW) || !under(k - GW)) { r = r * 0.4 + 0.55; g = g * 0.4 + 0.58; b = b * 0.4 + 0.56; }
+    } else if (under(k + 1) || under(k - 1) || under(k + GW) || under(k - GW)) {
+      // inked coastline on the land side
+      r *= 0.35; g *= 0.3; b *= 0.28;
     }
-    const k = (j * N + i) * 4;
-    data[k] = toS(Math.min(1, r)); data[k + 1] = toS(Math.min(1, g)); data[k + 2] = toS(Math.min(1, b)); data[k + 3] = 255;
+    const k4 = (j * N + i) * 4;
+    data[k4] = toS(Math.min(1, r)); data[k4 + 1] = toS(Math.min(1, g)); data[k4 + 2] = toS(Math.min(1, b)); data[k4 + 3] = 255;
   }
   return data;
 }

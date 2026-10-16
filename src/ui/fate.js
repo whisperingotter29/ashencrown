@@ -7,6 +7,7 @@ import { el, esc, root, toast, pxTitle } from './ui.js';
 import { RACES } from '../data/races.js';
 import { TOWNS } from '../data/world.js';
 import { CLASSES, rareFateFor } from '../data/classes.js';
+import { rollFate, rarityOfRace, rarityOfClass, fateChance } from '../data/fateRarity.js';
 import { cam, snapCamera } from '../world/cameraRig.js';
 import { atmo } from '../world/atmosphere.js';
 import { setTerrainVisible } from '../world/terrain.js';
@@ -208,8 +209,9 @@ function rollDice(rRace, rClass) {
   if (ui.cards) { ui.cards.forEach((c) => c.remove()); ui.cards = null; }
   if (ui.rare) { ui.rare.remove(); ui.rare = null; }
   const dice = [];
-  if (rRace) { scene.race = 1 + Math.floor(Math.random() * 12); dice.push([scene.raceDie, scene.race, -1.2]); }
-  if (rClass) { scene.cls = 1 + Math.floor(Math.random() * 12); dice.push([scene.classDie, scene.cls, 1.2]); }
+  // weighted by rarity: Common turns up most, Supreme almost never
+  if (rRace) { scene.race = rollFate(RACES); dice.push([scene.raceDie, scene.race, -1.2]); }
+  if (rClass) { scene.cls = rollFate(CLASSES); dice.push([scene.classDie, scene.cls, 1.2]); }
   scene.rolls = dice.map(([die, value, x], i) => {
     die.x = -3.4 + i * 0.4; die.z = 1.6; die.h = 3 + i * 0.4;
     return { die, value, vx: 3.2 + Math.random() * 1.2 + x * 0.4, vz: -1.4 - Math.random() * 0.6, vh: 1.2, spin: (Math.random() < 0.5 ? -1 : 1) * (14 + Math.random() * 8), t: -i * 0.18, settled: false, endX: x, faceT: 0 };
@@ -262,16 +264,26 @@ export function updateFate(dt) {
   }
 }
 
-function card(side, kicker, name, tag, desc, traits) {
-  const cdv = el('div', `fate-card panel ${side}`);
-  cdv.innerHTML = `<div class="die">${kicker}</div><div class="nm">${esc(name)}</div><div class="tag">${esc(tag)}</div><div class="rule"></div><div class="desc">${esc(desc)}</div>${traits.map((t) => `<div class="trait"><b>${esc(t.name)}.</b> ${esc(t.desc)}</div>`).join('')}`;
+function card(side, kicker, name, tag, desc, traits, rar, chance) {
+  const cdv = el('div', `fate-card panel ${side} r-${rar.id}`);
+  cdv.style.setProperty('--rar', rar.color);
+  cdv.innerHTML = `<div class="die">${kicker}</div><div class="rar" style="color:${rar.color}">${rar.name.toUpperCase()}<span>${chance < 0.01 ? (chance * 100).toFixed(2) : (chance * 100).toFixed(1)}% chance${rar.stats ? ` · +${rar.stats} all attributes, +${rar.power}% damage &amp; health` : ''}</span></div><div class="nm">${esc(name)}</div><div class="tag">${esc(tag)}</div><div class="rule"></div><div class="desc">${esc(desc)}</div>${traits.map((t) => `<div class="trait"><b>${esc(t.name)}.</b> ${esc(t.desc)}</div>`).join('')}`;
   return cdv;
 }
 
 function showResult() {
   const race = RACES[scene.race - 1], cls = CLASSES[scene.cls - 1];
-  const rc = card('left', `CRIMSON DIE · ${scene.race}`, race.name, race.tagline, race.desc, [...race.traits, { name: 'Homeland', desc: TOWNS.find((t) => t.id === race.home)?.name || race.home }]);
-  const cc = card('right', `GOLDEN DIE · ${scene.cls}`, cls.name, cls.tagline, cls.desc, [{ name: 'Signature (X): ' + cls.signature.name, desc: cls.signature.desc }, { name: 'Kit', desc: `${cls.kit.mainhand}${cls.kit.offhand ? ' & shield' : ''}, ${cls.kit.armor} armour${cls.kit.tome ? ', a spellbook' : ''}` }]);
+  const rRar = rarityOfRace(race.id), cRar = rarityOfClass(cls.id);
+  const rc = card('left', `CRIMSON DIE · ${scene.race}`, race.name, race.tagline, race.desc, [...race.traits, { name: 'Homeland', desc: TOWNS.find((t) => t.id === race.home)?.name || race.home }], rRar, fateChance(RACES, race));
+  const cc = card('right', `GOLDEN DIE · ${scene.cls}`, cls.name, cls.tagline, cls.desc, [{ name: 'Signature (X): ' + cls.signature.name, desc: cls.signature.desc }, { name: 'Kit', desc: `${cls.kit.mainhand}${cls.kit.offhand ? ' & shield' : ''}, ${cls.kit.armor} armour${cls.kit.tome ? ', a spellbook' : ''}` }], cRar, fateChance(CLASSES, cls));
+  // rarer rolls get a bigger reveal: coloured flash and burst, screen shake and rumble
+  const best = rRar.index >= cRar.index ? rRar : cRar;
+  if (best.index >= 2) {
+    flash(FX, TABLE_Y + 2, FZ, best.color, 18 + best.index * 5, 6 + best.index * 1.2, 0.5 + best.index * 0.15);
+    burst(FX, TABLE_Y + 0.5, FZ, { count: 30 + best.index * 25, speed: 4 + best.index, color: best.color, color2: '#ffffff', life: 1.2 + best.index * 0.2, up: 1.4 });
+    if (best.index >= 4) ring(FX, TABLE_Y + 0.05, FZ, { radius: 6, color: best.color, dur: 1 });
+  }
+  bus.emit('fateRarity', { index: best.index, color: best.color, id: best.id });
   ui.appendChild(rc); ui.appendChild(cc);
   ui.cards = [rc, cc];
   const rare = rareFateFor(race.id, cls.id);

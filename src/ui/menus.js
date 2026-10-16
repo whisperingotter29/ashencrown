@@ -10,6 +10,7 @@ import { equip, unequip, removeItem, slotFor, useConsumable, itemPower, INV_SIZE
 import { RARITIES, RARITY, MATERIALS_LIST, CONSUMABLES, LEGENDARIES, SETS, WEAPON_TYPES } from '../data/items.js';
 import { RACE_BY_ID } from '../data/races.js';
 import { CLASS_BY_ID } from '../data/classes.js';
+import { rarityOfRace, rarityOfClass, fateBonus, rarityTag } from '../data/fateRarity.js';
 import { TOMES, ELEMENTS } from '../data/tomes.js';
 import { SKILLS, COMBOS } from '../data/skills.js';
 import { MOUNTS } from '../data/mounts.js';
@@ -17,7 +18,7 @@ import { abilityDef } from '../systems/abilities.js';
 import { ensureLoadout, activeItem, loadoutItem, setLoadoutSlot, clearLoadoutSlot, equipToLoadout, switchSlot, canSlot, kitFor, abilityPool, assignAbility, ABILITY_KEYS, LOADOUT_SIZE } from '../systems/loadout.js';
 import { xpToNext } from '../systems/stats.js';
 import { questDef, objectiveProgress } from '../systems/quests.js';
-import { FACTIONS, TOWNS, DEEP_TOWNS, DUNGEONS, WAYSTONES, SHRINES, BIOMES, WORLD_BOSSES, LANDMARKS } from '../data/world.js';
+import { FACTIONS, TOWNS, DEEP_TOWNS, DUNGEONS, WAYSTONES, SHRINES, BIOMES, WORLD_BOSSES, LANDMARKS, BIOME_SEEDS } from '../data/world.js';
 import { repTier } from '../systems/factions.js';
 import { MAP } from '../world/mapdata.js';
 import { refreshSkillbar } from './hud.js';
@@ -295,7 +296,7 @@ function buildAttributes(body, c) {
   // left: portrait + attributes
   const left = el('div', 'attr-left f-sheet');
   const need = xpToNext(c.level);
-  left.appendChild(el('div', 'attr-id', `<div class="hero-bg small">${heroPortrait(1)}</div><div><div class="nm">${esc(c.name)}</div><div class="sub">${c.title ? esc(c.title) + ' · ' : ''}Level ${c.level} ${esc(race.name)} ${esc(cls.name)}</div><div class="xp"><i style="width:${Math.min(100, (c.xp / need) * 100).toFixed(1)}%"></i></div><div class="xpt">${c.xp} / ${need} XP</div></div>`));
+  left.appendChild(el('div', 'attr-id', `<div class="hero-bg small">${heroPortrait(1)}</div><div><div class="nm">${esc(c.name)}</div><div class="sub">${c.title ? esc(c.title) + ' · ' : ''}Level ${c.level} ${esc(race.name)} ${esc(cls.name)}</div><div class="sub fate-line">${rarityTag(rarityOfRace(c.race))} race · ${rarityTag(rarityOfClass(c.cls))} class${fateBonus(c).stats ? ` · +${fateBonus(c).stats} all attributes, +${fateBonus(c).power}% damage &amp; health` : ''}</div><div class="xp"><i style="width:${Math.min(100, (c.xp / need) * 100).toFixed(1)}%"></i></div><div class="xpt">${c.xp} / ${need} XP</div></div>`));
   left.appendChild(el('div', 'sec-h', `<span>Attributes</span>${c.statPoints ? `<span class="pts">${c.statPoints} to spend</span>` : ''}`));
   for (const k of ['str', 'dex', 'int', 'vit', 'wil']) {
     const r = el('div', 'arow', `${img(simpleIcon(...STAT_ICON[k]), 'mini')}<span class="an">${STAT_NAMES[k]}</span><b>${d.stats[k]}</b>`);
@@ -650,6 +651,42 @@ function initMapView(view) {
     else if (kind === 'shrine') { px(-2, -2, 4, 4, '#000'); px(-1, -1, 2, 2, col); }
     else if (kind === 'quest') { px(-1, -6, 3, 9, '#000'); px(0, -5, 1, 5, col); px(-1, 4, 3, 3, '#000'); px(0, 5, 1, 1, col); }
   }
+  // parchment under and around the map, cached per size
+  let paper = null;
+  function parchment(W, H) {
+    if (paper && paper.width === W && paper.height === H) return paper;
+    paper = document.createElement('canvas'); paper.width = W; paper.height = H;
+    const pg = paper.getContext('2d');
+    const grd = pg.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.75);
+    grd.addColorStop(0, '#e9d3a2'); grd.addColorStop(0.7, '#d4b67c'); grd.addColorStop(1, '#a8834a');
+    pg.fillStyle = grd; pg.fillRect(0, 0, W, H);
+    const img = pg.getImageData(0, 0, W, H), d = img.data;
+    for (let i = 0; i < d.length; i += 4) { const n = (Math.random() - 0.5) * 18 + (((i >> 2) % W) % 7 === 0 ? -3 : 0); d[i] += n; d[i + 1] += n; d[i + 2] += n * 0.8; }
+    pg.putImageData(img, 0, 0);
+    return paper;
+  }
+  // region names, placed at the middle of each biome's seeds
+  const regionLabels = (() => {
+    const acc = {};
+    for (const [b, x, z] of BIOME_SEEDS) { const a = (acc[b] ||= { x: 0, z: 0, n: 0 }); a.x += x; a.z += z; a.n++; }
+    return Object.entries(acc).filter(([b]) => BIOMES[b]).map(([b, a]) => ({ name: BIOMES[b].short || BIOMES[b].name, x: a.x / a.n, z: a.z / a.n }));
+  })();
+  function compass(g, cx, cy, r) {
+    g.save(); g.translate(cx, cy);
+    g.globalAlpha = 0.85;
+    g.strokeStyle = '#3a2412'; g.lineWidth = Math.max(1, r / 24);
+    g.beginPath(); g.arc(0, 0, r * 0.62, 0, Math.PI * 2); g.stroke();
+    g.beginPath(); g.arc(0, 0, r * 0.7, 0, Math.PI * 2); g.stroke();
+    for (let i = 0; i < 8; i++) {
+      const a = (i / 8) * Math.PI * 2, L = i % 2 ? r * 0.5 : r, w = i % 2 ? r * 0.09 : r * 0.14;
+      g.save(); g.rotate(a);
+      g.beginPath(); g.moveTo(0, -L); g.lineTo(w, 0); g.lineTo(0, 0); g.closePath(); g.fillStyle = i === 0 ? '#9a2a14' : '#3a2412'; g.fill();
+      g.beginPath(); g.moveTo(0, -L); g.lineTo(-w, 0); g.lineTo(0, 0); g.closePath(); g.fillStyle = i === 0 ? '#d8603a' : '#e8d0a0'; g.fill(); g.stroke();
+      g.restore();
+    }
+    g.fillStyle = '#3a2412'; g.font = `${Math.round(r * 0.42)}px 'Jersey 10'`; g.textAlign = 'center'; g.fillText('N', 0, -r * 1.08);
+    g.restore();
+  }
   function draw() {
     if (!cv.isConnected) return;
     const m = MAP[mapView.realm], c = G.char;
@@ -657,11 +694,34 @@ function initMapView(view) {
     if (cv.width !== W || cv.height !== H) { cv.width = W; cv.height = H; }
     const g = cv.getContext('2d');
     g.imageSmoothingEnabled = false;
-    g.fillStyle = '#120c08'; g.fillRect(0, 0, cv.width, cv.height);
+    g.drawImage(parchment(cv.width, cv.height), 0, 0);
     if (!m.ready) { g.fillStyle = '#e8c47a'; g.font = "18.6667px 'Jersey 10'"; g.fillText('The cartographers are still painting...', 30, 40); return; }
     const [x0, y0] = toScreen(-m.half, -m.half);
     const s = scale();
-    g.drawImage(m.canvas, x0, y0, Math.round(m.half * 2 * s), Math.round(m.half * 2 * s));
+    const mw = Math.round(m.half * 2 * s);
+    // drop shadow and inked double border, then the map itself
+    g.fillStyle = 'rgba(60,36,16,0.35)'; g.fillRect(x0 + 6, y0 + 8, mw, mw);
+    g.drawImage(m.canvas, x0, y0, mw, mw);
+    g.strokeStyle = '#3a2412'; g.lineWidth = 3; g.strokeRect(x0 - 1.5, y0 - 1.5, mw + 3, mw + 3);
+    g.lineWidth = 1; g.strokeRect(x0 - 7.5, y0 - 7.5, mw + 15, mw + 15);
+    // faint survey grid
+    g.strokeStyle = 'rgba(40,24,10,0.16)'; g.lineWidth = 1;
+    g.beginPath();
+    for (let i = 1; i < 8; i++) { const t = Math.round(x0 + (mw * i) / 8) + 0.5, v = Math.round(y0 + (mw * i) / 8) + 0.5; g.moveTo(t, y0); g.lineTo(t, y0 + mw); g.moveTo(x0, v); g.lineTo(x0 + mw, v); }
+    g.stroke();
+    // region names, wide-spaced like an old atlas
+    if (mapView.realm === 'surface' && mapView.zoom < 3) {
+      g.textAlign = 'center'; g.textBaseline = 'middle';
+      g.font = `${Math.round(Math.max(18, Math.min(34, mw / 22)))}px 'Jersey 10'`;
+      for (const L of regionLabels) {
+        const txt = L.name.toUpperCase().split('').join(' ');
+        const hw = g.measureText(txt).width / 2 + 6;
+        let [sx, sy] = toScreen(L.x, L.z);
+        sx = Math.max(x0 + hw, Math.min(x0 + mw - hw, sx)); sy = Math.max(y0 + 20, Math.min(y0 + mw - 20, sy));
+        g.fillStyle = 'rgba(30,16,6,0.55)'; g.fillText(txt, sx + 2, sy + 2);
+        g.fillStyle = 'rgba(255,240,205,0.62)'; g.fillText(txt, sx, sy);
+      }
+    }
     hot.length = 0;
     const dests = destinations(mapView.realm);
     const selD = dests.find((d) => d.id === mapView.sel);
@@ -701,6 +761,8 @@ function initMapView(view) {
       g.fillStyle = '#ffe08a';
       for (let a = 0; a < 16; a++) { const an = (a / 16) * Math.PI * 2; if (a % 2) continue; g.fillRect(Math.round(sx + Math.cos(an) * r * p) - p, Math.round(sy + Math.sin(an) * r * p) - p, p * 2, p * 2); }
     }
+    // compass rose in the corner
+    compass(g, cv.width - 54 * u() / 2 - 20, cv.height - 70, Math.min(46, cv.height / 9));
     // the player
     const here = G.realm === 'dungeon' ? G.dungeon?.returnRealm : G.realm;
     if (here === mapView.realm) {

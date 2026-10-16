@@ -1,6 +1,7 @@
 // Derived character stats. Keep the math light: five stats, a level curve, and gear.
 import { RACE_BY_ID } from '../data/races.js';
 import { CLASS_BY_ID } from '../data/classes.js';
+import { fateBonus } from '../data/fateRarity.js';
 import { WEAPON_TYPES, SETS, LEGENDARIES, S } from '../data/items.js';
 import { SKILLS, COMBOS } from '../data/skills.js';
 import { TOMES } from '../data/tomes.js';
@@ -14,13 +15,16 @@ export function computeStats(c) {
   const race = RACE_BY_ID[c.race];
   const cls = CLASS_BY_ID[c.cls];
   const st = { str: 0, dex: 0, int: 0, vit: 0, wil: 0 };
-  for (const k in st) st[k] = c.stats[k] + (c.bonusStats?.[k] || 0) + (race?.stats[k] || 0) + (c.shrineBoons?.[k] || 0);
+  // rarer races and classes add to every attribute (see fateRarity.js)
+  const fb = fateBonus(c);
+  for (const k in st) st[k] = c.stats[k] + (c.bonusStats?.[k] || 0) + (race?.stats[k] || 0) + (c.shrineBoons?.[k] || 0) + fb.stats;
   const out = {
     stats: st, armor: 0, armorPct: 0, dmgPct: 0, critChance: 5, critDmg: 50, atkSpeed: 0, moveSpeed: 0, spellPower: 0, spellCrit: 0,
     hpPct: 0, manaPct: 0, lifeOnHit: 0, manaRegen: 0, staminaRegen: 0, cdr: 0, goldFind: 0, magicFind: 0, xpPct: 0,
     fireRes: 0, frostRes: 0, lightningRes: 0, voidRes: 0, rotRes: 0, holyRes: 0, blockPct: 0, regen: 0, bossDmg: 0, fireDmgPct: 0, voidDmgPct: 0,
     block: 0.5, flags: {}, powers: {}, sets: {}, trinketAll: 0,
   };
+  out.dmgPct += fb.power; out.hpPct += fb.power;
   const items = Object.entries(c.equip).filter(([, it]) => it);
   for (const [slot, it] of items) {
     if (it.armor) out.armor += it.armor;

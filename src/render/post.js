@@ -63,7 +63,7 @@ void main() {
 
 export const post = {
   ok: false, on: false, cv: null, gl: null, prog: null, tex: null, u: {},
-  tilt: 0.16, dof: 1, bloom: 0.5, grade: 1,
+  tilt: 0.21, dof: 1, bloom: 0.5, grade: 1,
   roll: 0, rollV: 0, punch: 0, aberr: 0,
   rays: 0, rayCol: [1, 0.92, 0.75], time: 0,
   cost: 0, slowFrames: 0, autoOff: false,   // frame-cost guard for slow machines

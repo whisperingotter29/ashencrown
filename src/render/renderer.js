@@ -9,6 +9,7 @@ import { drawMagic } from './magic.js';
 import { initPost, presentPost } from './post.js';
 import { drawCastShadows } from '../px/shadow.js';
 import { bus } from '../core/events.js';
+import { G } from '../game.js';
 
 export const R = {
   canvas: null, ctx: null,         // screen canvas (device pixels)
@@ -127,7 +128,34 @@ const list = [];
 const overlap = (a, b) => a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h;
 
 let lastT = 0;
+// ---- 2.5D lean. The camera hangs above the middle of the screen looking down at an angle, so
+// anything that stands up leans away from the centre the further out it is, and stands a little
+// taller near the top of the screen (seen more from the side) than near the bottom (seen from
+// above). Walking past a house or a tree, its top swings across: the flat pixel world reads as 3D.
+const LEAN = 0.17, SQUASH = 0.09;
+function anchorOf(o) {
+  if (o.ent) return [o.ent.pos.x * PPU - view.x0, o.ent.pos.z * PPU - view.y0];
+  if (typeof o.pos === 'function') return o.pos();
+  if (o.x !== undefined && o.z !== undefined) return [o.x * PPU - view.x0, o.z * PPU - view.y0];
+  return null;
+}
+// sets ctx's transform to lean o around its ground point; unit = pixels per low-res pixel
+function lean(ctx, o, unit = 1) {
+  if (G_flat()) return false;
+  const a = anchorOf(o);
+  if (!a) return false;
+  const W2 = view.W / 2, H2 = view.H / 2;
+  const k = -Math.max(-1.2, Math.min(1.2, (a[0] - W2) / W2)) * LEAN;
+  const sy = 1 - Math.max(-1.2, Math.min(1.2, (a[1] - H2) / H2)) * SQUASH;
+  const by = a[1] * unit;
+  ctx.transform(1, 0, k, sy, -k * by, by - sy * by);
+  return true;
+}
+let flatCam = false;
+const G_flat = () => flatCam;
+
 export function renderFrame(time) {
+  flatCam = G.settings?.camera === 'flat';
   const fdt = Math.min(0.1, Math.max(0, (time - (lastT || time))));
   lastT = time;
   R.time = time;
@@ -168,7 +196,7 @@ export function renderFrame(time) {
       const b = o.bounds();
       if (b && overlap(b, fb)) covered = true;
     }
-    o.draw(lctx);
+    if (lean(lctx, o)) { o.draw(lctx); lctx.setTransform(1, 0, 0, 1, 0, 0); } else o.draw(lctx);
   }
   R.xrayHint = false;
   for (const f of scene.pixels) f(lctx);
@@ -200,7 +228,7 @@ export function renderFrame(time) {
   }
   // ---- emissive (unaffected by darkness)
   if (scene.groundEmissive) scene.groundEmissive(lctx);
-  for (const o of list) if (o.emissive) o.emissive(lctx);
+  for (const o of list) if (o.emissive) { if (!o.flat && lean(lctx, o)) { o.emissive(lctx); lctx.setTransform(1, 0, 0, 1, 0, 0); } else o.emissive(lctx); }
   if (covered && R.focusModel && !R.focusModel.hidden) R.focusModel.drawXray(lctx);
   for (const f of scene.emissives) f(lctx);
   for (const f of scene.persist.emissives) f(lctx);
@@ -216,7 +244,7 @@ export function renderFrame(time) {
     ctx.save();
     ctx.translate(ox - s, oy - s);
     ctx.globalCompositeOperation = 'lighter';
-    for (const o of list) if (o.glow) o.glow(ctx);
+    for (const o of list) if (o.glow) { ctx.save(); if (!o.flat) lean(ctx, o, s); o.glow(ctx); ctx.restore(); }
     for (const f of scene.glows) f(ctx);
     for (const f of scene.persist.glows) f(ctx);
     // soft halos around strong lights at night

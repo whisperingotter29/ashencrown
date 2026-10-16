@@ -28,6 +28,12 @@ export function rumble(strong, weak, ms) {
   if (touch && navigator.vibrate) try { navigator.vibrate(Math.round(ms * (0.4 + str * 0.6))); } catch (e) { /* blocked */ }
 }
 
+// a sequence of rumbles: [[strong, weak, ms, delayMs], ...]
+export function rumblePattern(steps) { for (const [s, w, ms, at] of steps) setTimeout(() => rumble(s, w, ms), at || 0); }
+// screen shake that tops up to a level instead of stacking, so a flurry of hits stays readable
+function shakeTo(x) { const v = x * (G.settings.screenShake ?? 1); if (cam.trauma < v) cam.trauma = Math.min(1, v); }
+function shake(x) { addShake(x * (G.settings.screenShake ?? 1)); }
+
 // ---------------------------------------------------------------- HUD jolts
 function hudJolt() {
   const hud = document.getElementById('hud');
@@ -65,8 +71,9 @@ export function updateFeel(dt) {
   R.damage = Math.max(0, R.damage - dt * 1.6);
   if (pendingHit) {
     const h = pendingHit; pendingHit = null;
-    kick(h.dx, h.dz, h.big ? 3 : 1.5);
-    if (h.big) rumble(0.55, 0.35, 90); else rumble(0.12, 0.32, 45);
+    kick(h.dx, h.dz, h.big ? 3.5 : 1.8);
+    shakeTo(h.big ? 0.36 : 0.2);
+    if (h.big) rumble(0.65, 0.45, 100); else rumble(0.18, 0.38, 50);
   }
   // low-health heartbeat: lub-dub every second
   const p = G.player;
@@ -92,7 +99,7 @@ export function initFeel() {
       const dx = tgt.pos.x - src.pos.x, dz = tgt.pos.z - src.pos.z;
       if (kind === 'dot' || kind === 'hazard') return;
       if (!pendingHit || (big && !pendingHit.big)) pendingHit = { dx, dz, big: big || false };
-      if (crit) postKick({ punch: 0.35, aberr: 0.25 });
+      if (crit) { postKick({ punch: 0.45, aberr: 0.35 }); hudJolt(); }
     }
   });
   bus.on('playerHit', ({ amount, src }) => {
@@ -103,7 +110,8 @@ export function initFeel() {
     R.damage = Math.min(1, Math.max(R.damage, 0.3 + frac * 3));
     postKick({ roll: (Math.random() < 0.5 ? -1 : 1) * Math.min(0.5, 0.15 + frac * 3), aberr: Math.min(1, 0.3 + frac * 6) });
     hudJolt();
-    rumble(Math.min(1, 0.45 + frac * 4), 0.5, 120 + Math.min(200, frac * 1500));
+    shake(Math.min(0.55, 0.22 + frac * 3));
+    rumble(Math.min(1, 0.5 + frac * 4), 0.6, 140 + Math.min(220, frac * 1500));
   });
   bus.on('block', ({ player: p, attacker }) => {
     if (attacker) kick(p.pos.x - attacker.pos.x, p.pos.z - attacker.pos.z, 1.5);
@@ -129,8 +137,9 @@ export function initFeel() {
   bus.on('abilityUsed', ({ id }) => {
     const p = G.player;
     const a = Math.atan2(p.aim.x - p.pos.x, p.aim.z - p.pos.z);
-    kick(Math.sin(a), Math.cos(a), 1);
-    rumble(0.15, 0.3, 50);
+    kick(Math.sin(a), Math.cos(a), 1.6);
+    shakeTo(0.24);
+    rumble(0.3, 0.45, 70);
     const k = keyForAbility(id);
     if (k) slotFired(k);
   });
@@ -144,13 +153,28 @@ export function initFeel() {
       R.white = Math.max(R.white, 0.35);
       rumble(1, 1, 700);
     } else if (victim.elite) { addShake(0.3 * (G.settings.screenShake ?? 1)); rumble(0.6, 0.5, 160); postKick({ roll: (Math.random() < 0.5 ? -1 : 1) * 0.3, punch: 0.7, aberr: 0.5 }); }
-    else rumble(0.25, 0.3, 60);
+    else { shakeTo(0.22); rumble(0.35, 0.4, 70); }
   });
+  // combo finishers land hard
+  bus.on('meleeHit', ({ heavy }) => { if (heavy) { shake(0.22); rumblePattern([[0.8, 0.5, 70], [0.3, 0.2, 60, 90]]); postKick({ punch: 0.5, aberr: 0.25 }); } });
+  bus.on('signature', () => { shake(0.4); rumblePattern([[0.6, 0.9, 120], [1, 0.6, 160, 140]]); postKick({ punch: 1, aberr: 0.6, roll: (Math.random() < 0.5 ? -1 : 1) * 0.3 }); });
+  bus.on('spellCast', ({ spell }) => { const t = spell?.tier || 1; if (t >= 3) { shake(0.12 + t * 0.06); rumble(0.25 + t * 0.12, 0.4, 80 + t * 30); } });
+  bus.on('weaponSwap', () => { kick(0, -1, 0.8); rumblePattern([[0, 0.35, 25], [0.2, 0, 30, 70]]); });
+  bus.on('streakShout', ({ n } = {}) => { shake(0.35 + Math.min(0.4, (n || 10) / 500)); rumblePattern([[0.6, 0.8, 120], [0.9, 0.5, 140, 160], [0.4, 0.3, 120, 340]]); });
+  // loot: the rarer the drop, the bigger the thump
+  bus.on('rareDrop', (it) => { const i = it?.rarity === 'mythic' ? 5 : it?.rarity === 'legendary' ? 4 : 3; shake(0.12 * i); rumblePattern(Array.from({ length: i - 1 }, (_, k) => [0.3 + k * 0.15, 0.6, 70, k * 110])); });
+  bus.on('chestOpened', () => { shake(0.18); rumblePattern([[0.4, 0.3, 60], [0.2, 0.5, 90, 90]]); });
+  bus.on('bossPhase', () => { shake(0.6); rumble(1, 0.8, 450); postKick({ punch: 1, aberr: 0.8, roll: (Math.random() < 0.5 ? -1 : 1) * 0.35 }); });
+  bus.on('worldBossAppears', () => { shake(0.5); rumblePattern([[1, 0.4, 300], [0.6, 0.6, 300, 450], [1, 1, 500, 900]]); });
+  bus.on('dungeonCleared', () => { shake(0.3); rumblePattern([[0.5, 0.8, 200], [0.8, 0.5, 260, 260]]); });
+  bus.on('thunder', ({ dist = 40 } = {}) => { const k = Math.max(0, 1 - dist / 80); if (k > 0.05) { shake(0.25 + k * 0.45); rumblePattern([[k, 0.3, 120], [k * 0.6, 0.6, 400, 140]]); } });
+  bus.on('fateRarity', ({ index }) => { if (index >= 2) { shake(0.2 + index * 0.12); rumblePattern(Array.from({ length: index }, (_, k) => [0.25 + k * 0.15, 0.5, 90, k * 140])); postKick({ punch: Math.min(1, index * 0.25), aberr: index * 0.15 }); } });
+  bus.on('diceClack', ({ strength = 0.5 } = {}) => { rumble(0.15 * strength, 0.4 * strength, 40); shakeTo(0.12 * strength); });
   bus.on('bossEngaged', bossIntro);
   bus.on('tutorialStep', () => rumble(0.1, 0.4, 80));
   bus.on('tutorialDone', () => rumble(0.3, 0.6, 300));
-  bus.on('levelUp', () => { addShake(0.25 * (G.settings.screenShake ?? 1)); rumble(0.3, 0.7, 420); postKick({ punch: 1, aberr: 0.4 }); });
-  bus.on('explosion', ({ owner, radius }) => { if (owner?.isPlayer) { rumble(Math.min(1, 0.4 + radius * 0.1), 0.4, 130); postKick({ punch: Math.min(1, 0.2 + radius * 0.1), aberr: Math.min(0.8, radius * 0.12), roll: (Math.random() - 0.5) * 0.3 }); } });
+  bus.on('levelUp', () => { shake(0.45); rumblePattern([[0.3, 0.7, 160], [0.6, 0.9, 200, 200], [1, 0.6, 260, 440]]); postKick({ punch: 1, aberr: 0.5 }); });
+  bus.on('explosion', ({ owner, radius }) => { shake(Math.min(0.55, 0.15 + (radius || 2) * 0.07) * (owner?.isPlayer ? 1 : 0.6)); if (owner?.isPlayer) { rumble(Math.min(1, 0.4 + radius * 0.1), 0.4, 130); postKick({ punch: Math.min(1, 0.2 + radius * 0.1), aberr: Math.min(0.8, radius * 0.12), roll: (Math.random() - 0.5) * 0.3 }); } });
   bus.on('streakShout', () => postKick({ punch: 1, aberr: 0.7, roll: (Math.random() < 0.5 ? -1 : 1) * 0.25 }));
   bus.on('parry', () => postKick({ punch: 0.8, aberr: 0.6 }));
   bus.on('slam', ({ src }) => {

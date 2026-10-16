@@ -30,7 +30,7 @@ export function buildMaps(onProgress) {
       generateMapImage(realm, m.N, m.half, (data) => {
         const c = document.createElement('canvas');
         c.width = c.height = m.N;
-        const g = c.getContext('2d');
+        const g = c.getContext('2d', { willReadFrequently: true });
         const img = new ImageData(data, m.N, m.N);
         g.putImageData(img, 0, 0);
         // painterly finish: soft vignette + grain
@@ -38,7 +38,14 @@ export function buildMaps(onProgress) {
         const gr = g.createRadialGradient(m.N / 2, m.N / 2, m.N * 0.3, m.N / 2, m.N / 2, m.N * 0.75);
         gr.addColorStop(0, '#ffffff'); gr.addColorStop(1, '#6a5a48');
         g.fillStyle = gr; g.fillRect(0, 0, m.N, m.N);
+        g.globalCompositeOperation = 'soft-light';
+        g.fillStyle = realm === 'deep' ? '#6a6aa0' : '#d8b880'; g.fillRect(0, 0, m.N, m.N);
         g.globalCompositeOperation = 'source-over';
+        { // paper grain
+          const im = g.getImageData(0, 0, m.N, m.N), dd = im.data;
+          for (let i = 0; i < dd.length; i += 4) { const n = (Math.random() - 0.5) * 10; dd[i] += n; dd[i + 1] += n; dd[i + 2] += n; }
+          g.putImageData(im, 0, 0);
+        }
         m.canvas = c;
         m.pixels = g.getImageData(0, 0, m.N, m.N);   // kept to repaint after a GPU reset
         m.ready = true;

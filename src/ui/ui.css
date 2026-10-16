@@ -816,3 +816,15 @@ input[type=range].range:hover::-webkit-slider-thumb { filter: brightness(1.25); 
 .shop-side > button.small { align-self: flex-end; }
 /* the hanging title plate on untabbed windows also needs a little clearance */
 .window:not(.has-tabs) > .body { padding-top: calc(var(--u) * 6); }
+
+/* ---- race / class rarity on the fate cards */
+.fate-card .rar { display: inline-block; font-size: var(--fs-1); line-height: var(--lh-1); letter-spacing: .06em; margin: calc(var(--u) * 2) 0 calc(var(--u) * 1); padding: 0 calc(var(--u) * 3); border: var(--u) solid currentColor; background: rgba(0,0,0,.45); text-shadow: var(--u) var(--u) 0 #000; box-shadow: inset 0 0 0 var(--u) rgba(0,0,0,.6); }
+.fate-card .rar span { display: block; font-family: var(--label); font-size: var(--lbl-1); line-height: 10px; color: var(--cream-2); letter-spacing: 0; text-transform: none; margin: calc(var(--u) * 1) 0; }
+.fate-card:not(.r-common) { box-shadow: 0 0 0 calc(var(--u) * 1) var(--rar), 0 0 calc(var(--u) * 8) color-mix(in srgb, var(--rar) 55%, transparent); }
+.fate-card.r-legendary, .fate-card.r-supreme { animation: cardIn 0.25s steps(4) both, rarPulse 1.6s steps(8) infinite; }
+.fate-card.r-supreme .rar { animation: rarHue 2.4s steps(24) infinite; }
+@keyframes rarPulse { 50% { box-shadow: 0 0 0 calc(var(--u) * 1) var(--rar), 0 0 calc(var(--u) * 16) var(--rar); } }
+@keyframes rarHue { 0% { color: #fff0a0; } 25% { color: #a0f0ff; } 50% { color: #ffa0f0; } 75% { color: #a0ffb0; } 100% { color: #fff0a0; } }
+.fate-rar { font-weight: normal; }
+.fate-rar.r-supreme { animation: rarHue 2.4s steps(24) infinite; }
+.attr-id .fate-line { margin-top: 2px; }
