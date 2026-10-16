@@ -10,6 +10,16 @@ export const MAP = {
 export const FOG_N = 96;
 export const FULL_MAP = true;
 
+// after a GPU reset the map canvases come back blank: repaint them from the kept pixels
+export function repaintMaps() {
+  for (const m of Object.values(MAP)) {
+    if (!m.pixels) continue;
+    const c = document.createElement('canvas'); c.width = c.height = m.N;
+    c.getContext('2d').putImageData(m.pixels, 0, 0);
+    m.canvas = c;
+  }
+}
+
 export function buildMaps(onProgress) {
   return new Promise((resolve) => {
     let pending = 0;
@@ -30,6 +40,7 @@ export function buildMaps(onProgress) {
         g.fillStyle = gr; g.fillRect(0, 0, m.N, m.N);
         g.globalCompositeOperation = 'source-over';
         m.canvas = c;
+        m.pixels = g.getImageData(0, 0, m.N, m.N);   // kept to repaint after a GPU reset
         m.ready = true;
         if (--pending === 0) resolve();
       }, (p) => { m.progress = p; onProgress && onProgress(realm, p); });

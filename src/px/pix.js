@@ -251,7 +251,8 @@ export class Pix {
     return p;
   }
   canvas() {
-    if (this._cv) return this._cv;
+    if (this._cv && this._ep === canvasEpoch.n) return this._cv;
+    this._ep = canvasEpoch.n;
     const cv = document.createElement('canvas');
     cv.width = Math.max(1, this.w); cv.height = Math.max(1, this.h);
     if (this.w && this.h) cv.getContext('2d').putImageData(new ImageData(this.d, this.w, this.h), 0, 0);
@@ -259,6 +260,10 @@ export class Pix {
     return cv;
   }
 }
+
+// Bumped when the browser drops GPU canvas contents (GPU reset, memory pressure): every cached
+// canvas built from pixel data is rebuilt on its next use.
+export const canvasEpoch = { n: 0 };
 
 // Ordered 4x4 Bayer threshold, for dithered fades and gradients
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];

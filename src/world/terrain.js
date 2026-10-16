@@ -5,7 +5,7 @@ import { PROPS, PROP_IDS } from '../data/scatter.js';
 import { addCollider, removeOwner } from '../systems/collision.js';
 import { scene } from '../px/scene.js';
 import { view } from '../px/view.js';
-import { PPU } from '../px/pix.js';
+import { PPU, canvasEpoch } from '../px/pix.js';
 import { propSprite } from '../px/sprites/props.js';
 import { glowAt } from '../render/renderer.js';
 import { castSprite } from '../px/shadow.js';
@@ -51,11 +51,9 @@ function onWorkerMessage(e) {
   const ch = terrain.chunks.get(m.key);
   if (!ch || ch.reqId !== m.id || m.realm !== terrain.realm) return;
   // ground image
-  const cv = document.createElement('canvas');
-  cv.width = cv.height = m.P;
-  cv.getContext('2d').putImageData(new ImageData(m.img, m.P, m.P), 0, 0);
-  ch.cv = cv;
-  if (m.emis) { const ev = document.createElement('canvas'); ev.width = ev.height = m.P; ev.getContext('2d').putImageData(new ImageData(m.emis, m.P, m.P), 0, 0); ch.emis = ev; }
+  ch.img = new ImageData(m.img, m.P, m.P);
+  ch.emisImg = m.emis ? new ImageData(m.emis, m.P, m.P) : null;
+  paintChunk(ch);
   ch.H = m.H; ch.G = m.G; ch.step = m.step;
   ch.glints = m.glints;
   ch.loaded = true;
@@ -71,6 +69,11 @@ function onWorkerMessage(e) {
     }
   }
 }
+
+function toCanvas(img) { const cv = document.createElement('canvas'); cv.width = img.width; cv.height = img.height; cv.getContext('2d').putImageData(img, 0, 0); return cv; }
+function paintChunk(ch) { ch.cv = toCanvas(ch.img); ch.emis = ch.emisImg ? toCanvas(ch.emisImg) : null; ch.ep = canvasEpoch.n; }
+// after a GPU reset the chunk canvases come back blank: repaint them from the kept pixels
+export function repaintTerrain() { for (const ch of terrain.chunks.values()) if (ch.img && ch.ep !== canvasEpoch.n) paintChunk(ch); }
 
 // ---------------------------------------------------------------- props as drawables
 function makeProp(type, x, y, z, rot, scale) {

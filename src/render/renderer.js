@@ -8,6 +8,7 @@ import { PPU, C } from '../px/pix.js';
 import { drawMagic } from './magic.js';
 import { initPost, presentPost } from './post.js';
 import { drawCastShadows } from '../px/shadow.js';
+import { bus } from '../core/events.js';
 
 export const R = {
   canvas: null, ctx: null,         // screen canvas (device pixels)
@@ -30,6 +31,25 @@ export const R = {
 };
 
 let lightTex = null;
+function makeLightTex() {
+  // radial light falloff texture
+  lightTex = document.createElement('canvas');
+  lightTex.width = lightTex.height = 64;
+  const g = lightTex.getContext('2d');
+  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+  grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.35, 'rgba(255,255,255,0.55)'); grd.addColorStop(0.7, 'rgba(255,255,255,0.16)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
+  g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+}
+export function resetRendererCaches() { makeLightTex(); tintedLights.clear(); vigKey = ''; }
+// polled from the frame loop: a lost -> back transition means cached canvases need rebuilding
+let ctxLost = false, lostCheckT = 0;
+function checkContextLoss(dt) {
+  if ((lostCheckT += dt) < 0.5) return;
+  lostCheckT = 0;
+  const lost = !!(R.ctx.isContextLost?.() || R.lctx.isContextLost?.());
+  if (ctxLost && !lost) bus.emit('canvasRestored');
+  ctxLost = lost;
+}
 const tintedLights = new Map();
 
 export function initRenderer(container) {
@@ -42,13 +62,11 @@ export function initRenderer(container) {
   R.lctx = R.low.getContext('2d', { alpha: false });
   R.lightCv = document.createElement('canvas');
   R.lightCtx = R.lightCv.getContext('2d', { alpha: false, willReadFrequently: true });
-  // radial light falloff texture
-  lightTex = document.createElement('canvas');
-  lightTex.width = lightTex.height = 64;
-  const g = lightTex.getContext('2d');
-  const grd = g.createRadialGradient(32, 32, 0, 32, 32, 32);
-  grd.addColorStop(0, 'rgba(255,255,255,1)'); grd.addColorStop(0.35, 'rgba(255,255,255,0.55)'); grd.addColorStop(0.7, 'rgba(255,255,255,0.16)'); grd.addColorStop(1, 'rgba(255,255,255,0)');
-  g.fillStyle = grd; g.fillRect(0, 0, 64, 64);
+  makeLightTex();
+  // The browser can drop GPU canvas contents (GPU process reset, memory pressure, long sleep).
+  // Every cached image then comes back blank: a black world with only freshly drawn things on it.
+  // Catch it and have everything rebuild its caches.
+  for (const c of [cv, R.low]) c.addEventListener('contextrestored', () => bus.emit('canvasRestored'));
   initPost(container);
   window.addEventListener('resize', resize);
   resize();
@@ -113,6 +131,7 @@ export function renderFrame(time) {
   const fdt = Math.min(0.1, Math.max(0, (time - (lastT || time))));
   lastT = time;
   R.time = time;
+  checkContextLoss(fdt);
   const { lctx, W, H, ctx } = R;
   lctx.setTransform(1, 0, 0, 1, 0, 0);
   lctx.globalCompositeOperation = 'source-over';

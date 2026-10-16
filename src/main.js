@@ -1,8 +1,9 @@
 // Ashen Crown: bootstrap, game state machine and the main loop.
 import { Vec3 } from './core/vec3.js';
 import { G, newCharacter } from './game.js';
-import { initRenderer, renderFrame, R, flushLights, requestLight, applySettings } from './render/renderer.js';
-import { initTerrain, updateTerrain, groundHeight, terrain, setRealm, setTerrainVisible, terrainProgress } from './world/terrain.js';
+import { initRenderer, renderFrame, R, flushLights, requestLight, applySettings, resetRendererCaches } from './render/renderer.js';
+import { canvasEpoch } from './px/pix.js';
+import { initTerrain, updateTerrain, groundHeight, terrain, setRealm, setTerrainVisible, terrainProgress, repaintTerrain } from './world/terrain.js';
 import { initAtmosphere, updateAtmosphere, atmo, isNight, timePhase } from './world/atmosphere.js';
 import { initWeather, updateWeather, forceWeather } from './world/weather.js';
 import { cam, updateCamera, snapCamera, addShake, worldToScreen } from './world/cameraRig.js';
@@ -38,7 +39,7 @@ import { TOMES, spellsForTome } from './data/tomes.js';
 import { SKILLS } from './data/skills.js';
 import { bus } from './core/events.js';
 import { saveGame, loadGame, saveInfo, loadSettings, saveSettings } from './core/save.js';
-import { buildMaps, revealAround, serializeFog, MAP } from './world/mapdata.js';
+import { buildMaps, revealAround, serializeFog, MAP, repaintMaps } from './world/mapdata.js';
 import { el, esc, root, toast, banner, closeModal, modalName, pxTitle } from './ui/ui.js';
 import { initPixelKit, fontsReady } from './ui/pixelKit.js';
 import { initFeel, updateFeel } from './core/feel.js';
@@ -465,6 +466,12 @@ function fastTravel(w) {
   });
 }
 bus.on('fastTravel', fastTravel);
+bus.on('canvasRestored', () => {
+  canvasEpoch.n++;
+  repaintTerrain(); repaintMaps(); resetRendererCaches();
+  if (G.dungeon?.floorChunks) G.dungeon.floorChunks.clear();
+  console.warn('graphics were reset by the browser: redrawn');
+});
 bus.on('recall', () => {
   const c = G.char;
   const list = WAYSTONES.filter((w) => c.discovered.waystones.includes(w.id) && w.realm === (G.realm === 'dungeon' ? G.dungeon.returnRealm : G.realm));

@@ -97,6 +97,7 @@ export function initPost(container) {
     for (const n of ['src', 'res', 'tilt', 'zoom', 'roll', 'dof', 'bloom', 'aberr', 'grade', 'rays', 'time', 'rayCol']) u[n] = gl.getUniformLocation(prog, n);
     Object.assign(post, { ok: true, cv, gl, prog, vao, tex, u });
     cv.addEventListener('webglcontextlost', (e) => { e.preventDefault(); post.ok = false; });
+    cv.addEventListener('webglcontextrestored', () => { cv.remove(); post.on = false; initPost(container); });
     return true;
   } catch (e) {
     console.warn('post-processing unavailable', e);
