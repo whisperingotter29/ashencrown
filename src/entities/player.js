@@ -354,10 +354,10 @@ export class Player extends Entity {
     let best = null, bd = 1e9;
     for (const e of G.entities) {
       if (e.dead || e.removed || e.isNpc || !e.model || !hostile(this, e)) continue;
-      const hp = e.model.heightPx || 24;
+      const hp = e.model.heightPx || 38;
       const X = e.pos.x * PPU - view.x0, Y = e.pos.z * PPU - view.y0 - (e.pos.y - view.ground(e.pos.x, e.pos.z)) * PPU;
-      const half = Math.max(6, hp * 0.32);
-      if (cx < X - half || cx > X + half || cy < Y - hp - 2 || cy > Y + 3) continue;
+      const half = Math.max(10, hp * 0.32);
+      if (cx < X - half || cx > X + half || cy < Y - hp - 3 || cy > Y + 5) continue;
       const d = Math.abs(cx - X) + Math.abs(cy - (Y - hp * 0.5));
       if (d < bd) { bd = d; best = e; }
     }

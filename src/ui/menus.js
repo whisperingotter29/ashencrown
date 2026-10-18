@@ -89,9 +89,10 @@ const SLOT_GHOST = { helm: 'helm', chest: 'chest', gloves: 'gloves', legs: 'legs
 const ghostIcon = (slot) => simpleIcon(SLOT_GHOST[slot] || 'gem', '#8a7a64');
 
 // pixel portrait of the player (their actual in-game sprite, armour included), trimmed to the
-// figure and scaled by a whole number of UI pixels. k = sprite pixel size in UI units.
+// figure and scaled by a whole number of UI pixels. k = the largest sprite pixel size in UI units;
+// it steps down (never below 1) until the figure fits a box of maxW x maxH UI units.
 const portraitCache = new WeakMap();
-function heroPortrait(k = 3) {
+function heroPortrait(k = 3, maxW = 76, maxH = 120) {
   const spr = G.player?.model?.spr;
   let fr = null;
   try { fr = spr?.frame ? spr.frame('down', {}) : spr?.views?.down?.idle?.[0]; } catch (e) { fr = null; }
@@ -99,6 +100,7 @@ function heroPortrait(k = 3) {
   if (!pix?.canvas) return '';
   let p = portraitCache.get(pix);
   if (!p) { const t = pix.trim ? pix.trim(0) : pix; p = { url: t.canvas().toDataURL(), w: t.w, h: t.h }; portraitCache.set(pix, p); }
+  while (k > 1 && (p.w * k > maxW || p.h * k > maxH)) k--;
   const s = k * uiUnit();
   return `<img class="hero-img" src="${p.url}" width="${p.w * s}" height="${p.h * s}" draggable="false">`;
 }
