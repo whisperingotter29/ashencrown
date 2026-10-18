@@ -14,8 +14,8 @@
 // death falls. Everything casts a directional shadow (see shadow.js).
 import { glowPx } from '../render/renderer.js';
 import { view } from './view.js';
-import { Pix, PPU, C } from './pix.js';
-import { humanSprites, FEET, CX } from './sprites/human.js';
+import { Pix, PPU, C, ART, ap } from './pix.js';
+import { humanSprites } from './sprites/human.js';
 import { creatureSprites } from './sprites/creatures.js';
 import { weaponSprite, shieldSprite, tomeSprite, ELEM_GLOW } from './sprites/weapons.js';
 import { addObject, removeObject } from './scene.js';
@@ -201,7 +201,7 @@ export class Actor {
       this.sideOnly = !!this.spr.sideOnly;
       this.frontOnly = !!this.spr.frontOnly;
     }
-    this.heightPx = (this.spr.height || 24) * this.k;
+    this.heightPx = (this.spr.height || ap(24)) * this.k;
   }
   setLook(look) {
     if (this.spec.type !== 'human') return;
@@ -291,12 +291,12 @@ export class Actor {
     const e = this.ent;
     if (e.flying || this.hidden || this.kind === 'wraith' || this.kind === 'eye' || this.kind === 'flyer' || this.kind === 'serpent' || this.kind === 'blob') return;
     const sx = e.pos.x * PPU - view.x0, sy = e.pos.z * PPU - view.y0;
-    if (sx < -20 || sy < -20 || sx > view.W + 20 || sy > view.H + 20) return;
+    if (sx < -32 || sy < -32 || sx > view.W + 32 || sy > view.H + 32) return;
     if (e.swimming || e.wading) return;
     const gy = view.ground(e.pos.x, e.pos.z);
     if (e.pos.y - gy > 0.4) return;
     const f = e.facing, dx = Math.sin(f), dz = Math.cos(f);
-    const big = Math.min(2.4, (this.k || 1) * (this.kind === 'quadruped' || this.kind === 'dragon' ? 1.4 : 1));
+    const big = Math.min(2.4, (this.spr?.m?.hf || this.k || 1) * (this.kind === 'quadruped' || this.kind === 'dragon' ? 1.4 : 1));
     const count = Math.max(1, Math.round((1 + Math.random()) * n));
     for (let i = 0; i < count; i++) {
       const a = Math.random() * TAU;
@@ -332,7 +332,7 @@ export class Actor {
     if (this.hidden || this.ent.removed) return;
     const e = this.ent;
     const x = Math.round(e.pos.x * PPU - view.x0), y = Math.round(e.pos.z * PPU - view.y0);
-    let rx = this.spec.type === 'human' ? 4.5 * this.k * (this.spr.m ? this.spr.m.torsoW / 8 : 1) : Math.max(3, this.heightPx * (this.kind === 'serpent' ? 0.5 : 0.42));
+    let rx = this.spec.type === 'human' ? this.k * (this.spr.m ? this.spr.m.torsoW * 0.66 : 7) : Math.max(5, this.heightPx * (this.kind === 'serpent' ? 0.5 : 0.42));
     if (this.kind === 'quadruped' || this.kind === 'dragon' || this.kind === 'arachnid') rx *= 1.45;
     if (this.mount) rx = 9 * this.mount.k * (this.mount.spr.height / 16);
     const h = e.pos.y - view.ground(e.pos.x, e.pos.z) + (this.hoverPx || 0) / PPU;
@@ -341,7 +341,7 @@ export class Actor {
     const noSun = !sun.cast || sun.a < 0.2;
     const soft = noSun ? 1.25 : 0.9;
     const a = (e.dead ? Math.max(0, 1 - e.deathT * 0.5) : 1) * this.alpha * (noSun ? 1 : 0.85);
-    contactBlob(ctx, x, y, rx * fade * soft, Math.max(1.5, rx * 0.36 * fade * soft), a);
+    contactBlob(ctx, x, y, rx * fade * soft, Math.max(2, rx * 0.36 * fade * soft), a);
   }
 
   castShadow(sctx) {
@@ -433,7 +433,8 @@ export class Actor {
   }
 
   // ---------------------------------------------------------------- limbs (runtime arms)
-  // a 2-3px arm from the shoulder to the hand with an outline, a lit edge and a cuff
+  // a 3-4 px arm from the shoulder to the hand: 1-px outline, a lit upper-left edge, a shaded
+  // lower-right edge, a sleeve fold half way and a cuff before the hand
   limb(ctx, x0, y0, x1, y1, k, P, w) {
     if (this._xray) return;
     const n = Math.max(1, Math.round(Math.max(Math.abs(x1 - x0), Math.abs(y1 - y0)) / k));
@@ -444,22 +445,26 @@ export class Actor {
     for (const [x, y] of pts) ctx.fillRect(x - (hw + 1) * k, y - (hw + 1) * k, (w + 2) * k, (w + 2) * k);
     ctx.fillStyle = P.s;
     for (const [x, y] of pts) ctx.fillRect(x - hw * k, y - hw * k, w * k, w * k);
-    // shading: lit left edge, shadowed lower-right edge
+    // shading: shadowed lower-right edge, lit upper-left edge
     ctx.fillStyle = P.sd;
-    for (const [x, y] of pts) ctx.fillRect(x + (w - 1 - hw) * k, y + (w - 1 - hw) * k, k, k);
+    for (const [x, y] of pts) { ctx.fillRect(x + (w - 1 - hw) * k, y - hw * k, k, w * k); ctx.fillRect(x - hw * k, y + (w - 1 - hw) * k, w * k, k); }
     ctx.fillStyle = P.sl;
     for (let i = 0; i < pts.length - 1; i++) ctx.fillRect(pts[i][0] - hw * k, pts[i][1] - hw * k, k, k);
+    // a fold at the elbow
+    if (n >= 6) { const c = pts[n >> 1]; ctx.fillStyle = P.sd; ctx.fillRect(c[0] - hw * k, c[1] - hw * k, (w - 1) * k, k); }
     // cuff just before the hand
-    if (n >= 3) { const c = pts[n - 1]; ctx.fillStyle = P.cf; ctx.fillRect(c[0] - hw * k, c[1] - hw * k, w * k, k); }
+    if (n >= 3) { const c = pts[n - 1]; ctx.fillStyle = P.cf; ctx.fillRect(c[0] - hw * k, c[1] - hw * k, w * k, w * k); }
   }
+  // a rounded fist: knuckles lit on top, shaded underneath
   hand(ctx, x, y, k, P, w) {
     if (this._xray) return;
-    const s = Math.max(2, w);
+    const s = Math.max(3, w + 1);
     const hx = x - (s >> 1) * k, hy = y - (s >> 1) * k;
-    ctx.fillStyle = P.ho; ctx.fillRect(hx - k, hy - k, (s + 2) * k, (s + 2) * k);
+    ctx.fillStyle = P.ho; ctx.fillRect(hx - k, hy, (s + 2) * k, s * k); ctx.fillRect(hx, hy - k, s * k, (s + 2) * k);
     ctx.fillStyle = P.h; ctx.fillRect(hx, hy, s * k, s * k);
-    ctx.fillStyle = P.hd; ctx.fillRect(hx + (s - 1) * k, hy + (s - 1) * k, k, k);
-    ctx.fillStyle = P.hl; ctx.fillRect(hx, hy, k, k);
+    ctx.fillStyle = P.hd; ctx.fillRect(hx + (s - 1) * k, hy + k, k, (s - 1) * k); ctx.fillRect(hx + k, hy + (s - 1) * k, (s - 1) * k, k);
+    ctx.fillStyle = P.hl; ctx.fillRect(hx, hy, (s - 1) * k, k); ctx.fillRect(hx, hy, k, (s - 1) * k);
+    if (s >= 4) { ctx.fillStyle = P.hd; ctx.fillRect(hx + k, hy + k, k, k); }
   }
 
   // ================================================================ humanoids
@@ -467,6 +472,8 @@ export class Actor {
     const e = this.ent, st = e.st, k = this.k, m = this.spr.m;
     this._ax = x; this._ay = y;
     this._glows = null;
+    // U: today's pixels per old design pixel for this body (ART, more for giant bosses)
+    const U = m.u, q = (v) => Math.round(v * U);
     const kind = st.action ? st.kind : null;
     const u = clamp01(st.actionT || 0);
     const su = st.strikeU || 0.5;
@@ -491,13 +498,13 @@ export class Actor {
       const M = this.mount, MV = M.spr.views.side;
       const fr = spd > 0.4 ? MV.run[Math.floor(M.ph) % 4] : MV.idle[Math.floor(this.t * 1.5) % 2];
       this.body(ctx, fr, x, y, M.k, 0, this.flip, { noAura: true, cast: { y: this._gy, h: this._gh } });
-      const seat = M.spr.seat || [0, -14];
+      const seat = M.spr.seat || [0, -ap(14)];
       bx = x + (this.flip ? -seat[0] : seat[0]) * M.k;
-      by = y + seat[1] * M.k + (FEET - m.legTop) * k + (spd > 0.4 && Math.floor(M.ph) % 2 ? -1 : 0);
+      by = y + seat[1] * M.k + (m.feet - m.legTop) * k + (spd > 0.4 && Math.floor(M.ph) % 2 ? -q(1) : 0);
       rideH = y - by;
     }
 
-    // ---- body pose
+    // ---- body pose (offsets in today's pixels)
     const pose = { legs: 'stand', ph: 0, bob: 0, lean: 0, hdx: 0, hdy: 0, cape: Math.floor(this.t * 3.2) % 4, sway: 0, face: this.blink > 0 ? 1 : 0, wing: Math.floor(this.t * 9) % 2 };
     let rot = 0, roll = 0, lift = 0, offX = 0, offY = 0;
     let deathPhase = -1;
@@ -505,40 +512,40 @@ export class Actor {
     if (e.dead) {
       const dt = e.deathT || 0;
       deathPhase = dt < 0.12 ? 0 : dt < 0.3 ? 1 : 2;
-      if (deathPhase === 0) { pose.legs = 'stance'; pose.face = 2; pose.hdy = -1; offX = -dx * 2; offY = -dy * 2; }
-      else if (deathPhase === 1) { pose.legs = 'kneel'; pose.bob = 3; pose.face = 2; offX = -dx * 2; offY = -dy * 2; }
+      if (deathPhase === 0) { pose.legs = 'stance'; pose.face = 2; pose.hdy = -q(1); offX = -dx * q(2); offY = -dy * q(2); }
+      else if (deathPhase === 1) { pose.legs = 'kneel'; pose.bob = q(3); pose.face = 2; offX = -dx * q(2); offY = -dy * q(2); }
       else { pose.legs = 'stand'; pose.face = 1; }
     } else if (st.ride) {
       pose.legs = 'ride';
     } else if (dodging) {
       const du = clamp01(st.dodgeT);
-      if (du < 0.14) { pose.legs = 'lunge'; pose.lean = 2; pose.bob = 1; }
-      else if (du < 0.84) { pose.legs = 'tuck'; pose.bob = 3; pose.hdy = 1; roll = Math.min(3, Math.floor((du - 0.14) / 0.7 * 4)) + 1; lift = Math.round(Math.sin((du - 0.14) / 0.7 * Math.PI) * 3); }
-      else { pose.legs = 'stance'; pose.bob = 2; }
+      if (du < 0.14) { pose.legs = 'lunge'; pose.lean = q(2); pose.bob = q(1); }
+      else if (du < 0.84) { pose.legs = 'tuck'; pose.bob = q(3); pose.hdy = q(1); roll = Math.min(3, Math.floor((du - 0.14) / 0.7 * 4)) + 1; lift = Math.round(Math.sin((du - 0.14) / 0.7 * Math.PI) * 3 * U); }
+      else { pose.legs = 'stance'; pose.bob = q(2); }
     } else if (atk) {
-      pose.legs = atk.legs; pose.bob = atk.bob; pose.lean = atk.lean; if (atk.face) pose.face = atk.face;
-      offX = dx * atk.lunge; offY = dy * atk.lunge;
+      pose.legs = atk.legs; pose.bob = q(atk.bob); pose.lean = q(atk.lean); if (atk.face) pose.face = atk.face;
+      offX = dx * atk.lunge * U; offY = dy * atk.lunge * U;
       if (moving) { pose.legs = 'run'; pose.ph = Math.floor(this.ph) % 6; }
     } else if (st.spin) {
-      pose.legs = 'stance'; pose.bob = 1;
+      pose.legs = 'stance'; pose.bob = q(1);
     } else if (hurt) {
-      pose.legs = 'stance'; pose.face = 2; pose.hdy = -1; pose.lean = -1;
-      const r = Math.round(((st.hitT || 0) - 0.35) * 3);
+      pose.legs = 'stance'; pose.face = 2; pose.hdy = -q(1); pose.lean = -q(1);
+      const r = ((st.hitT || 0) - 0.35) * 3 * U;
       offX = -dx * r; offY = -dy * r;
     } else if (st.block) {
-      pose.legs = 'stance'; pose.bob = 1;
+      pose.legs = 'stance'; pose.bob = q(1);
     } else if (moving) {
       const sprint = !!st.sprint;
       pose.legs = sprint ? 'sprint' : 'run';
       pose.ph = Math.floor(this.ph) % 6;
-      pose.bob = [0, 1, -1, 0, 1, -1][pose.ph];
-      pose.lean = sprint ? 2 : 1;
-      if (this.startT > 0) pose.lean += 1;
+      pose.bob = [0, q(1), -1, 0, q(1), -1][pose.ph];
+      pose.lean = q(sprint ? 2 : 1);
+      if (this.startT > 0) pose.lean += q(1);
       pose.sway = sprint ? 2 : 1;
       pose.cape = Math.floor(this.ph / 1.5) % 4;
-      if (sprint) pose.hdy = 1;
+      if (sprint) pose.hdy = q(1);
     } else if (this.settleT > 0) {
-      pose.legs = 'stance'; pose.bob = this.settleT > 0.06 ? 2 : 1;
+      pose.legs = 'stance'; pose.bob = this.settleT > 0.06 ? q(2) : q(1);
     } else if (st.combat) {
       pose.legs = 'stance'; pose.bob = Math.floor(this.t * 2.2 + (st.seed || 0)) % 2;
     } else {
@@ -546,8 +553,8 @@ export class Actor {
       pose.bob = Math.floor(this.t * 1.5 + (st.seed || 0)) % 2;
     }
     if (vName !== 'side') pose.lean = 0;
-    else if (Math.abs(this.turn) > 0.5 && moving) pose.lean += 1;
-    if (pose.lean < -1) pose.lean = -1;
+    else if (Math.abs(this.turn) > 0.5 && moving) pose.lean += q(1);
+    if (pose.lean < -q(1)) pose.lean = -q(1);
     const fr = this.spr.frame(vName, pose);
     const lx = Math.round(offX), ly = Math.round(offY);
     const px = bx + lx * k, py = by + (ly - lift) * k;
@@ -568,13 +575,13 @@ export class Actor {
     const drawFist = (h0) => { const b = S(h0); this.hand(ctx, b[0], b[1], k, L, w); };
     const body = () => {
       const src = flip ? variant(fr.pix, 'flip') : fr.pix;
-      const ccx = CX + (flip ? -1 : 0), ccy = Math.round((m.torsoTop + m.legTop) / 2);
+      const ccx = m.cx + (flip ? -1 : 0), ccy = Math.round((m.torsoTop + m.legTop) / 2);
       if (roll) {
         // tucked roll: pixel-exact quarter turns around the body centre
         const dir = dx < -0.05 || (Math.abs(dx) <= 0.05 && dy < 0) ? -1 : 1;
         const q = ((dir > 0 ? roll : 4 - roll) % 4 + 4) % 4;
         const R = rotFrame(src, q, ccx, ccy);
-        this.body(ctx, { pix: R.pix, emis: null }, px + R.dx * k, py - (FEET - ccy) * k + R.dy * k, k, 0, false, {});
+        this.body(ctx, { pix: R.pix, emis: null }, px + R.dx * k, py - (m.feet - ccy) * k + R.dy * k, k, 0, false, {});
         return;
       }
       if (deathPhase === 2) {
@@ -582,9 +589,9 @@ export class Actor {
         const dt = e.deathT;
         const sideSgn = this._deathSide || (this._deathSide = (e.id % 2 ? 1 : -1));
         const q = sideSgn > 0 ? 1 : 3;
-        const b = dt < 0.42 ? Math.round(Math.sin((dt - 0.3) / 0.12 * Math.PI) * 2) : 0;
+        const b = dt < 0.42 ? Math.round(Math.sin((dt - 0.3) / 0.12 * Math.PI) * 2 * U) : 0;
         const R = rotFrame(src, q, ccx, ccy);
-        const half = Math.ceil(m.torsoW / 2) + 1;
+        const half = Math.ceil(m.torsoW / 2) + q(1);
         this.body(ctx, { pix: R.pix, emis: null }, px + R.dx * k, py - (half + b) * k + R.dy * k, k, 0, false, {});
         return;
       }
@@ -596,18 +603,18 @@ export class Actor {
       let sp = vName === 'up' ? this.shield.back : vName === 'side' ? this.shield.edge : this.shield.front;
       if (shieldUp) sp = vName === 'up' ? this.shield.back : this.shield.front;
       const h0 = P.off;
-      this.body(ctx, { pix: sp, emis: null }, px + Math.round(h0[0] + (shieldUp ? 0 : 0)) * k, py + Math.round(h0[1] + 1) * k, k, 0, false, { noAura: true });
+      this.body(ctx, { pix: sp, emis: null }, px + Math.round(h0[0]) * k, py + Math.round(h0[1] + q(1)) * k, k, 0, false, { noAura: true });
     };
     const drawTome = () => {
       if (!this.tome || e.dead || roll) return;
-      const bob = Math.round(Math.sin(this.t * 2.6) * 1.5);
+      const bob = Math.round(Math.sin(this.t * 2.6) * 1.5 * U);
       const so = P.offS;
-      const sx = so[0] + (so[0] >= 0 ? 4 : -4), sy = so[1] - 6 + bob;
+      const sx = so[0] + (so[0] >= 0 ? q(4) : -q(4)), sy = so[1] - q(6) + bob;
       const tx = px + sx * k, ty = py + sy * k;
       this.body(ctx, this.tome, tx, ty, k, 0, sx < 0, { noAura: true });
       this._glows = this._glows || [];
-      this._glows.push([tx, ty - 4 * k, '#ffd080', 5 * k, 0.35]);
-      if (lines) lines.push([tx - 3 * k, gY, gH - sy * k + 4 * k, tx + 3 * k, gY, gH - sy * k + 4 * k, 2 * k]);
+      this._glows.push([tx, ty - q(4) * k, '#ffd080', q(5) * k, 0.35]);
+      if (lines) lines.push([tx - q(3) * k, gY, gH - sy * k + q(4) * k, tx + q(3) * k, gY, gH - sy * k + q(4) * k, q(2) * k]);
     };
     // weapon sprite + smear trail
     let wspr = null;
@@ -627,12 +634,12 @@ export class Actor {
       if (P.smear && !this._xray) this.drawSmear(ctx, wspr, wx, wy, W.a, k, wpn);
       if (P.streak && !this._xray) {
         // thrust: pale speed copies trailing the blade
-        const sm = variant(wspr.pix, 'smear:' + (wpn.element && ELEM_GLOW[wpn.element] ? ELEM_GLOW[wpn.element] : '#fff6e0') + ':' + Math.round((wspr.len || 8) * 0.3));
-        for (let i = 2; i >= 1; i--) { ctx.globalAlpha = this.alpha * (i === 1 ? 0.7 : 0.35); blit(ctx, sm, wx - Math.round(Math.cos(W.a) * 3 * i * k), wy - Math.round(Math.sin(W.a) * 3 * i * k), k, rr, fl); }
+        const sm = variant(wspr.pix, 'smear:' + (wpn.element && ELEM_GLOW[wpn.element] ? ELEM_GLOW[wpn.element] : '#fff6e0') + ':' + Math.round((wspr.len || ap(8)) * 0.3));
+        for (let i = 2; i >= 1; i--) { ctx.globalAlpha = this.alpha * (i === 1 ? 0.7 : 0.35); blit(ctx, sm, wx - Math.round(Math.cos(W.a) * q(3) * i * k), wy - Math.round(Math.sin(W.a) * q(3) * i * k), k, rr, fl); }
         ctx.globalAlpha = this.alpha;
       }
       this.body(ctx, { pix: wspr.pix, emis: wspr.emis }, wx, wy, k, rr, fl, { noAura: true });
-      const len = (wspr.len || 8) * k;
+      const len = (wspr.len || ap(8)) * k;
       const tipx = wx + Math.cos(W.a) * len, tipy = wy + Math.sin(W.a) * len;
       this._tipPx = [tipx - x, tipy - y];
       if (lines && deathPhase < 0 && !roll) lines.push([wx, gY, gH - W.y * k, tipx, gY, gH - W.y * k - Math.sin(W.a) * len, k]);
@@ -640,10 +647,10 @@ export class Actor {
         const ox = wx + Math.cos(W.a) * wspr.orb[0] * k, oy = wy + Math.sin(W.a) * wspr.orb[0] * k;
         this._tipPx = [ox - x, oy - y];
         this._glows = this._glows || [];
-        this._glows.push([ox, oy, wspr.orbColor, (kind && CASTS.has(kind) ? 9 : 6) * k, kind && CASTS.has(kind) ? 0.75 : 0.45]);
+        this._glows.push([ox, oy, wspr.orbColor, q(kind && CASTS.has(kind) ? 9 : 6) * k, kind && CASTS.has(kind) ? 0.75 : 0.45]);
       } else if (wpn.element && ELEM_GLOW[wpn.element]) {
         this._glows = this._glows || [];
-        this._glows.push([(wx + tipx) / 2, (wy + tipy) / 2, ELEM_GLOW[wpn.element], 6 * k, 0.3]);
+        this._glows.push([(wx + tipx) / 2, (wy + tipy) / 2, ELEM_GLOW[wpn.element], q(6) * k, 0.3]);
       }
       if (!this._xray) { this.trail.push({ a: W.a }); if (this.trail.length > 4) this.trail.shift(); }
     };
@@ -689,7 +696,7 @@ export class Actor {
       mainFist();
     }
     // dropped weapon after death
-    if (e.dead && this.weapon && !this._xray) this.drawDropped(ctx, x, y, k);
+    if (e.dead && this.weapon && !this._xray) this.drawDropped(ctx, x, y, k, U);
     this._hand = [P.main[0] * k + lx * k, P.main[1] * k + ly * k];
   }
 
@@ -700,7 +707,7 @@ export class Actor {
     if (Math.abs(angDiff(tr[0].a, a)) < 0.15) return;
     const col = wpn.element && ELEM_GLOW[wpn.element] ? ELEM_GLOW[wpn.element] : '#fff6e0';
     // only the outer part of the blade smears, so it reads as a crescent near the tip, not a fan
-    const from = Math.max(2, Math.round((wspr.len || 8) * 0.6));
+    const from = Math.max(3, Math.round((wspr.len || ap(8)) * 0.6));
     const sm = variant(wspr.pix, 'smear:' + col + ':' + from);
     const fan = (a0, a1, al) => {
       let dd = angDiff(a0, a1);
@@ -723,15 +730,15 @@ export class Actor {
     ctx.globalAlpha = this.alpha;
   }
 
-  drawDropped(ctx, x, y, k) {
+  drawDropped(ctx, x, y, k, U = ART) {
     const e = this.ent;
     const wspr = weaponSprite(this.weapon.type === 'bow' || this.weapon.type === 'crossbow' ? { ...this.weapon, draw: 0 } : this.weapon);
     if (!wspr || wspr.none) return;
     const t = clamp01((e.deathT || 0) / 0.4);
     const sideSgn = this._deathSide || 1;
-    const gx = x + (sideSgn * 3) * k, gy = y + 6 * k;
-    const hx = x + (this._hand ? this._hand[0] : 0), hy = y + (this._hand ? this._hand[1] : -10);
-    const arcH = Math.sin(t * Math.PI) * 6 * k;
+    const gx = x + Math.round(sideSgn * 3 * U) * k, gy = y + Math.round(6 * U) * k;
+    const hx = x + (this._hand ? this._hand[0] : 0), hy = y + (this._hand ? this._hand[1] : -Math.round(10 * U));
+    const arcH = Math.sin(t * Math.PI) * 6 * U * k;
     const wx = Math.round(lerp(hx, gx, t)), wy = Math.round(lerp(hy, gy, t) - arcH);
     const a = lerp(-1.2 * sideSgn, sideSgn > 0 ? 0.25 : Math.PI - 0.25, easeOut(t)) + (t < 1 ? t * 6 * sideSgn : 0);
     let rr = a, fl = false;
@@ -745,29 +752,30 @@ export class Actor {
     const st = this.ent.st, m = this.spr.m, wpn = this.weapon && !this.ent.dead ? this.weapon : null;
     const wtype = wpn ? wpn.type : null;
     const { dx, dy, side, alpha, moving } = c;
-    const tw = vName === 'side' ? Math.max(5, m.torsoW - 2) : m.torsoW;
+    // every reach, offset and lift below was designed in old pixels; U converts to today's
+    const U = m.u, q = (v) => v * U;
+    const tw = vName === 'side' ? m.twSide : m.torsoW;
     const bob = pose.bob | 0, lean = vName === 'side' ? pose.lean | 0 : 0;
-    const tyR = m.torsoTop - FEET + bob;
-    const tl = -Math.floor(tw / 2) + lean, tr = tl + tw - 1;
+    const tyR = m.torsoTop - m.feet + bob;
+    const tl = -(tw >> 1) + lean, tr = tl + tw - 1;
     const fx = (r) => (flip ? -r - 1 : r);
-    // shoulder anchors (pixel centres of the arm's top)
+    // shoulder anchors (pixel centres of the arm's top), tucked one pixel into the shoulder
     let mainS, offS;
-    const sy = tyR + 1 + m.pad;
-    if (vName === 'down') { mainS = [tl - 1, sy]; offS = [tr + 2, sy]; }
-    else if (vName === 'up') { mainS = [tr + 2, sy]; offS = [tl - 1, sy]; }
-    else { mainS = [fx(lean), sy]; offS = [fx(lean - 2), sy]; }
-    const chest = [fx(lean) + (flip ? 0.5 : -0.5) * 0, tyR + 2];
+    const sy = tyR + Math.round(m.armW / 2) + m.pad;
+    if (vName === 'down') { mainS = [tl - 1, sy]; offS = [tr + 1, sy]; }
+    else if (vName === 'up') { mainS = [tr + 1, sy]; offS = [tl - 1, sy]; }
+    else { mainS = [fx(lean), sy]; offS = [fx(lean - Math.round(q(2))), sy]; }
+    const chest = [fx(lean), tyR + q(2)];
     const armL = m.armL;
     const swingPh = moving ? Math.sin((this.ph / 6) * TAU) : 0;
     const sprint = !!st.sprint;
-    const A = sprint ? 3 : 2;
+    const A = q(sprint ? 3 : 2);
     // relaxed hands: hang under the shoulder, swing along the facing while running
-    const hang = (s, sw) => [s[0] + dx * sw * A * 0.9 + (vName === 'side' ? 0 : 0), s[1] + armL - 1 - Math.abs(sw) * (sprint ? 1.5 : 0.7) + dy * sw * A * 0.5];
+    const hang = (s, sw) => [s[0] + dx * sw * A * 0.9, s[1] + armL - 1 - Math.abs(sw) * q(sprint ? 1.5 : 0.7) + dy * sw * A * 0.5];
     let main = hang(mainS, -swingPh), off = hang(offS, swingPh);
-    if (vName !== 'side') { main[0] += (vName === 'down' ? -0.4 : 0.4); off[0] += (vName === 'down' ? 0.4 : -0.4); }
+    if (vName !== 'side') { main[0] += (vName === 'down' ? -q(0.4) : q(0.4)); off[0] += (vName === 'down' ? q(0.4) : -q(0.4)); }
     let weapon = null, smear = false, streak = false, weaponBehind = vName === 'up', twoHand = false, offHidden = false;
     let mainBehind = false, offBehind = false;
-    const vec = (a, r) => [Math.cos(a) * r, Math.sin(a) * r];
     const norm = (v) => { const l = Math.hypot(v[0], v[1]) || 1; return [v[0] / l, v[1] / l]; };
     const ang = (v) => Math.atan2(v[1], v[0]);
     const pole = wtype && POLES.has(wtype);
@@ -777,41 +785,41 @@ export class Actor {
     if (wpn) {
       if (wtype === 'bow') {
         // bow in the off hand; drawn toward the aim when fighting
-        if (combat) { off = [chest[0] + dx * (armL + 1), chest[1] + dy * (armL + 1) - 1]; weapon = { x: off[0], y: off[1], a: alpha, off: true }; main = [off[0] - dx * 3, off[1] - dy * 3]; }
+        if (combat) { off = [chest[0] + dx * (armL + q(1)), chest[1] + dy * (armL + q(1)) - q(1)]; weapon = { x: off[0], y: off[1], a: alpha, off: true }; main = [off[0] - dx * q(3), off[1] - dy * q(3)]; }
         else weapon = { x: off[0], y: off[1], a: Math.abs(dx) > 0.3 ? alpha : (vName === 'down' ? 0 : Math.PI), off: true };
       } else if (wtype === 'crossbow') {
-        const g = combat ? [chest[0] + dx * 3, chest[1] + dy * 3 + 1] : [main[0], main[1]];
+        const g = combat ? [chest[0] + dx * q(3), chest[1] + dy * q(3) + q(1)] : [main[0], main[1]];
         main = g; weapon = { x: g[0], y: g[1], a: combat ? alpha : ang(norm([dx * 0.6, 1])) };
-        off = [g[0] + dx * 5, g[1] + dy * 5]; twoHand = true;
+        off = [g[0] + dx * q(5), g[1] + dy * q(5)]; twoHand = true;
       } else if (pole) {
         if (combat && wtype !== 'staff') {
-          main = [chest[0] - dx * 1 + side.x * 2, chest[1] - dy * 1 + 2 + side.y * 1];
+          main = [chest[0] - dx * q(1) + side.x * q(2), chest[1] - dy * q(1) + q(2) + side.y * q(1)];
           const a = ang(norm([dx, dy - 0.25]));
           weapon = { x: main[0], y: main[1], a };
-          off = [main[0] + Math.cos(a) * 5, main[1] + Math.sin(a) * 5]; twoHand = true;
+          off = [main[0] + Math.cos(a) * q(5), main[1] + Math.sin(a) * q(5)]; twoHand = true;
         } else {
           // walking staff / spear held upright at the side
-          main = [mainS[0] + (vName === 'side' ? dx * 2 : 0), mainS[1] + armL - 3];
+          main = [mainS[0] + (vName === 'side' ? dx * q(2) : 0), mainS[1] + armL - q(3)];
           weapon = { x: main[0], y: main[1], a: -Math.PI / 2 + (vName === 'down' ? -0.12 : vName === 'up' ? 0.12 : dx * 0.18) };
           weaponBehind = vName === 'up' || vName === 'side' && !combat;
         }
       } else if (TWO_H.has(wtype)) {
         // greatsword: two-handed guard forward, or resting on the shoulder
         if (combat) {
-          main = [chest[0] + dx * 3 + side.x, chest[1] + dy * 2 + 2];
+          main = [chest[0] + dx * q(3) + side.x * q(1), chest[1] + dy * q(2) + q(2)];
           const a = ang(norm([dx * 1.0 + side.x * 0.3, dy * 0.8 - 0.75]));
           weapon = { x: main[0], y: main[1], a };
-          off = [main[0] - Math.cos(a) * 2, main[1] - Math.sin(a) * 2]; twoHand = true;
+          off = [main[0] - Math.cos(a) * q(2), main[1] - Math.sin(a) * q(2)]; twoHand = true;
         } else {
-          main = [mainS[0] + side.x * 0.5, mainS[1] + 2];
+          main = [mainS[0] + side.x * q(0.5), mainS[1] + q(2)];
           const a = ang(norm([-dx * 0.55 + side.x * 0.45, -1 - dy * 0.2]));
           weapon = { x: main[0], y: main[1], a };
-          weaponBehind = vName === 'up' || (vName === 'down' && false);
+          weaponBehind = vName === 'up';
         }
       } else {
         // one-handed: relaxed at the side, raised in a guard when fighting
         if (combat) {
-          main = [mainS[0] + dx * 2.5, mainS[1] + armL - 3 + dy * 1.5];
+          main = [mainS[0] + dx * q(2.5), mainS[1] + armL - q(3) + dy * q(1.5)];
           weapon = { x: main[0], y: main[1], a: ang(norm([dx * 0.8 + side.x * 0.7, dy * 0.2 - 0.75 + side.y * 0.3])) };
         } else {
           weapon = { x: main[0], y: main[1], a: ang(norm([dx * 0.45 + side.x * 0.3, 1 + side.y * 0.3])) };
@@ -822,63 +830,64 @@ export class Actor {
     }
     // shield arm: held a little forward in a fight, up in front of the chest when blocking
     if (this.shield) {
-      if (st.block) off = [chest[0] + dx * 4, chest[1] + dy * 3 - 1];
-      else if (combat) off = [offS[0] + dx * 2, offS[1] + armL - 2 + dy];
+      if (st.block) off = [chest[0] + dx * q(4), chest[1] + dy * q(3) - q(1)];
+      else if (combat) off = [offS[0] + dx * q(2), offS[1] + armL - q(2) + dy * q(1)];
     }
-    if (st.block && wpn && !twoHand) { main = [mainS[0] - dx * 1, mainS[1] + armL - 3]; if (weapon) { weapon.x = main[0]; weapon.y = main[1]; weapon.a = ang(norm([side.x * 0.5 + dx * 0.3, -1])); } }
+    if (st.block && wpn && !twoHand) { main = [mainS[0] - dx * q(1), mainS[1] + armL - q(3)]; if (weapon) { weapon.x = main[0]; weapon.y = main[1]; weapon.a = ang(norm([side.x * 0.5 + dx * 0.3, -1])); } }
 
     // ---- attacks
     if (kind && atk) {
       const K = atk;
       const cA = [chest[0], chest[1]];
+      const Kr = q(K.r), Kl = q(K.lift);
       if (K.mode === 'arc' || K.mode === 'thrust') {
         const ha = alpha + K.phi;
-        let hp = [cA[0] + Math.cos(ha) * K.r, cA[1] + Math.sin(ha) * K.r * 0.85 - K.lift];
+        const hp = [cA[0] + Math.cos(ha) * Kr, cA[1] + Math.sin(ha) * Kr * 0.85 - Kl];
         let wa = ha + K.psi;
         if (K.mode === 'thrust') wa = alpha + K.psi;
         if (pole || twoHand || TWO_H.has(wtype)) { twoHand = true; }
         main = hp;
         weapon = wpn ? { x: hp[0], y: hp[1], a: wa } : null;
-        if (twoHand && wtype !== 'bow') off = [hp[0] - Math.cos(wa) * (pole ? -4 : 2), hp[1] - Math.sin(wa) * (pole ? -4 : 2)];
+        if (twoHand && wtype !== 'bow') off = [hp[0] - Math.cos(wa) * q(pole ? -4 : 2), hp[1] - Math.sin(wa) * q(pole ? -4 : 2)];
         smear = K.smear && !!wpn && K.mode === 'arc';
         streak = K.smear && !!wpn && K.mode === 'thrust' && atk.streak;
         if (!wpn) {
           // claws: both hands rake, the off hand trailing the main one
           const oa = alpha - K.phi * 0.6;
-          off = [cA[0] + Math.cos(oa) * K.r * 0.8, cA[1] + Math.sin(oa) * K.r * 0.7 - K.lift];
+          off = [cA[0] + Math.cos(oa) * Kr * 0.8, cA[1] + Math.sin(oa) * Kr * 0.7 - Kl];
         }
       } else if (K.mode === 'overhead') {
-        main = [cA[0] + dx * K.r, cA[1] + dy * K.r * 0.85 - K.lift];
+        main = [cA[0] + dx * Kr, cA[1] + dy * Kr * 0.85 - Kl];
         const vw = norm([-dx * 0.7 + side.x * 0.3, -1 - dy * 0.3]), vm = norm([side.x * 0.9 + dx * 0.3, -0.8 + side.y * 0.4]), ve = norm([dx, dy + 0.75]);
         const t = K.wt;
         const v = norm([(1 - t) * (1 - t) * vw[0] + 2 * t * (1 - t) * vm[0] + t * t * ve[0], (1 - t) * (1 - t) * vw[1] + 2 * t * (1 - t) * vm[1] + t * t * ve[1]]);
         weapon = wpn ? { x: main[0], y: main[1], a: ang(v) } : null;
         twoHand = TWO_H.has(wtype) || pole || K.slam;
-        if (twoHand) off = [main[0] - v[0] * 2, main[1] - v[1] * 2];
-        else off = [offS[0] - dx, offS[1] + armL - 2];
+        if (twoHand) off = [main[0] - v[0] * q(2), main[1] - v[1] * q(2)];
+        else off = [offS[0] - dx * q(1), offS[1] + armL - q(2)];
         smear = K.smear && !!wpn;
         if (vName === 'down' && v[1] < -0.55 && K.lift > 3) weaponBehind = true; else if (vName !== 'up') weaponBehind = false;
       } else if (K.mode === 'cast') {
         // staff / wand forward, the free hand raised toward the aim
-        main = [cA[0] + dx * K.r + side.x * 1.5, cA[1] + dy * K.r * 0.8 - K.lift + 1];
+        main = [cA[0] + dx * Kr + side.x * q(1.5), cA[1] + dy * Kr * 0.8 - Kl + q(1)];
         if (wpn) weapon = { x: main[0], y: main[1], a: K.up ? -Math.PI / 2 + side.x * 0.12 : alpha + K.psi };
-        off = K.up ? [cA[0] - side.x * 3, cA[1] - 7] : [cA[0] + dx * (K.r + 1) - side.x * 2, cA[1] + dy * (K.r + 1) * 0.8 - 3];
-        if (K.nova) { main = [cA[0] + side.x * K.spread + dx * 2, cA[1] - K.olift]; off = [main[0], main[1] + 3]; if (weapon) { weapon.x = main[0]; weapon.y = main[1]; weapon.a = K.wa; } }
+        off = K.up ? [cA[0] - side.x * q(3), cA[1] - q(7)] : [cA[0] + dx * (Kr + q(1)) - side.x * q(2), cA[1] + dy * (Kr + q(1)) * 0.8 - q(3)];
+        if (K.nova) { main = [cA[0] + side.x * q(K.spread) + dx * q(2), cA[1] - q(K.olift)]; off = [main[0], main[1] + q(3)]; if (weapon) { weapon.x = main[0]; weapon.y = main[1]; weapon.a = K.wa; } }
         if (vName === 'up') weaponBehind = true;
       } else if (K.mode === 'bow') {
-        off = [cA[0] + dx * (armL + 1), cA[1] + dy * (armL + 1) - 1];
+        off = [cA[0] + dx * (armL + q(1)), cA[1] + dy * (armL + q(1)) - q(1)];
         const pull = K.pull;
-        main = [off[0] - dx * (2 + pull * 6), off[1] - dy * (2 + pull * 6) - (1 - pull)];
+        main = [off[0] - dx * q(2 + pull * 6), off[1] - dy * q(2 + pull * 6) - q(1 - pull)];
         weapon = wpn ? { x: off[0], y: off[1], a: alpha, off: true } : null;
-        if (K.recoil) { main = [main[0] - dx * K.recoil, main[1] - dy * K.recoil - K.recoil * 0.5]; }
+        if (K.recoil) { main = [main[0] - dx * q(K.recoil), main[1] - dy * q(K.recoil) - q(K.recoil * 0.5)]; }
       } else if (K.mode === 'xbow') {
         const kick = K.kick;
-        main = [cA[0] + dx * (3 - kick), cA[1] + dy * (3 - kick) + 1 - kick * 0.5];
+        main = [cA[0] + dx * q(3 - kick), cA[1] + dy * q(3 - kick) + q(1 - kick * 0.5)];
         weapon = wpn ? { x: main[0], y: main[1], a: alpha - (dx >= 0 ? 1 : -1) * kick * 0.12 } : null;
-        off = [main[0] + dx * 5, main[1] + dy * 5]; twoHand = true;
+        off = [main[0] + dx * q(5), main[1] + dy * q(5)]; twoHand = true;
       } else if (K.mode === 'bash') {
-        off = [cA[0] + dx * K.r, cA[1] + dy * K.r * 0.8 - 1];
-        main = [mainS[0] - dx * 2, mainS[1] + armL - 3];
+        off = [cA[0] + dx * Kr, cA[1] + dy * Kr * 0.8 - q(1)];
+        main = [mainS[0] - dx * q(2), mainS[1] + armL - q(3)];
         if (weapon) { weapon.x = main[0]; weapon.y = main[1]; }
       }
       // blend in from the previous pose so chained attacks don't pop
@@ -893,28 +902,28 @@ export class Actor {
     } else if (st.spin && wpn) {
       // whirlwind: blade sweeps around the body, smearing all the way
       const a = this.t * 17 + Math.PI / 2;
-      main = [chest[0] + Math.cos(a) * 6, chest[1] + Math.sin(a) * 5];
+      main = [chest[0] + Math.cos(a) * q(6), chest[1] + Math.sin(a) * q(5)];
       weapon = { x: main[0], y: main[1], a };
       smear = true; weaponBehind = Math.sin(a) < -0.2;
-      if (TWO_H.has(wtype) || pole) { twoHand = true; off = [main[0] - Math.cos(a) * 2, main[1] - Math.sin(a) * 2]; }
+      if (TWO_H.has(wtype) || pole) { twoHand = true; off = [main[0] - Math.cos(a) * q(2), main[1] - Math.sin(a) * q(2)]; }
     }
 
     // ---- states that override the arms
     if (c.hurt) {
-      main = [mainS[0] + (mainS[0] < 0 ? -2 : 2), mainS[1] + armL - 3];
-      off = [offS[0] + (offS[0] < 0 ? -2 : 2), offS[1] + armL - 3];
+      main = [mainS[0] + (mainS[0] < 0 ? -q(2) : q(2)), mainS[1] + armL - q(3)];
+      off = [offS[0] + (offS[0] < 0 ? -q(2) : q(2)), offS[1] + armL - q(3)];
       if (weapon) { weapon = { ...weapon, x: weapon.off ? off[0] : main[0], y: weapon.off ? off[1] : main[1], a: weapon.a + 0.5 }; }
     }
     if (pose.legs === 'ride' && !kind) {
-      main = [mainS[0] + dx * 3, mainS[1] + armL - 2]; off = [offS[0] + dx * 3, offS[1] + armL - 2];
+      main = [mainS[0] + dx * q(3), mainS[1] + armL - q(2)]; off = [offS[0] + dx * q(3), offS[1] + armL - q(2)];
       if (weapon && !weapon.off) { weapon.x = main[0]; weapon.y = main[1]; }
     }
-    if (c.deathPhase >= 0) { weapon = null; main = [mainS[0] - 1, mainS[1] + armL - 1]; off = [offS[0] + 1, offS[1] + armL - 1]; }
+    if (c.deathPhase >= 0) { weapon = null; main = [mainS[0] - q(1), mainS[1] + armL - 1]; off = [offS[0] + q(1), offS[1] + armL - 1]; }
     // weapon swap flourish: a quick twirl in the hand
     if (wpn && weapon && !kind && st.swapT !== undefined && st.swapT < 0.36) {
       const t = clamp01(st.swapT / 0.36);
       weapon = { ...weapon, a: weapon.a + easeOut(t) * TAU * (dx >= 0 ? 1 : -1) - TAU * (dx >= 0 ? 1 : -1) };
-      main = [main[0], main[1] - Math.sin(t * Math.PI) * 3];
+      main = [main[0], main[1] - Math.sin(t * Math.PI) * q(3)];
       if (!weapon.off) { weapon.x = main[0]; weapon.y = main[1]; }
       smear = t < 0.8;
     }
@@ -1031,7 +1040,7 @@ export class Actor {
   // tip of the weapon / staff orb / creature mouth in world space (projectile origins)
   weaponTip(out) {
     const e = this.ent;
-    const t = this._tipPx || [0, -12];
+    const t = this._tipPx || [0, -ap(12)];
     const hUnits = Math.max(0.6, -t[1] / PPU * 0.6);
     out.x = e.pos.x + t[0] / PPU;
     out.y = e.pos.y + hUnits;
@@ -1040,7 +1049,7 @@ export class Actor {
   }
   handPos(out) {
     const e = this.ent;
-    const t = this._hand || [0, -8];
+    const t = this._hand || [0, -ap(8)];
     out.x = e.pos.x + t[0] / PPU;
     out.y = e.pos.y + Math.max(0.6, -t[1] / PPU);
     out.z = e.pos.z;
