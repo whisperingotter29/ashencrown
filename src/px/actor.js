@@ -584,8 +584,8 @@ export class Actor {
       if (roll) {
         // tucked roll: pixel-exact quarter turns around the body centre
         const dir = dx < -0.05 || (Math.abs(dx) <= 0.05 && dy < 0) ? -1 : 1;
-        const q = ((dir > 0 ? roll : 4 - roll) % 4 + 4) % 4;
-        const R = rotFrame(src, q, ccx, ccy);
+        const qt = ((dir > 0 ? roll : 4 - roll) % 4 + 4) % 4;
+        const R = rotFrame(src, qt, ccx, ccy);
         this.body(ctx, { pix: R.pix, emis: null }, px + R.dx * k, py - (m.feet - ccy) * k + R.dy * k, k, 0, false, {});
         return;
       }
@@ -593,9 +593,9 @@ export class Actor {
         // lying on the ground: the standing frame turned a quarter, with a small landing bounce
         const dt = e.deathT;
         const sideSgn = this._deathSide || (this._deathSide = (e.id % 2 ? 1 : -1));
-        const q = sideSgn > 0 ? 1 : 3;
+        const qt = sideSgn > 0 ? 1 : 3;
         const b = dt < 0.42 ? Math.round(Math.sin((dt - 0.3) / 0.12 * Math.PI) * 2 * U) : 0;
-        const R = rotFrame(src, q, ccx, ccy);
+        const R = rotFrame(src, qt, ccx, ccy);
         const half = Math.ceil(m.torsoW / 2) + q(1);
         this.body(ctx, { pix: R.pix, emis: null }, px + R.dx * k, py - (half + b) * k + R.dy * k, k, 0, false, {});
         return;
