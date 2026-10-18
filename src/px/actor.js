@@ -210,6 +210,11 @@ export class Actor {
     [this.weapon, this.shield, this.tome] = keep;
     this.refreshQuiver();
   }
+  // giant bodies hold weapons drawn natively at their size (quarter steps keep the cache small)
+  heldSpec(spec) {
+    const hf = this.spr?.m?.hf || 1;
+    return hf > 1.12 ? { ...spec, sz: Math.round(hf * 4) / 4 } : spec;
+  }
   setWeapon(spec) { this.weapon = spec && spec.type !== 'claws' ? spec : null; this.refreshQuiver(); }
   setShield(spec) { this.shield = spec ? shieldSprite(spec) : null; }
   setTome(spec) { this.tome = spec ? tomeSprite(spec.color, spec.glow) : null; }
@@ -622,7 +627,7 @@ export class Actor {
       let draw = 0;
       if (wtype === 'bow') draw = kind === 'bowdraw' ? Math.round(u * 2) / 2 : 0;
       if (wtype === 'crossbow') draw = kind === 'xbow' && u < 0.6 ? 0 : 1;
-      wspr = weaponSprite(wtype === 'bow' || wtype === 'crossbow' ? { ...wpn, draw } : wpn);
+      wspr = weaponSprite(this.heldSpec(wtype === 'bow' || wtype === 'crossbow' ? { ...wpn, draw } : wpn));
     }
     const W = P.weapon;   // { x, y, a } grip position + angle, or null
     const drawWeapon = () => {
@@ -732,7 +737,7 @@ export class Actor {
 
   drawDropped(ctx, x, y, k, U = ART) {
     const e = this.ent;
-    const wspr = weaponSprite(this.weapon.type === 'bow' || this.weapon.type === 'crossbow' ? { ...this.weapon, draw: 0 } : this.weapon);
+    const wspr = weaponSprite(this.heldSpec(this.weapon.type === 'bow' || this.weapon.type === 'crossbow' ? { ...this.weapon, draw: 0 } : this.weapon));
     if (!wspr || wspr.none) return;
     const t = clamp01((e.deathT || 0) / 0.4);
     const sideSgn = this._deathSide || 1;

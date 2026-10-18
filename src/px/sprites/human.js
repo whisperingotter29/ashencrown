@@ -332,7 +332,7 @@ function torso(p, e, F) {
     return;
   }
   const base = L.chest ? L.chest.color : L.shirt;
-  const R = cw === 'plate' ? ramp(mixc(base, '#e8ecf0', 0.12), 0.56, 1.2) : cw === 'mail' ? ramp(mixc(base, '#c8ccd0', 0.12), 0.6, 1.16) : ramp(base, 0.66, 1.14);
+  const R = cw === 'plate' ? ramp(mixc(base, '#e8ecf0', 0.06), 0.56, 1.12) : cw === 'mail' ? ramp(mixc(base, '#c8ccd0', 0.12), 0.6, 1.16) : ramp(base, 0.66, 1.14);
   const T = ramp(C(L.chest?.trim || '#c8a050'), 0.7, 1.2);
   // body block with sloped shoulders: lit down the left, half shade then shade to the right,
   // the waist darker
@@ -349,7 +349,7 @@ function torso(p, e, F) {
     else if (!side && (x - tl) % 4 === 3 && y > ty0 + 2 && y < ty1 - 2) c = stepD(R, c);   // cloth folds
     if (L.bark && (x * 3 + y) % 5 === 0) c = dark(c, 0.8);
     if (L.stone && hash2(x, y, 4) < 0.12) c = dark(c, 0.82);
-    if (L.scales) { const k = (x + y * 2) % 4; if (k === 0) c = light(c, 1.1); else if (k === 2 && y % 2) c = dark(c, 0.9); }
+    if (L.scales) { const k = (x + ((y >> 1) & 1) * 2) % 4, r = y & 1; if (r === 1 && k === 0) c = dark(c, 0.82); else if (r === 0 && (k === 1 || k === 2)) c = light(c, 1.08); }
     p.set(x, y, c);
   }
   if (up) {
@@ -632,7 +632,7 @@ function cape(p, F) {
   // front view: the cape hangs behind, its edges flare past the body
   for (let y = ty0 + 1; y <= bottom; y++) {
     const t = (y - ty0) / Math.max(1, bottom - ty0);
-    const g = Math.floor(t * (S(L.cloak ? 5 : 3) + sway * S(1))) + (t > 0.5 && wave > 0 ? 1 : 0);
+    const g = Math.floor(t * (S(L.cloak ? 6 : 3) + sway * S(1))) + (t > 0.5 && wave > 0 ? 1 : 0);
     const xa = tl - 1 - g, xb = tr + 1 + g + (t > 0.5 && wave < 0 ? 1 : 0);
     for (let x = xa; x <= xb; x++) {
       let c;
@@ -667,7 +667,7 @@ function drape(p, F) {
     return;
   }
   const top = ty0 - S(2);
-  const xr = (t) => tr + 1 + Math.round(t * S(6));                 // right edge, flaring out
+  const xr = (t) => tr + 1 + Math.round(t * S(7));                 // right edge, flaring out
   const ex0 = F.mL - S(2), ex1 = xr(1) - S(3);
   for (let y = top; y <= bottom; y++) {
     const t = (y - top) / Math.max(1, bottom - top);
@@ -727,10 +727,12 @@ function tail(p, F) {
   const pts = side ? [[F.bx - S(3), ty1], [F.bx - S(8), ty1 + S(2)], [F.bx - S(11), ty1 - 1 + wave], [F.bx - S(13), ty1 - S(6) + wave]]
     : up ? [[cx, ty1], [cx + S(2), ty1 + S(5)], [cx + S(5) + wave, ty1 + S(5)], [cx + S(7) + wave, ty1]]
       : [[tr, ty1], [tr + S(5), ty1 + S(2)], [tr + S(8), ty1 - 1 + wave], [tr + S(10), ty1 - S(6) + wave]];
-  for (let i = 0; i < pts.length - 1; i++) p.line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], i === 2 ? H.m : H.d, 3);
-  for (let i = 0; i < pts.length - 1; i++) p.line(pts[i][0], pts[i][1] - 1, pts[i + 1][0], pts[i + 1][1] - 1, i === 0 ? H.d : H.l);
+  for (let i = 0; i < pts.length - 1; i++) p.line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], i === 0 ? H.d : H.m, i === 0 ? 3 : 4);
+  for (let i = 0; i < pts.length - 1; i++) p.line(pts[i][0], pts[i][1] - 1, pts[i + 1][0], pts[i + 1][1] - 1, i === 0 ? H.m : H.l);
+  for (let i = 1; i < pts.length - 1; i++) p.line(pts[i][0], pts[i][1] + 2, pts[i + 1][0], pts[i + 1][1] + 2, H.d);
+  // a bushy tip
   const t = pts[3];
-  p.rect(t[0] - 1, t[1] - 2, 3, 3, H.l); p.set(t[0], t[1] - 3, H.s); p.set(t[0] + 1, t[1], H.m);
+  p.disc(t[0] + 0.5, t[1] - 1.5, S(3), H.m); p.disc(t[0], t[1] - 2, S(2), H.l); p.set(t[0] - 1, t[1] - 3, H.s); p.set(t[0] + 1, t[1], H.d); p.set(t[0] + 2, t[1] - 1, H.d);
 }
 
 function quiver(p, F, behind) {
@@ -1069,7 +1071,7 @@ function hair(p, F, x0, y0, x1, y1, eyeY, H, helm) {
 function helmet(p, e, F, helm, x0, y0, x1, y1, eyeY) {
   const { side, up, S, m } = F;
   const M = C(helm.color || '#9aa4ae'), T = ramp(C(helm.trim || '#c8a050'), 0.7, 1.2);
-  const R = ramp(mixc(M, '#e8ecf0', 0.2), 0.58, 1.3);
+  const R = ramp(mixc(M, '#e8ecf0', 0.1), 0.58, 1.18);
   const w = x1 - x0 + 1, cL = x0 + (w >> 1) - 1, cR = x0 + (w >> 1);
   switch (helm.kind) {
     case 'great': {
@@ -1112,11 +1114,15 @@ function helmet(p, e, F, helm, x0, y0, x1, y1, eyeY) {
       }
       if (helm.crest) for (let k = 0; k < (side ? S(7) : S(3)); k++) { const cx = side ? x0 + 1 + k : cL; p.set(cx, ya - 1 - (side ? 0 : k), T.m); p.set(side ? cx : cR, ya - 1 - (side ? 1 : k), T.l); }
       if (helm.plume) {
-        const pc = ramp(helm.plume, 0.7, 1.2);
-        for (let k = 0; k < S(11); k++) {
-          const cx = side ? x0 + S(4) - k : cL - (k > S(7) ? k - S(7) : 0);
-          const cy = ya - 1 - (side ? Math.floor(k / 2) - (k > S(7) ? k - S(7) : 0) : Math.min(k, S(6)));
-          p.set(cx, cy, k % 2 ? pc.l : pc.m); p.set(cx + 1, cy, pc.d); if (k > 2) p.set(cx, cy + 1, pc.md);
+        // a full horsehair plume rising from the crest and sweeping back
+        const pc = ramp(helm.plume, 0.7, 1.2), n = S(12);
+        for (let k = 0; k < n; k++) {
+          const t = k / (n - 1);
+          const cx = side ? x0 + S(5) - Math.round(t * S(9)) : cL + 1 - Math.round(t * t * S(4));
+          const cy = ya - 1 - Math.round(Math.sin(t * Math.PI * 0.8) * S(side ? 5 : 6)) + (side ? Math.round(t * t * S(4)) : Math.round(t * S(3)));
+          const th = Math.max(1, Math.round((side ? 3 : 2.6) * (1 - t * 0.6) * m.hf));
+          for (let j = 0; j < th + 1; j++) p.set(cx, cy + j, j === 0 ? pc.l : j === th ? pc.d : (k + j) % 3 === 0 ? pc.md : pc.m);
+          if (!side) p.set(cx + 1, cy + 1, pc.d);
         }
       }
       break;

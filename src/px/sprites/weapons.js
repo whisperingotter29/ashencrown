@@ -90,8 +90,11 @@ function grip(p, x0, x1, cy, col = GRIP, thick = 2) {
     p.set(x, y, c);
   }
 }
-function pommel(p, x, cy, T) {
+// native size factor for weapons held by giant bodies: g, G(n) = round(n * g), odd(w) keeps odd widths odd
+function sizer(s) { const g = s.sz || 1; return { g, G: (v) => Math.max(1, Math.round(v * g)), odd: (w) => 2 * Math.round(((w - 1) / 2) * g) + 1 }; }
+function pommel(p, x, cy, T, g = 1) {
   const R = trimR(T);
+  if (g > 1.3) { const r = 1.6 * g; p.disc(x + 0.5, cy + 0.5, r, R.m); p.disc(x, cy, r * 0.55, R.l); p.set(x - 1, cy - 1, '#ffffff'); p.set(x + Math.round(r * 0.6), cy + Math.round(r * 0.6), R.dd); return; }
   p.set(x, cy - 1, R.l); p.set(x + 1, cy - 1, R.m); p.set(x - 1, cy, R.m); p.set(x, cy, R.l); p.set(x + 1, cy, R.m);
   p.set(x, cy + 1, R.d); p.set(x + 1, cy + 1, R.dd); p.set(x - 1, cy - 1 + 1, R.d);
 }
@@ -105,37 +108,39 @@ function shaft(p, x0, x1, cy, col = WOOD, thick = 2) {
 
 // ------------------------------------------------------------------ generators
 const GEN = {
+  // every melee generator takes spec.sz (1 = a person's weapon, up to ~2 for giant bosses) and
+  // grows its geometry natively by it; 1-px edges, glints and wraps stay 1 px
   sword(s) {
-    const b = s.base || 'Arming Sword';
+    const b = s.base || 'Arming Sword', z = sizer(s);
     const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
     const cfg = {
       'Arming Sword': { L: 19, w: 5, fuller: true },
       Longsword: { L: 24, w: 5, fuller: true, gripL: 7 },
       Broadsword: { L: 21, w: 7, fuller: true },
-      Gladius: { L: 14, w: 5, width: (t, h) => h + (t > 0.5 && t < 0.85 ? 1 : 0) },
-      Falchion: { L: 19, w: 5, width: (t, h) => h + (t > 0.45 ? 1 : 0) + (t > 0.7 ? 1 : 0) },
-      Scimitar: { L: 21, w: 5, curve: (t) => -t * t * 6 },
-      Khopesh: { L: 19, w: 5, curve: (t) => (t > 0.45 ? -(t - 0.45) * 14 + (t > 0.8 ? (t - 0.8) * 22 : 0) : 0) },
+      Gladius: { L: 14, w: 5, width: (t, h) => h + (t > 0.5 && t < 0.85 ? z.G(1) : 0) },
+      Falchion: { L: 19, w: 5, width: (t, h) => h + (t > 0.45 ? z.G(1) : 0) + (t > 0.7 ? z.G(1) : 0) },
+      Scimitar: { L: 21, w: 5, curve: (t) => -t * t * 6 * z.g },
+      Khopesh: { L: 19, w: 5, curve: (t) => (t > 0.45 ? -(t - 0.45) * 14 + (t > 0.8 ? (t - 0.8) * 22 : 0) : 0) * z.g },
       Rapier: { L: 27, w: 3, cup: true },
     }[b] || { L: 19, w: 5, fuller: true };
-    const gl0 = cfg.gripL || 5;
-    const gx = 4 + gl0;                                    // guard column
-    const W = gx + 2 + cfg.L + 2, H = 23, cy = 11, ox = 4 + (gl0 >> 1);
+    const L = z.G(cfg.L), bw = z.odd(cfg.w), gl0 = z.G(cfg.gripL || 5), pr = z.G(2);
+    const gx = 2 + pr + gl0;                               // guard column
+    const H = z.odd(23), cy = H >> 1, W = gx + z.G(2) + L + 2, ox = 2 + pr + (gl0 >> 1);
     const p = mk(W, H, ox, cy), e = mk(W, H, ox, cy);
-    pommel(p, 2, cy, T);
-    grip(p, 4, gx - 1, cy, GRIP, 2);
+    pommel(p, 1 + pr - 1, cy, T, z.g);
+    grip(p, 2 + pr, gx - 1, cy, GRIP, z.G(2));
     if (cfg.cup) {
       const R = trimR(T);
-      p.ellipse(gx + 1, cy + 0.5, 2.4, 4.2, R.m); p.ellipse(gx + 0.6, cy - 0.5, 1.2, 2.6, R.l); p.set(gx + 2, cy + 3, R.d); p.set(gx + 1, cy + 3, R.d);
-      p.line(gx - 1, cy + 1, gx - 3, cy + 3, R.d);           // knuckle bow
-    } else guard(p, gx, cy, cfg.w >= 7 ? 5 : 4, T);
-    blade(p, e, gx + 2, gx + 1 + cfg.L, cy, cfg.w, M, gl, cfg);
-    if (cfg.cup) { p.set(gx + 3, cy - 1, light(T, 1.2)); }
-    else { p.set(gx + 2, cy, trimR(T).d); p.set(gx + 2, cy - 1, trimR(T).m); }   // ricasso collar
-    return done(p, e, { len: gx + 1 + cfg.L - ox });
+      p.ellipse(gx + 1, cy + 0.5, 2.4 * z.g, 4.2 * z.g, R.m); p.ellipse(gx + 0.6, cy - 0.5, 1.2 * z.g, 2.6 * z.g, R.l); p.set(gx + 2, cy + z.G(3), R.d); p.set(gx + 1, cy + z.G(3), R.d);
+      p.line(gx - 1, cy + 1, gx - z.G(3), cy + z.G(3), R.d);  // knuckle bow
+    } else guard(p, gx, cy, z.G(cfg.w >= 7 ? 5 : 4), T, z.G(2));
+    blade(p, e, gx + z.G(2), gx + z.G(2) - 1 + L, cy, bw, M, gl, cfg);
+    if (cfg.cup) { p.set(gx + z.G(3), cy - 1, light(T, 1.2)); }
+    else { p.set(gx + z.G(2), cy, trimR(T).d); p.set(gx + z.G(2), cy - 1, trimR(T).m); }   // ricasso collar
+    return done(p, e, { len: gx + z.G(2) - 1 + L - ox });
   },
   greatsword(s) {
-    const b = s.base || 'Greatsword';
+    const b = s.base || 'Greatsword', z = sizer(s);
     const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
     const cfg = {
       Greatsword: { L: 27, w: 7, fuller: true },
@@ -144,166 +149,177 @@ const GEN = {
       "Executioner's Blade": { L: 24, w: 11, square: true, blunt: true },
       Flamberge: { L: 29, w: 7, wave: true, width: (t, h) => h + (Math.floor(t * 14) % 2 ? 0 : -1) },
     }[b] || { L: 27, w: 7, fuller: true };
-    const gx = 14, cy = 14, H = 29, W = gx + 3 + cfg.L + 2, ox = 8;
+    const L = z.G(cfg.L), bw = z.odd(cfg.w), pr = z.G(2);
+    const gx = 2 + pr + z.G(10), H = z.odd(29), cy = H >> 1, W = gx + z.G(3) + L + 2, ox = 2 + pr + z.G(4);
     const p = mk(W, H, ox, cy), e = mk(W, H, ox, cy);
-    pommel(p, 2, cy, T);
-    grip(p, 4, gx - 1, cy, GRIP, 3);
+    pommel(p, 1 + pr - 1, cy, T, z.g);
+    grip(p, 2 + pr, gx - 1, cy, GRIP, z.G(3));
     const R = trimR(T);
     if (cfg.angled) {
       // claymore: quillons swept forward, ending in quatrefoil knobs
-      for (let k = 0; k <= 7; k++) { const xx = gx + Math.floor(k / 2); p.set(xx, cy - k, k < 2 ? R.m : R.l); p.set(xx + 1, cy - k, R.d); p.set(xx, cy + k, R.m); p.set(xx + 1, cy + k, R.dd); }
-      for (const dy of [-8, 8]) { p.rect(gx + 3, cy + dy - 1, 2, 2, R.l); p.set(gx + 4, cy + dy, R.d); }
-    } else guard(p, gx, cy, cfg.w >= 11 ? 7 : 6, T, 3);
-    blade(p, e, gx + 3, gx + 2 + cfg.L, cy, cfg.w, M, gl, cfg);
-    if (cfg.hooks) for (const d of [-1, 1]) { p.set(gx + 8, cy + d * 4, M.hi); p.set(gx + 9, cy + d * 5, M.mid); p.set(gx + 8, cy + d * 5, M.lo); }
-    if (cfg.blunt) { for (let y = cy - 5; y <= cy + 5; y++) p.set(gx + 2 + cfg.L, y, M.lo); p.disc(gx + 2 + cfg.L - 4, cy - 2, 1.2, M.dk); }
-    return done(p, e, { len: gx + 2 + cfg.L - ox - 3 });
+      const n = z.G(7);
+      for (let k = 0; k <= n; k++) { const xx = gx + Math.floor(k / 2); p.set(xx, cy - k, k < 2 ? R.m : R.l); p.set(xx + 1, cy - k, R.d); p.set(xx, cy + k, R.m); p.set(xx + 1, cy + k, R.dd); }
+      for (const d of [-1, 1]) { const ky = cy + d * (n + 1), kx = gx + (n >> 1) + 1; p.rect(kx - 1, ky - 1, z.G(2), z.G(2), R.l); p.set(kx, ky, R.d); }
+    } else guard(p, gx, cy, z.G(cfg.w >= 11 ? 7 : 6), T, z.G(3));
+    const b0 = gx + z.G(3), b1 = b0 - 1 + L;
+    blade(p, e, b0, b1, cy, bw, M, gl, cfg);
+    if (cfg.hooks) for (const d of [-1, 1]) { const hx = b0 + z.G(5), hy = cy + d * ((bw >> 1) + 1); p.set(hx, hy, M.hi); p.set(hx + 1, hy + d, M.mid); p.set(hx, hy + d, M.lo); }
+    if (cfg.blunt) { for (let y = cy - (bw >> 1); y <= cy + (bw >> 1); y++) p.set(b1, y, M.lo); p.disc(b1 - z.G(4), cy - z.G(2), 1.2 * z.g, M.dk); }
+    return done(p, e, { len: b1 - ox - z.G(3) });
   },
   dagger(s) {
-    const b = s.base || 'Dagger';
+    const b = s.base || 'Dagger', z = sizer(s);
     const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
     const cfg = {
-      Dagger: { L: 11, w: 5 }, Kris: { L: 13, w: 5, curve: (t) => Math.round(Math.sin(t * 11)) * 0.8 },
-      Stiletto: { L: 14, w: 3 }, Dirk: { L: 13, w: 5, fuller: true }, 'Sickle-Knife': { L: 11, w: 5, curve: (t) => t * t * 6 },
+      Dagger: { L: 11, w: 5 }, Kris: { L: 13, w: 5, curve: (t) => Math.round(Math.sin(t * 11)) * 0.8 * z.g },
+      Stiletto: { L: 14, w: 3 }, Dirk: { L: 13, w: 5, fuller: true }, 'Sickle-Knife': { L: 11, w: 5, curve: (t) => t * t * 6 * z.g },
     }[b] || { L: 11, w: 5 };
-    const gx = 8, cy = 8, W = gx + 2 + cfg.L + 2, H = 17, ox = 5;
+    const L = z.G(cfg.L), pr = z.G(2);
+    const gx = 2 + pr + z.G(4), H = z.odd(17), cy = H >> 1, W = gx + z.G(2) + L + 2, ox = 2 + pr + z.G(1);
     const p = mk(W, H, ox, cy), e = mk(W, H, ox, cy);
-    pommel(p, 2, cy, T);
-    grip(p, 4, gx - 1, cy, GRIP, 2);
-    guard(p, gx, cy, 3, T);
-    blade(p, e, gx + 2, gx + 1 + cfg.L, cy, cfg.w, M, gl, cfg);
-    return done(p, e, { len: gx + 1 + cfg.L - ox - 2 });
+    pommel(p, 1 + pr - 1, cy, T, z.g);
+    grip(p, 2 + pr, gx - 1, cy, GRIP, z.G(2));
+    guard(p, gx, cy, z.G(3), T, z.G(2));
+    blade(p, e, gx + z.G(2), gx + z.G(2) - 1 + L, cy, z.odd(cfg.w), M, gl, cfg);
+    return done(p, e, { len: gx + z.G(2) - 1 + L - ox - 2 });
   },
   mace(s) {
-    const b = s.base || 'Mace';
+    const b = s.base || 'Mace', z = sizer(s), G = z.G;
     const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
-    const L = 18, cy = 11, H = 23, W = L + 18, ox = 5;
+    const L = G(18), H = z.odd(23), cy = H >> 1, pr = G(2), W = 2 + pr + G(4) + L + G(14), ox = 2 + pr + G(1);
     const p = mk(W, H, ox, cy), e = mk(W, H, ox, cy);
-    pommel(p, 2, cy, T);
-    grip(p, 4, 7, cy, GRIP, 2);
-    shaft(p, 8, 5 + L, cy - 1, dark(s.color || '#8a8a8a', 0.8), 2);
+    pommel(p, 1 + pr - 1, cy, T, z.g);
+    const g0 = 2 + pr, g1 = g0 + G(4) - 1;
+    grip(p, g0, g1, cy, GRIP, G(2));
+    shaft(p, g1 + 1, g1 + L - 2, cy - 1, dark(s.color || '#8a8a8a', 0.8), G(2));
     const R = trimR(T);
-    p.rect(8, cy - 1, 1, 2, R.m); p.set(8, cy - 2, R.l);           // collar above the grip
-    const hx = 7 + L + 2;
+    p.rect(g1 + 1, cy - 1, 1, G(2), R.m); p.set(g1 + 1, cy - 2, R.l);           // collar above the grip
+    const hx = g1 + L + G(2);
     if (b === 'Morningstar') {
-      p.disc(hx, cy + 0.5, 5, M.mid); p.disc(hx - 1, cy - 0.5, 3.2, M.hi); p.disc(hx + 1.2, cy + 1.6, 2.4, M.md); p.set(hx - 2, cy - 2, M.edge);
-      for (const [dx, dy] of [[0, -8], [6, -5], [8, 1], [5, 6], [-1, 8], [-6, 5], [-6, -5]]) { p.set(hx + dx, cy + dy, M.edge); p.set(hx + Math.round(dx * 0.82), cy + Math.round(dy * 0.82), M.hi); p.set(hx + Math.round(dx * 0.68), cy + Math.round(dy * 0.68), M.lo); }
+      p.disc(hx, cy + 0.5, 5 * z.g, M.mid); p.disc(hx - G(1), cy - 0.5, 3.2 * z.g, M.hi); p.disc(hx + 1.2 * z.g, cy + 1.6 * z.g, 2.4 * z.g, M.md); p.set(hx - G(2), cy - G(2), M.edge);
+      for (const [dx, dy] of [[0, -8], [6, -5], [8, 1], [5, 6], [-1, 8], [-6, 5], [-6, -5]]) { const ex = hx + G(dx), ey = cy + G(dy); p.set(ex, ey, M.edge); p.set(hx + Math.round(dx * 0.82 * z.g), cy + Math.round(dy * 0.82 * z.g), M.hi); p.set(hx + Math.round(dx * 0.68 * z.g), cy + Math.round(dy * 0.68 * z.g), M.lo); }
     } else if (b === 'Warhammer') {
-      p.rect(hx - 3, cy - 7, 6, 16, M.mid); p.rect(hx - 3, cy - 7, 6, 2, M.hi); p.rect(hx - 3, cy + 7, 6, 2, M.lo); p.rect(hx + 1, cy - 7, 2, 16, M.md); p.rect(hx + 2, cy - 7, 1, 16, M.lo);
-      p.rect(hx - 3, cy - 7, 1, 14, M.hi);
-      for (let x = hx + 3; x <= hx + 8; x++) { const hh = x < hx + 6 ? 1 : 0; for (let y = cy - hh; y <= cy + hh; y++) p.set(x, y, y < cy ? M.hi : y > cy ? M.lo : M.edge); }
-      p.rect(hx - 5, cy - 3, 2, 8, R.m); p.rect(hx - 5, cy - 3, 1, 8, R.l);
+      const a = G(3), t = G(7);
+      p.rect(hx - a, cy - t, 2 * a, 2 * t + 2, M.mid); p.rect(hx - a, cy - t, 2 * a, G(2), M.hi); p.rect(hx - a, cy + t, 2 * a, G(2), M.lo); p.rect(hx + a - G(2), cy - t, G(2), 2 * t + 2, M.md); p.rect(hx + a - 1, cy - t, 1, 2 * t + 2, M.lo);
+      p.rect(hx - a, cy - t, 1, 2 * t, M.hi);
+      for (let x = hx + a; x <= hx + a + G(5); x++) { const hh = x < hx + a + G(3) ? G(1) : 0; for (let y = cy - hh; y <= cy + hh; y++) p.set(x, y, y < cy ? M.hi : y > cy ? M.lo : M.edge); }
+      p.rect(hx - a - G(2), cy - G(3), G(2), G(8), R.m); p.rect(hx - a - G(2), cy - G(3), 1, G(8), R.l);
     } else if (b === 'Scepter-Mace') {
       const gem = C(s.element ? ELEM_GLOW[s.element] || '#ff4060' : '#ff4060');
-      p.disc(hx, cy + 0.5, 5, R.m); p.disc(hx - 1, cy - 0.5, 3, R.l); p.disc(hx, cy + 0.5, 2.6, gem); p.set(hx - 1, cy - 1, '#ffffff');
-      e.disc(hx, cy + 0.5, 2.6, gem);
-      for (const [dx, dy] of [[6, 0], [-1, -6], [-1, 7], [4, -4], [4, 5]]) { p.set(hx + dx, cy + dy, R.l); p.set(hx + dx, cy + dy + 1, R.d); }
+      p.disc(hx, cy + 0.5, 5 * z.g, R.m); p.disc(hx - G(1), cy - 0.5, 3 * z.g, R.l); p.disc(hx, cy + 0.5, 2.6 * z.g, gem); p.set(hx - G(1), cy - G(1), '#ffffff');
+      e.disc(hx, cy + 0.5, 2.6 * z.g, gem);
+      for (const [dx, dy] of [[6, 0], [-1, -6], [-1, 7], [4, -4], [4, 5]]) { p.set(hx + G(dx), cy + G(dy), R.l); p.set(hx + G(dx), cy + G(dy) + 1, R.d); }
     } else {
       // flanged / plain mace: a ribbed head with a top cap and a spike
-      p.rrect(hx - 4, cy - 5, 9, 11, M.mid, 2);
-      for (let k = -4; k <= 4; k += 2) for (let x = hx - 4; x <= hx + 4; x++) if (Math.abs(k) + Math.abs(x - hx) < 9) p.set(x, cy + k, k < 0 ? M.hi : k > 0 ? M.lo : M.mid);
-      p.rect(hx - 3, cy - 4, 2, 2, M.edge);
-      if (b === 'Flanged Mace') for (const dy of [-8, 8]) { p.rect(hx - 3, cy + dy - (dy > 0 ? 1 : 0), 6, 2, M.edge); p.rect(hx - 2, cy + dy + (dy > 0 ? -2 : 1), 4, 1, M.lo); }
-      p.set(hx + 5, cy, M.edge); p.set(hx + 6, cy, M.hi);
+      const a = G(4), t = G(5);
+      p.rrect(hx - a, cy - t, 2 * a + 1, 2 * t + 1, M.mid, G(2));
+      for (let k = -a; k <= a; k += 2) for (let x = hx - a; x <= hx + a; x++) if (Math.abs(k) + Math.abs(x - hx) < 2 * a + 1) p.set(x, cy + k, k < 0 ? M.hi : k > 0 ? M.lo : M.mid);
+      p.rect(hx - a + 1, cy - a, G(2), G(2), M.edge);
+      if (b === 'Flanged Mace') for (const d of [-1, 1]) { const fy = cy + d * G(8); p.rect(hx - G(3), fy - (d > 0 ? 1 : 0), G(6), G(2), M.edge); p.rect(hx - G(2), fy + (d > 0 ? -G(2) : G(1)), G(4), 1, M.lo); }
+      p.set(hx + a + 1, cy, M.edge); p.set(hx + a + 2, cy, M.hi);
     }
-    if (gl) for (const [dx, dy] of [[0, -5], [5, 0], [0, 6], [-4, 0]]) e.set(hx + dx, cy + dy, gl);
-    return done(p, e, { len: hx - ox + 2 });
+    if (gl) for (const [dx, dy] of [[0, -5], [5, 0], [0, 6], [-4, 0]]) e.set(hx + G(dx), cy + G(dy), gl);
+    return done(p, e, { len: hx - ox + G(2) });
   },
   club(s) {
-    const col = C(s.color || '#6a4a2a');
-    const W = 35, H = 19, cy = 9;
-    const p = mk(W, H, 3, cy), e = mk(W, H, 3, cy);
-    for (let x = 1; x < 33; x++) {
-      const t = x / 33, h = 1.3 + t * t * 5.2;
+    const col = C(s.color || '#6a4a2a'), z = sizer(s), G = z.G;
+    const Ln = G(33), H = z.odd(19), cy = H >> 1, W = Ln + 2;
+    const p = mk(W, H, G(3), cy), e = mk(W, H, G(3), cy);
+    for (let x = 1; x < Ln; x++) {
+      const t = x / Ln, h = (1.3 + t * t * 5.2) * z.g;
       const y0 = Math.round(cy - h), y1 = Math.round(cy + h);
       for (let y = y0; y <= y1; y++) p.set(x, y, y <= y0 + 1 ? light(col, 1.2) : y >= y1 - 1 ? dark(col, 0.65) : y > cy + h * 0.3 ? dark(col, 0.85) : col);
     }
-    for (const [x, y] of [[20, cy - 3], [25, cy + 3], [29, cy - 2], [16, cy + 1]]) { p.set(x, y, dark(col, 0.5)); p.set(x + 1, y, light(col, 1.3)); p.set(x, y + 1, dark(col, 0.6)); }
-    for (let x = 2; x < 8; x++) if (x % 2) { p.set(x, cy - 1, dark(col, 0.6)); p.set(x, cy + 1, dark(col, 0.6)); }
-    return done(p, e, { len: 29 });
+    for (const [x, y] of [[20, -3], [25, 3], [29, -2], [16, 1]]) { const kx = G(x), ky = cy + G(y); p.set(kx, ky, dark(col, 0.5)); p.set(kx + 1, ky, light(col, 1.3)); p.set(kx, ky + 1, dark(col, 0.6)); }
+    for (let x = 2; x < G(8); x++) if (x % 2) { p.set(x, cy - 1, dark(col, 0.6)); p.set(x, cy + 1, dark(col, 0.6)); }
+    return done(p, e, { len: Ln - G(4) });
   },
   spear(s) {
-    const b = s.base || 'Spear';
+    const b = s.base || 'Spear', z = sizer(s), G = z.G;
     const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
-    const L = 32, cy = 9, H = 19, W = L + 19, ox = 10;
+    const L = G(32), H = z.odd(19), cy = H >> 1, W = L + G(19), ox = G(10);
     const p = mk(W, H, ox, cy), e = mk(W, H, ox, cy);
-    const R = trimR(T);
-    shaft(p, 0, L, cy, WOOD, 2);
-    p.rect(0, cy, 3, 2, R.m); p.rect(0, cy, 3, 1, R.l);
-    p.rect(L - 2, cy, 3, 2, R.m); p.set(L - 2, cy, R.l); p.set(L - 3, cy - 1, R.d); p.set(L - 3, cy + 2, R.dd);
-    for (let x = 8; x <= 12; x++) if (x % 2 === 0) { p.set(x, cy, dark(WOOD, 0.6)); p.set(x, cy + 1, dark(WOOD, 0.5)); }   // binding where the hand rests
+    const R = trimR(T), th = G(2);
+    shaft(p, 0, L, cy, WOOD, th);
+    p.rect(0, cy, G(3), th, R.m); p.rect(0, cy, G(3), 1, R.l);
+    p.rect(L - G(2), cy, G(3), th, R.m); p.set(L - G(2), cy, R.l); p.set(L - G(3), cy - 1, R.d); p.set(L - G(3), cy + th, R.dd);
+    for (let x = G(8); x <= G(12); x++) if (x % 2 === 0) { p.set(x, cy, dark(WOOD, 0.6)); p.set(x, cy + 1, dark(WOOD, 0.5)); }   // binding where the hand rests
     const hx = L + 1;
     if (b === 'Trident') {
-      p.line(hx, cy - 5, hx, cy + 5, M.mid); p.line(hx + 1, cy - 5, hx + 1, cy + 5, M.lo);
-      for (const dy of [-5, 0, 5]) { const len = dy ? 9 : 13; p.line(hx, cy + dy, hx + len, cy + dy, dy < 0 ? M.hi : dy > 0 ? M.lo : M.mid); p.set(hx + len, cy + dy, M.edge); p.set(hx + len - 1, cy + dy - 1, M.hi); }
+      p.line(hx, cy - G(5), hx, cy + G(5), M.mid); p.line(hx + 1, cy - G(5), hx + 1, cy + G(5), M.lo);
+      for (const d of [-1, 0, 1]) { const dy = d * G(5), len = G(d ? 9 : 13); p.line(hx, cy + dy, hx + len, cy + dy, d < 0 ? M.hi : d > 0 ? M.lo : M.mid, z.g > 1.4 ? 2 : 1); p.set(hx + len, cy + dy, M.edge); p.set(hx + len - 1, cy + dy - 1, M.hi); }
     } else if (b === 'Partisan' || b === 'Ranseur') {
-      blade(p, e, hx, hx + 13, cy, 5, M, gl, {});
-      for (const dy of [-1, 1]) { p.line(hx + 1, cy + dy * 3, hx + (b === 'Ranseur' ? 6 : 3), cy + dy * 7, dy < 0 ? M.hi : M.lo); p.line(hx + 2, cy + dy * 3, hx + (b === 'Ranseur' ? 7 : 4), cy + dy * 7, M.md); }
+      blade(p, e, hx, hx + G(13), cy, z.odd(5), M, gl, {});
+      for (const d of [-1, 1]) { const r = b === 'Ranseur' ? 6 : 3; p.line(hx + 1, cy + d * G(3), hx + G(r), cy + d * G(7), d < 0 ? M.hi : M.lo); p.line(hx + 2, cy + d * G(3), hx + G(r) + 1, cy + d * G(7), M.md); }
     } else {
-      blade(p, e, hx, hx + 11, cy, 5, M, gl, { width: (t, h) => (t > 0.2 && t < 0.7 ? h + 1 : h), fuller: true });
-      if (b === 'Boar Spear') { p.line(hx - 1, cy - 4, hx - 1, cy + 4, R.m); p.line(hx, cy - 4, hx, cy + 4, R.d); }
+      blade(p, e, hx, hx + G(11), cy, z.odd(5), M, gl, { width: (t, h) => (t > 0.2 && t < 0.7 ? h + G(1) : h), fuller: true });
+      if (b === 'Boar Spear') { p.line(hx - 1, cy - G(4), hx - 1, cy + G(4), R.m); p.line(hx, cy - G(4), hx, cy + G(4), R.d); }
     }
-    return done(p, e, { len: L + 6 - ox });
+    return done(p, e, { len: L + G(6) - ox });
   },
   halberd(s) {
-    const b = s.base || 'Halberd';
+    const b = s.base || 'Halberd', z = sizer(s), G = z.G;
     const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
-    const L = 35, cy = 16, H = 33, W = L + 19, ox = 11;
+    const L = G(35), H = z.odd(33), cy = H >> 1, W = L + G(19), ox = G(11);
     const p = mk(W, H, ox, cy), e = mk(W, H, ox, cy);
-    const R = trimR(T);
-    shaft(p, 0, L + 1, cy, WOOD, 2);
-    p.rect(0, cy, 2, 2, R.m); p.rect(L - 6, cy, 2, 2, R.m); p.set(L - 6, cy, R.l);
-    const hx = L - 3;
+    const R = trimR(T), th = G(2);
+    shaft(p, 0, L + 1, cy, WOOD, th);
+    p.rect(0, cy, G(2), th, R.m); p.rect(L - G(6), cy, G(2), th, R.m); p.set(L - G(6), cy, R.l);
+    const hx = L - G(3);
     if (b === 'Glaive') {
-      blade(p, e, hx, hx + 16, cy, 7, M, gl, { curve: (t) => -t * 4, width: (t, h) => h - (t < 0.15 ? 1 : 0) });
-      p.set(hx + 2, cy + 4, M.lo); p.set(hx + 3, cy + 5, M.lo);
+      blade(p, e, hx, hx + G(16), cy, z.odd(7), M, gl, { curve: (t) => -t * 4 * z.g, width: (t, h) => h - (t < 0.15 ? 1 : 0) });
+      p.set(hx + G(2), cy + G(4), M.lo); p.set(hx + G(3), cy + G(5), M.lo);
     } else if (b === 'Bardiche' || b === 'Voulge') {
       // a long crescent blade bound to the haft
-      for (let y = -13; y <= 2; y++) {
-        const x0 = hx - 1 + Math.round(Math.abs(y + 5) * 0.3), x1 = hx + 6 + Math.round((y + 13) * 0.25);
-        for (let x = x0; x <= x1; x++) p.set(x, cy + y, x === x1 ? M.edge : x === x1 - 1 ? M.hi : y === -13 ? M.hi : x === x0 ? M.lo : M.mid);
+      for (let y = -G(13); y <= G(2); y++) {
+        const x0 = hx - 1 + Math.round(Math.abs(y + G(5)) * 0.3), x1 = hx + G(6) + Math.round((y + G(13)) * 0.25);
+        for (let x = x0; x <= x1; x++) p.set(x, cy + y, x === x1 ? M.edge : x === x1 - 1 ? M.hi : y === -G(13) ? M.hi : x === x0 ? M.lo : M.mid);
         if (gl) e.set(x1, cy + y, gl);
       }
-      blade(p, e, L + 1, L + 6, cy, 3, M, null, {});
+      blade(p, e, L + 1, L + G(6), cy, z.odd(3), M, null, {});
     } else {
-      // axe blade on one side, hook or hammer on the other, a spike forward
-      // the axe flares from a narrow neck at the haft to a broad crescent edge
-      for (let y = -11; y <= 0; y++) {
-        const w = y >= -6 ? 2 + (y >= -1 ? 1 : 0) : y >= -9 ? 3 + (-6 - y) : y === -10 ? 5 : 4;
-        const x0 = hx - w + (y >= -6 ? 1 : 0), x1 = hx + w;
-        for (let x = x0; x <= x1; x++) p.set(x, cy + y - 1, y === -11 ? M.edge : y === -10 ? (x === x0 || x === x1 ? M.hi : M.edge) : x === x1 ? M.lo : x === x0 ? M.hi : x > hx + 1 ? M.md : M.mid);
+      // axe blade on one side, hook or hammer on the other, a spike forward; the axe flares
+      // from a narrow neck at the haft to a broad crescent edge
+      const n = G(11);
+      for (let k = 0; k <= n; k++) {
+        const y = -k, t = k / n;
+        const w = t <= 0.55 ? G(2) + (k <= 1 ? 1 : 0) : t < 0.85 ? G(3) + Math.round((t - 0.55) * 10 * z.g) : t < 0.95 ? G(5) : G(4);
+        const x0 = hx - w + (t <= 0.55 ? 1 : 0), x1 = hx + w;
+        for (let x = x0; x <= x1; x++) p.set(x, cy + y - 1, k === n ? M.edge : k === n - 1 ? (x === x0 || x === x1 ? M.hi : M.edge) : x === x1 ? M.lo : x === x0 ? M.hi : x > hx + 1 ? M.md : M.mid);
         if (gl) e.set(x0, cy + y - 1, gl);
       }
-      p.set(hx, cy - 5, M.dk); p.set(hx + 1, cy - 5, M.dk); p.set(hx, cy - 4, M.lo);
-      if (b === 'Poleaxe') { p.rect(hx - 2, cy + 2, 5, 5, M.mid); p.rect(hx - 2, cy + 2, 5, 1, M.hi); p.rect(hx + 2, cy + 2, 1, 5, M.lo); p.rect(hx - 2, cy + 6, 5, 1, M.lo); }
-      else { p.line(hx, cy + 2, hx - 3, cy + 6, M.mid, 2); p.set(hx - 4, cy + 7, M.edge); p.set(hx - 3, cy + 7, M.lo); }
-      blade(p, e, L + 2, L + 11, cy, 5, M, gl, {});
+      p.set(hx, cy - G(5), M.dk); p.set(hx + 1, cy - G(5), M.dk); p.set(hx, cy - G(4), M.lo);
+      if (b === 'Poleaxe') { const a = G(5); p.rect(hx - G(2), cy + G(2), a, a, M.mid); p.rect(hx - G(2), cy + G(2), a, 1, M.hi); p.rect(hx - G(2) + a - 1, cy + G(2), 1, a, M.lo); p.rect(hx - G(2), cy + G(2) + a - 1, a, 1, M.lo); }
+      else { p.line(hx, cy + G(2), hx - G(3), cy + G(6), M.mid, G(2)); p.set(hx - G(4), cy + G(7), M.edge); p.set(hx - G(3), cy + G(7), M.lo); }
+      blade(p, e, L + G(2), L + G(11), cy, z.odd(5), M, gl, {});
     }
-    return done(p, e, { len: L + 3 - ox });
+    return done(p, e, { len: L + G(3) - ox });
   },
   staff(s) {
-    const b = s.base || 'Staff';
+    const b = s.base || 'Staff', z = sizer(s), G = z.G;
     const T = C(s.trim || '#c8a050'), R = trimR(T);
     const orb = C(s.element && ELEM_GLOW[s.element] ? ELEM_GLOW[s.element] : s.orb || '#a080ff');
-    const L = 32, cy = 9, H = 19, W = L + 14, ox = 13;
+    const L = G(32), H = z.odd(19), cy = H >> 1, W = L + G(14), ox = G(13);
     const p = mk(W, H, ox, cy), e = mk(W, H, ox, cy);
     const wood = b === 'Rod of Office' ? T : b === 'Battle Staff' ? C('#5a5048') : WOOD;
+    const th = G(3), t0 = cy - (th >> 1);
     for (let x = 0; x <= L; x++) {
-      const wob = b === 'Elder Staff' ? Math.round(Math.sin(x * 0.45) * 0.8) : 0;
-      p.set(x, cy - 1 + wob, light(wood, 1.25)); p.set(x, cy + wob, (x * 7) % 9 === 0 ? wood : light(wood, 1.05)); p.set(x, cy + 1 + wob, dark(wood, 0.7));
+      const wob = b === 'Elder Staff' ? Math.round(Math.sin(x * 0.45 / z.g) * 0.8 * z.g) : 0;
+      for (let k = 0; k < th; k++) p.set(x, t0 + k + wob, k === 0 ? light(wood, 1.25) : k === th - 1 ? dark(wood, 0.7) : (x * 7) % 9 === 0 ? wood : light(wood, 1.05));
     }
-    p.rect(0, cy - 1, 3, 3, R.m); p.rect(0, cy - 1, 3, 1, R.l);
-    if (b === 'Battle Staff') for (const x of [10, 22]) { p.rect(x, cy - 1, 2, 3, R.m); p.set(x, cy - 1, R.l); }
-    for (let x = 11; x <= 15; x++) if (x % 2) { p.set(x, cy, dark(wood, 0.6)); p.set(x, cy + 1, dark(wood, 0.5)); }      // hand wrap
-    if (b === 'Quarterstaff') { p.rect(L - 2, cy - 1, 3, 3, R.m); p.rect(L - 2, cy - 1, 3, 1, R.l); return done(p, e, { len: L - ox }); }
+    p.rect(0, t0, G(3), th, R.m); p.rect(0, t0, G(3), 1, R.l);
+    if (b === 'Battle Staff') for (const x of [G(10), G(22)]) { p.rect(x, t0, G(2), th, R.m); p.set(x, t0, R.l); }
+    for (let x = G(11); x <= G(15); x++) if (x % 2) { p.set(x, cy, dark(wood, 0.6)); p.set(x, cy + 1, dark(wood, 0.5)); }      // hand wrap
+    if (b === 'Quarterstaff') { p.rect(L - G(2), t0, G(3), th, R.m); p.rect(L - G(2), t0, G(3), 1, R.l); return done(p, e, { len: L - ox }); }
     // head: prongs cradling an orb
-    const ocx = L + 5;
-    p.line(L - 1, cy - 2, L + 3, cy - 5, R.m, 2); p.line(L - 1, cy + 2, L + 3, cy + 6, R.d, 2);
-    p.set(L + 4, cy - 6, R.l); p.set(L + 4, cy + 6, R.dd);
-    if (b === 'Elder Staff') { p.line(L, cy, L + 6, cy - 6, wood, 2); p.line(L + 6, cy - 6, L + 9, cy - 1, wood, 2); p.set(L + 6, cy - 7, light(wood, 1.3)); }
-    p.disc(ocx + 0.5, cy + 0.5, 4.2, orb); p.disc(ocx - 0.5, cy - 0.5, 2.4, mixc(orb, '#ffffff', 0.35));
-    p.set(ocx - 1, cy - 2, '#ffffff'); p.set(ocx - 2, cy - 1, mixc(orb, '#ffffff', 0.7)); p.set(ocx + 2, cy + 3, dark(orb, 0.7)); p.set(ocx + 3, cy + 2, dark(orb, 0.75));
-    e.disc(ocx + 0.5, cy + 0.5, 4.2, orb); e.disc(ocx - 0.5, cy - 0.5, 2, '#ffffff');
+    const ocx = L + G(5);
+    p.line(L - 1, cy - G(2), L + G(3), cy - G(5), R.m, G(2)); p.line(L - 1, cy + G(2), L + G(3), cy + G(6), R.d, G(2));
+    p.set(L + G(4), cy - G(6), R.l); p.set(L + G(4), cy + G(6), R.dd);
+    if (b === 'Elder Staff') { p.line(L, cy, L + G(6), cy - G(6), wood, G(2)); p.line(L + G(6), cy - G(6), L + G(9), cy - G(1), wood, G(2)); p.set(L + G(6), cy - G(7), light(wood, 1.3)); }
+    const r = 4.2 * z.g;
+    p.disc(ocx + 0.5, cy + 0.5, r, orb); p.disc(ocx - 0.5, cy - 0.5, r * 0.57, mixc(orb, '#ffffff', 0.35));
+    p.set(ocx - G(1), cy - G(2), '#ffffff'); p.set(ocx - G(2), cy - G(1), mixc(orb, '#ffffff', 0.7)); p.set(ocx + G(2), cy + G(3), dark(orb, 0.7)); p.set(ocx + G(3), cy + G(2), dark(orb, 0.75));
+    e.disc(ocx + 0.5, cy + 0.5, r, orb); e.disc(ocx - 0.5, cy - 0.5, r * 0.48, '#ffffff');
     return done(p, e, { len: ocx - ox, orb: [ocx - ox, 0], orbColor: orb });
   },
   wand(s) {
