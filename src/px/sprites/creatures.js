@@ -39,10 +39,15 @@ const dimR = (R, k) => R.map((c) => dark(c, k));
 // light from the top-left and a little toward the viewer
 const LX = -0.48, LY = -0.62, LZ = 0.62;
 const tone = (l) => (l > 0.8 ? 4 : l > 0.32 ? 3 : l > -0.08 ? 2 : l > -0.5 ? 1 : 0);
-// fur: 1-px wide strands, 3 px long, with a random phase per column (jagged band edges)
-const furN = (x, y, sd) => hash2(x, Math.floor((y + Math.floor(hash2(x, 3, sd) * 3)) / 3), sd) - 0.5;
-// scales: staggered 3x2 cells with a dark lower edge
-const scaleN = (x, y) => { const r = y >> 1, c = ((x + (r & 1) * 2) % 4 + 4) % 4; return (y & 1) && c !== 0 ? -0.2 : c === 0 ? -0.12 : 0.04; };
+// fur: 1-px wide strands, 4 px long, with a random phase per column (jagged band edges)
+const furN = (x, y, sd) => hash2(x, Math.floor((y + Math.floor(hash2(x, 3, sd) * 4)) / 4), sd) - 0.5;
+// scales: staggered 4x3 cells, each a lit top and a dark rounded lower edge
+const scaleN = (x, y) => {
+  const r = Math.floor(y / 3), lx = ((x + (r & 1) * 2) % 4 + 4) % 4, ly = ((y % 3) + 3) % 3;
+  if (ly === 2 && (lx === 1 || lx === 2)) return -0.2;
+  if (ly === 1 && (lx === 0 || lx === 3)) return -0.1;
+  return ly === 0 && (lx === 1 || lx === 2) ? 0.08 : 0;
+};
 
 // Union of ellipses shaded as one form: each pixel takes the normal of the ellipse it sits
 // deepest in, so a chest or hump grows out of the body without a seam.
@@ -60,7 +65,7 @@ function balls(p, list, R, o = {}) {
       }
       if (best > 1) continue;
       let l = bx * LX + by * LY + Math.sqrt(1 - best) * LZ + (o.lift || 0);
-      if (o.fur) l += furN(x, y, o.fur) * 0.34;
+      if (o.fur) l += furN(x, y, o.fur) * 0.24;
       else if (o.tex) l += (hash2(x, y, o.tex) - 0.5) * 0.2;
       if (o.scales) l += scaleN(x, y);
       let t = tone(l);
@@ -74,12 +79,13 @@ const ball = (p, cx, cy, rx, ry, R, o) => balls(p, [[cx, cy, rx, ry]], R, o);
 
 // Paint src over dst. With contour, dst pixels just outside src turn into a dark selective
 // line, so the near part reads in front of what it overlaps.
+// contour 'drop' only darkens below/right of the part (a cast edge rather than a full line).
 function put(dst, src, contour = true) {
-  const w = dst.w, h = dst.h, S = src.d, D = dst.d, W4 = w * 4;
+  const w = dst.w, h = dst.h, S = src.d, D = dst.d, W4 = w * 4, drop = contour === 'drop';
   if (contour) for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
     const i = (y * w + x) * 4;
     if (S[i + 3] > 40 || D[i + 3] < 100) continue;
-    if ((x > 0 && S[i - 1] > 100) || (x < w - 1 && S[i + 7] > 100) || (y > 0 && S[i - W4 + 3] > 100) || (y < h - 1 && S[i + W4 + 3] > 100)) {
+    if ((x > 0 && S[i - 1] > 100) || (y > 0 && S[i - W4 + 3] > 100) || (!drop && ((x < w - 1 && S[i + 7] > 100) || (y < h - 1 && S[i + W4 + 3] > 100)))) {
       D[i] = OUTLINE[0] * 0.55 + D[i] * 0.24; D[i + 1] = OUTLINE[1] * 0.55 + D[i + 1] * 0.22; D[i + 2] = OUTLINE[2] * 0.55 + D[i + 2] * 0.26 + 4;
     }
   }
@@ -121,6 +127,12 @@ function underside(L, cols, x0 = 0, x1 = L.w - 1) {
     const y = lowY(L, x);
     if (y < 0) continue;
     for (let k = 0; k < cols.length; k++) if (L.a(x, y - k)) L.set(x, y - k, cols[k]);
+  }
+}
+// clear the part of a layer that sits inside an ellipse (lets the form underneath keep its shading)
+function clipOut(L, cx, cy, rx, ry) {
+  for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
+    if (((x + 0.5 - cx) / rx) ** 2 + ((y + 0.5 - cy) / ry) ** 2 <= 1) L.clear(x, y);
   }
 }
 // small swept-back spike pointing up
@@ -303,9 +315,9 @@ function quadFrame(o, D, pose) {
       const pr = Math.max(1.6, lw * 0.58);
       ball(L, fx + pr * 0.35, fy + 0.5 - pr * 0.6, pr * 1.12, pr * 0.62, col, { matte: true });
       if (u >= 1.1) {
-        const n = kind === 'bear' || dragon ? 3 : 2, cc = dragon ? light(o.c2, 1.1) : BONE;
+        const n = kind === 'bear' || dragon ? 3 : u >= 1.5 ? 2 : 1, cc = mixc(dragon ? light(o.c2, 1.1) : BONE, col[1], 0.3);
         const tx = Math.round(fx + pr * 1.35);
-        for (let k = 0; k < n; k++) L.set(tx - k * 2, fy, far ? dark(cc, 0.72) : cc);
+        for (let k = 0; k < n; k++) L.set(tx - k * 2, fy, far ? dark(cc, 0.75) : cc);
       }
     }
     put(p, L, !far);
@@ -322,31 +334,49 @@ function quadFrame(o, D, pose) {
     if (!spread) pts = [[shX + ox, shY + oy], [bx - rx * 0.7 + ox, shY - 6 * u + oy], [bx - rx * 0.9 + ox, shY + 2 * u + oy], [bx - rx * 0.1, shY + ry * 0.6]];
     else if (wingUp) pts = [[shX + ox, shY + oy], [shX - 2 * u + ox, shY - 13 * u + oy], [shX - 10 * u + ox, shY - 10 * u + oy], [shX - 13 * u + ox, shY - 3 * u + oy], [bx - rx * 0.5, shY + ry * 0.4]];
     else pts = [[shX + ox, shY + oy], [shX - 5 * u + ox, shY - 5 * u + oy], [shX - 14 * u + ox, shY - 2 * u + oy], [shX - 12 * u + ox, shY + 4 * u + oy], [bx - rx * 0.5, shY + ry * 0.5]];
-    const n = pts.length, L = blank(p);
-    L.poly(pts, Wr[3]);
-    // alternate panels a tone darker
-    for (let i = 2; i < n - 1; i++) if (i % 2 === 0) L.poly([pts[1], pts[i], pts[i + 1]], Wr[2]);
-    L.poly([pts[0], pts[1], pts[n - 2], pts[n - 1]], Wr[2]);
+    // more fingers: a tip between each pair of trailing points, pushed out so the edge fans
+    const fan = [pts[0], pts[1]];
+    for (let i = 2; i < pts.length - 1; i++) {
+      fan.push(pts[i]);
+      const q = pts[i + 1], m = lerpP(pts[i], q, 0.5);
+      const dx = m[0] - pts[1][0], dy = m[1] - pts[1][1], dl = Math.hypot(dx, dy) || 1;
+      const push = Math.hypot(q[0] - pts[i][0], q[1] - pts[i][1]) * 0.16;
+      if (i < pts.length - 2 || spread) fan.push([m[0] + dx / dl * push, m[1] + dy / dl * push]);
+    }
+    fan.push(pts[pts.length - 1]);
+    const n = fan.length, L = blank(p);
+    L.poly(fan, Wr[2]);
     // scallops: a shallow bite out of each trailing-edge span
-    const cxm = pts.reduce((a, q) => a + q[0], 0) / n, cym = pts.reduce((a, q) => a + q[1], 0) / n;
+    const cxm = fan.reduce((a, q) => a + q[0], 0) / n, cym = fan.reduce((a, q) => a + q[1], 0) / n;
     for (let i = 2; i < n - 1; i++) {
-      const [ax, ay] = pts[i], [bx2, by2] = pts[i + 1];
+      const [ax, ay] = fan[i], [bx2, by2] = fan[i + 1];
       const len = Math.hypot(bx2 - ax, by2 - ay);
       if (len < 4) continue;
       const mx = (ax + bx2) / 2, my = (ay + by2) / 2;
       let nx = -(by2 - ay) / len, ny = (bx2 - ax) / len;
       if (nx * (mx - cxm) + ny * (my - cym) < 0) { nx = -nx; ny = -ny; }
-      const r = len * 0.5, depth = Math.max(1, len * 0.13);
+      const r = len * 0.5, depth = Math.max(1, len * 0.14);
       carve(L, mx + nx * (r - depth), my + ny * (r - depth), r);
     }
-    // trailing edge in shadow
-    for (let y = 0; y < L.h; y++) for (let x = 0; x < L.w; x++) if (L.a(x, y) && (!L.a(x, y + 1) || !L.a(x + 1, y)) && !(!L.a(x, y - 1))) L.set(x, y, Wr[1]);
-    // arm and finger bones, wrist claw, bright finger tips
-    L.line(pts[0][0], pts[0][1], pts[1][0], pts[1][1], bone[2], u >= 1.6 ? 2 : 1);
-    L.line(pts[0][0], pts[0][1] - 1, pts[1][0], pts[1][1] - 1, bone[4]);
-    for (let i = 2; i < n - 1; i++) L.line(pts[1][0], pts[1][1], pts[i][0], pts[i][1], bone[1]);
-    for (let i = 2; i < n - 1; i++) L.set(Math.round(pts[i][0]), Math.round(pts[i][1]), Wr[4]);
-    L.set(Math.round(pts[1][0]) + 1, Math.round(pts[1][1]) - 1, far ? BONE_D : BONE);
+    // bones: thick arm, finger rays from the wrist
+    const BM = blank(p);
+    const aw = u >= 2.4 ? 3 : u >= 1.6 ? 2 : 1;
+    BM.line(fan[0][0], fan[0][1], fan[1][0], fan[1][1], WHITE, aw);
+    for (let i = 2; i < n - 1; i++) BM.line(fan[1][0], fan[1][1], fan[i][0], fan[i][1], WHITE, u >= 3 ? 2 : 1);
+    // membrane: lit where it stretches near a bone, shadowed along the trailing edge
+    const rib = Math.max(1, Math.round(u * 0.7));
+    for (let y = 0; y < L.h; y++) for (let x = 0; x < L.w; x++) {
+      if (!L.a(x, y) || BM.a(x, y)) continue;
+      if (!L.a(x, y + 1) || !L.a(x + 1, y)) { L.set(x, y, Wr[1]); continue; }
+      let near = false;
+      for (let k = 1; k <= rib && !near; k++) near = BM.a(x - k, y) || BM.a(x, y - k) || BM.a(x + k, y) || BM.a(x, y + k);
+      if (near) L.set(x, y, Wr[3]);
+    }
+    for (let y = 0; y < L.h; y++) for (let x = 0; x < L.w; x++) if (BM.a(x, y) && L.a(x, y)) L.set(x, y, BM.a(x, y - 1) ? bone[1] : bone[3]);
+    L.line(fan[0][0], fan[0][1] - 1, fan[1][0], fan[1][1] - 1, bone[4]);
+    for (let i = 2; i < n - 1; i++) L.set(Math.round(fan[i][0]), Math.round(fan[i][1]), Wr[4]);
+    L.set(Math.round(fan[1][0]) + 1, Math.round(fan[1][1]) - 1, far ? BONE_D : BONE);
+    L.set(Math.round(fan[1][0]) + 1, Math.round(fan[1][1]) - 2, far ? BONE_D : BONE);
     put(p, L, !far);
   };
   if (dragon) wing(true);
@@ -511,8 +541,10 @@ function quadFrame(o, D, pose) {
   } else if (kind === 'rat') { ball(HL, ex - 0.5 * u, ey - 0.6 * u, 2 * u, 2 * u, R); HL.ellipse(ex - 0.3 * u, ey - 0.4 * u, 1.1 * u, 1.1 * u, '#d89898'); }
   else if (kind === 'bear') { ball(HL, ex, ey, 1.5 * u, 1.4 * u, R, { fur: 4 }); HL.ellipse(ex + 0.2 * u, ey + 0.2 * u, 0.6 * u, 0.6 * u, R[1]); }
   else if (kind === 'cat') { ball(HL, ex, ey - 0.5 * u, 1.3 * u, 1.3 * u, R); HL.ellipse(ex + 0.2 * u, ey - 0.3 * u, 0.55 * u, 0.55 * u, R[1]); }
-  // skull
-  ball(HL, hcx, hcy, HH * 0.55, HH * 0.5, R, { fur: furry ? 9 : 0, scales: dragon && u >= 1.5 });
+  // skull (hooved heads get a heavy cheek so the head reads as a wedge, not a tube)
+  const skull = [[hcx, hcy, HH * 0.55, HH * 0.5]];
+  if (hooved) skull.push([hcx + HH * 0.12, hcy + HH * 0.22, HH * 0.5, HH * 0.42]);
+  balls(HL, skull, R, { fur: furry ? 9 : 0, scales: dragon && u >= 1.5 });
   // snout / jaws
   const SL = HH * f.snout;
   const sy = Math.round(hcy + HH * 0.18);
@@ -522,16 +554,22 @@ function quadFrame(o, D, pose) {
   const mx0 = Math.round(hcx + HH * 0.15);
   let J = null;
   if (open) {
-    HL.poly([[mx0, sy], [tipX, sy - 1], [tipX - 1, sy + open + 1], [mx0, sy + 2]], MAW);
-    HL.line(mx0 + 1, sy + Math.round(open * 0.6), tipX - 3, sy + Math.round(open * 0.7), TONGUE, Math.max(1, Math.round(u * 0.6)));
+    // maw, tongue and the dropped lower jaw, tucked behind the cheek
+    const MJ = blank(p);
+    MJ.poly([[mx0, sy], [tipX, sy - 1], [tipX - 1, sy + open + 1], [mx0, sy + 2]], MAW);
+    MJ.line(mx0 + 1, sy + Math.round(open * 0.6), tipX - 3, sy + Math.round(open * 0.7), TONGUE, Math.max(1, Math.round(u * 0.6)));
     J = blank(p);
     J.taper(hcx, sy + 1, tipX - 1, sy + open + 1, sh0 * 0.55, sh1 * 0.7, R[3]);
     cyl(J, R);
-    put(HL, J, false);
+    put(MJ, J, false);
+    clipOut(MJ, hcx, hcy - 1, HH * 0.42, HH * 0.36);
+    put(HL, MJ, false);
   }
   const S = blank(p);
   S.taper(mx0, sy - (open ? 1 : 0), tipX, sy - (open ? 1 : 0), sh0, sh1, R[3]);
+  if (hooved) S.ellipse(tipX - sh1 * 0.45, sy - (open ? 1 : 0) + sh1 * 0.12, sh1 * 0.62, sh1 * 0.58, R[3]);   // soft muzzle
   cyl(S, R, { wide: HH >= 10 });
+  clipOut(S, hcx, hcy - 1, HH * 0.42, HH * 0.36);
   if (dragon) for (let x = mx0 + 2; x < tipX - 1; x += 3) { const y = topY(S, x); if (y >= 0) S.set(x, y + 1, R[4]); }   // brow scales
   put(HL, S, false);
   if (open) {
@@ -610,10 +648,10 @@ function quadFrame(o, D, pose) {
     const top = by - Math.round(ry);
     const bl = Math.round(ry * 1.1);
     for (let x = x0 - ap(1); x <= x1 + ap(1); x++) {
-      const t0 = topY(p, x);
+      const t0 = topY(B, x);
       if (t0 < 0) continue;
-      for (let y = t0; y <= top + bl; y++) if (p.a(x, y)) p.set(x, y, y === top + bl ? TR[3] : y === top + bl - 1 ? SC[1] : (x === x0 - ap(1) || x === x1 + ap(1)) ? SC[1] : SC[2]);
-      if (((x - x0) & 3) === 1 && p.a(x, top + bl)) p.set(x, top + bl, TR[4]);
+      for (let y = t0; y <= top + bl; y++) if (B.a(x, y)) p.set(x, y, y === top + bl ? TR[3] : y === top + bl - 1 ? SC[1] : (x === x0 - ap(1) || x === x1 + ap(1)) ? SC[1] : SC[2]);
+      if (((x - x0) & 3) === 1 && B.a(x, top + bl)) p.set(x, top + bl, TR[4]);
     }
     const st = Math.round(ry * 0.5);
     for (let x = x0; x <= x1; x++) for (let y = top - 1; y <= top + st; y++) p.set(x, y, y === top - 1 ? SC[4] : y === top + st ? SC[1] : SC[3]);
@@ -695,7 +733,7 @@ function arachFrame(o, D, pose) {
       // bristles on spider legs
       if (kind === 'spider' && u >= 1.4) for (let k = 1; k < 4; k++) { const q = k / 4; L.set(Math.round(kx + (ax - kx) * q) + (dir >= 0 ? 1 : -1), Math.round(ky + (ay - ky) * q) - 1, col[0]); }
     }
-    put(p, L, !far);
+    put(p, L, far ? false : 'drop');
   };
   legs(true);
   // scorpion tail (behind): segments with joint rings, venom bulb and a glowing barb
@@ -751,7 +789,7 @@ function arachFrame(o, D, pose) {
     const fo = pose.atk === 2 ? Math.max(1, Math.round(u * 0.6)) : 0;
     p.line(cx + 5.2 * u, cy + 1.4 * u, cx + 5.6 * u + fo, cy + 2.8 * u, BONE); p.set(Math.round(cx + 5.6 * u + fo), Math.round(cy + 2.8 * u) + 1, BONE_D);
     // eye cluster: two big eyes with glints and a row of small ones
-    const c3 = C(o.c3), en = u >= 2.2 ? 2 : 1;
+    const c3 = C(o.c3), en = u >= 3.5 ? 3 : u >= 2.2 ? 2 : 1;
     for (const [dx, dy, big] of [[4.2, -1.5, 1], [5.1, -0.9, 1], [3.5, -0.8, 0], [4.7, -2.1, 0], [3.3, -1.8, 0], [5.6, -1.6, 0]]) {
       const x = Math.round(cx + dx * u), y = Math.round(cy + dy * u), n = big ? en : 1;
       p.rect(x, y, n, n, c3); e.rect(x, y, n, n, c3);
@@ -873,6 +911,15 @@ function serpentHead(o, D, pose) {
     for (let k = 0; k < 4; k++) { F.line(base[0], base[1], tips[k][0], tips[k][1], A[4], Math.max(1, Math.round(u * 0.6))); F.set(Math.round(tips[k][0]), Math.round(tips[k][1]), WHITE); }
     put(p, F, false);
   }
+  if (kind === 'sea' || kind === 'eel') {
+    // swept dorsal fin with rays, behind the skull
+    const F = blank(p);
+    const f0 = [cx - r0 * 0.55, cy - r0 * 0.62], f1 = [cx + r0 * 0.15, cy - r0 * 0.78], ft = [cx - r0 * 0.45, cy - r0 * 1.55];
+    F.poly([f0, f1, ft], A[3]);
+    for (let k = 1; k < 3; k++) F.line(lerp(f0[0], f1[0], k / 3), lerp(f0[1], f1[1], k / 3), lerp(ft[0], f1[0], k * 0.12), lerp(ft[1], f1[1], k * 0.12), A[2]);
+    F.line(ft[0], ft[1], f1[0], f1[1], A[1]); F.line(f0[0], f0[1], ft[0], ft[1], A[4]);
+    put(p, F, false);
+  }
   if (kind === 'worm') {
     const B = blank(p);
     ball(B, cx, cy, r0 * 1.1, r0 * 1.05, R, { tex: 2 });
@@ -902,15 +949,20 @@ function serpentHead(o, D, pose) {
     const open = pose.atk === 2 ? Math.round(r0 * 0.6) : 0;
     const tip = Math.round(cx + r0 * 1.9);
     if (open) {
-      B.poly([[cx + r0 * 0.3, cy + 1], [tip, cy - 1], [tip - 1, cy + open + 1], [cx + r0 * 0.3, cy + 2]], MAW);
+      const MJ = blank(p);
+      MJ.poly([[cx + r0 * 0.3, cy + 1], [tip, cy - 1], [tip - 1, cy + open + 1], [cx + r0 * 0.3, cy + 2]], MAW);
+      MJ.line(cx + r0 * 0.7, cy + open * 0.55, tip - 3, cy + open * 0.65, TONGUE, Math.max(1, Math.round(u * 0.5)));
       const J = blank(p);
       J.taper(cx, cy + r0 * 0.4, tip - 1, cy + open + 1, r0 * 0.7, r0 * 0.3, R[3]);
       cyl(J, R); underside(J, [A[2]]);
-      put(B, J, false);
+      put(MJ, J, false);
+      clipOut(MJ, cx - r0 * 0.05, cy - r0 * 0.05, r0 * 0.82, r0 * 0.66);
+      put(B, MJ, false);
     }
     const S = blank(p);
     S.taper(cx + r0 * 0.2, cy - (open ? 1 : 0), tip, cy - 1 - (open ? 1 : 0), r0 * 1.2, r0 * 0.55, R[3]);
     cyl(S, R, { wide: r0 >= 9 });
+    clipOut(S, cx - r0 * 0.05, cy - r0 * 0.05, r0 * 0.82, r0 * 0.66);
     put(B, S, false);
     // brow ridge
     B.line(cx + r0 * 0.25, cy - r0 * 0.62, tip - r0 * 0.5, cy - r0 * 0.3, R[4]);
@@ -925,7 +977,7 @@ function serpentHead(o, D, pose) {
     }
     B.set(tip - 1, cy - Math.round(r0 * 0.25) - (open ? 1 : 0), R[0]);   // nostril
     eye(B, e, cx + r0 * 0.55, cy - r0 * 0.35, o, eyeN(u), R[1]);
-    if (kind === 'sea' || kind === 'eel') { B.line(cx - r0 * 0.3, cy - r0 * 0.8, cx - r0 * 0.1, cy - r0 * 1.5, A[3], Math.max(1, Math.round(u))); B.set(Math.round(cx - r0 * 0.1), Math.round(cy - r0 * 1.5) - 1, A[4]); }
+    if (kind === 'sea') for (let k = 0; k < 4; k++) { const x = Math.round(cx - r0 * 0.55 + k * r0 * 0.42), y = Math.round(cy + r0 * (0.32 + (k % 2) * 0.12)); B.set(x, y, o.c3); e.set(x, y, o.c3); }
     if (glass) for (let k = 0; k < 3; k++) { const x = Math.round(cx - r0 * 0.4 + k * r0 * 0.5), y = Math.round(cy - r0 * 0.6 + k * ART); B.line(x, y, x + Math.round(u), y + Math.round(u * 0.6), o.c2); e.line(x, y, x + Math.round(u), y + Math.round(u * 0.6), o.c2); }
     put(p, B, false);
     // flickering forked tongue
@@ -948,7 +1000,6 @@ function segSprite(o, r, i, u) {
     // ring groove with a lit lip, tiny bristles top and bottom
     const x = Math.round(c + r * 0.3);
     for (let y = Math.round(c - r); y <= c + r; y++) { if (p.a(x, y)) p.set(x, y, A[1]); if (p.a(x - 1, y)) p.set(x - 1, y, R[4]); }
-    if (r >= 4) for (const sg of [-1, 1]) p.set(Math.round(c - r * 0.2), Math.round(c + sg * r * 0.92) + (sg > 0 ? 1 : -1), A[1]);
   } else if (kind === 'glass') {
     const x = Math.round(c - r * 0.3), y = Math.round(c - r * 0.4);
     p.line(x, y, x + r * 0.6, y + r * 0.5, o.c2); e.line(x, y, x + r * 0.6, y + r * 0.5, o.c2);
@@ -960,7 +1011,8 @@ function segSprite(o, r, i, u) {
     for (let k = -rw; k <= rw; k++) p.set(Math.round(c + k), Math.round(c - r * 0.92) - (Math.abs(k) < rw ? 1 : 0), A[Math.abs(k) < rw ? 3 : 2]);
     p.set(Math.round(c) - 1, Math.round(c - r * 0.92) - 1, A[4]);
     for (let x = Math.round(c - r * 0.6); x <= c + r * 0.6; x++) { const y = lowY(p, x); if (y >= 0) { p.set(x, y, A[2]); if (r >= 4) p.set(x, y - 1, (x & 1) ? A[3] : A[2]); } }
-    if (kind === 'sea') { p.line(c - 1, c - r, c + ap(1), c - r - Math.max(ap(2), 1.5 * u), A[3], r >= 6 ? 2 : 1); p.set(Math.round(c + ap(1)), Math.round(c - r - Math.max(ap(2), 1.5 * u)) - 1, A[4]); }
+    if (kind === 'sea' && i % 2 === 0) { const sx = Math.round(c + r * 0.15), sy = Math.round(c + r * 0.35); p.set(sx, sy, o.c3); e.set(sx, sy, o.c3); }
+    if (kind === 'sea') spike(p, c + r * 0.15, Math.round(c - r * 0.86), Math.max(2, r * 0.38), Math.max(ap(2), 1.6 * u), A[3], A[4]);
   }
   if (i % 3 === 0 && kind !== 'worm') { const gx = Math.round(c - r * 0.4), gy = Math.round(c - r * 0.45); p.over(gx, gy, light(o.c1, 1.4)); if (r >= 6) p.over(gx + 1, gy, light(o.c1, 1.25)); }
   p.outlineSel();
@@ -1120,10 +1172,12 @@ function wraithFrame(o, D, view, pose) {
     SL.ellipse(cfx, cfy, Math.max(1, 1.1 * u), Math.max(1, 0.6 * u), VOID);
     put(p, SL, true);
     // fingers point along the arm's reach
-    const fl = Math.max(2, Math.round(1.6 * u)), dirY = armUp ? -1 : 1;
+    const fl = Math.max(2, Math.round(1.25 * u)), dirY = armUp ? -1 : 1;
     const hy0 = Math.round(hy + (armUp ? -0.8 * u : 0.8 * u));
+    const fs = Math.max(1.5, u * 0.9);
+    p.rect(Math.round(hx - fs), hy0 - (armUp ? 0 : 1), Math.round(fs * 2) + 1, 1, hand[2]);
     for (let k = -1; k <= 1; k++) {
-      const fxp = Math.round(hx + k * Math.max(1.5, u * 0.9));
+      const fxp = Math.round(hx + k * fs);
       for (let j = 0; j < fl; j++) p.set(fxp, hy0 + dirY * j, j === fl - 1 ? hand[1] : j === 0 ? hand[4] : hand[3]);
     }
     if (armUp || armOut) { const c3 = C(o.c3); for (let k = -1; k <= 1; k++) e.set(Math.round(hx + k * Math.max(1.5, u * 0.9)), hy0 + dirY * (fl - 1), c3); e.set(Math.round(hx), Math.round(hy), c3); }
@@ -1201,18 +1255,17 @@ function flyerFrame(o, D, pose) {
     // coverts: the inner part of the wing a tone lighter
     L.poly([pts[0], lerpP(pts[0], pts[1], 0.85), lerpP(pts[0], pts[2], 0.48), lerpP(pts[0], pts[3], 0.75)], W[3]);
     // primaries: notched feather tips along the outer and trailing edges, with separation lines
-    const nF = Math.max(3, Math.round(u * 2.6));
-    for (let k = 1; k < nF; k++) {
-      const t = k / nF;
-      const q = t < 0.5 ? lerpP(pts[1], pts[2], t * 2) : lerpP(pts[2], pts[3], (t - 0.5) * 2);
+    const nF = Math.max(2, Math.round(u * 1.6));
+    for (let k = 1; k <= nF; k++) {
+      const q = lerpP(pts[1], pts[2], k / (nF + 1) * 0.9 + 0.1);
       const d = Math.hypot(pts[0][0] - q[0], pts[0][1] - q[1]) || 1;
-      const len = Math.max(2, 1.6 * u);
+      const len = Math.max(2, 1.2 * u);
       L.line(q[0], q[1], q[0] + (pts[0][0] - q[0]) / d * len, q[1] + (pts[0][1] - q[1]) / d * len, W[1]);
       L.clear(Math.round(q[0]), Math.round(q[1]));
     }
     // gull wingtips are black with a white mirror spot
     if (kind === 'gull') {
-      const tip = pts[2], tr = 2.6 * u;
+      const tip = pts[2], tr = Math.max(2, 1.8 * u);
       for (let y = Math.floor(tip[1] - tr); y <= tip[1] + tr; y++) for (let x = Math.floor(tip[0] - tr); x <= tip[0] + tr; x++) if (L.a(x, y) && Math.hypot(x - tip[0], y - tip[1]) < tr) L.set(x, y, far ? '#1a1a22' : '#2a2a34');
       L.set(Math.round(tip[0] + (pts[0][0] - tip[0]) * 0.12), Math.round(tip[1] + (pts[0][1] - tip[1]) * 0.12), far ? '#a0a0a8' : '#f0f0f0');
     }
