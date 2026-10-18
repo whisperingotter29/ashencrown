@@ -23,7 +23,7 @@ import { clockString, timePhase } from '../world/atmosphere.js';
 import { beatPhase } from '../systems/classMech.js';
 import { CONSUMABLES } from '../data/items.js';
 import { mixc } from '../px/pix.js';
-import { drawText, textWidth } from '../px/font.js';
+import { drawText, textWidth, TINY } from '../px/font.js';
 import { ensureLoadout, currentKit, switchSlot, LOADOUT_SIZE } from '../systems/loadout.js';
 import { input } from '../core/input.js';
 import { bus } from '../core/events.js';
@@ -209,7 +209,7 @@ function drawOrb(o, frac, value, shield, t) {
   }
   for (const [gx, gy] of [[10, 7], [9, 8], [8, 9], [8, 10], [7, 11], [12, 6], [13, 6]]) sink.px(gx, gy, [255, 255, 255]);
   const txt = String(value);
-  drawText(sink, Math.round(c - textWidth(txt) / 2), Math.round(c - 2), txt, [255, 255, 255], 1, [20, 10, 12]);
+  drawText(sink, Math.round(c - textWidth(txt, TINY) / 2), Math.round(c - 2), txt, [255, 255, 255], TINY, [20, 10, 12]);
   o.ctx.putImageData(o.img, 0, 0);
 }
 
