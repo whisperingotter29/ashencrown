@@ -1065,11 +1065,14 @@ function blobFrame(o, D, pose) {
     p.set(Math.round(bx - lr * 0.45), Math.round(by - lr * 0.4), WHITE);
   }
   ball(p, cx, cy, rx, ry, R, { clipY: floor, tex: 5 });
+  // keep spots and bubbles off the face band so they never read as extra eyes
+  const fy0 = cy - ry * 0.05;
+  const offFace = (x, y) => (Math.abs(x - cx) < rx * 0.55 && y > fy0 - ry * 0.32 && y < fy0 + ry * 0.62 ? [cx + Math.sign(x - cx || 1) * rx * (0.6 + Math.abs(x - cx) / rx * 0.4), y - ry * 0.12] : [x, y]);
   // a darker core seen through the jelly, and suspended bubbles
   ball(p, cx + rx * 0.08, cy + ry * 0.2, rx * 0.5, ry * 0.42, R.map((c) => alphaC(dark(c, 0.8), 150)), { clipY: floor });
   for (let k = 0; k < 3; k++) {
     const br = Math.max(1, (0.5 + hash2(k, 7, 3) * 0.5) * u * 0.8);
-    const x = cx + (hash2(k, 1, 9) - 0.5) * rx * 1.1, y = cy + (hash2(k, 2, 9) - 0.2) * ry * 0.7;
+    const [x, y] = offFace(cx + (hash2(k, 1, 9) - 0.5) * rx * 1.1, cy + (hash2(k, 2, 9) - 0.2) * ry * 0.7);
     if (br >= 1.8) p.ring(x, y, br, light(o.c1, 1.35), 1); else p.set(Math.round(x), Math.round(y), light(o.c1, 1.35));
     p.set(Math.round(x - br * 0.4), Math.round(y - br * 0.5), light(o.c1, 1.7));
   }
@@ -1082,7 +1085,7 @@ function blobFrame(o, D, pose) {
   if (u >= 2) p.set(Math.round(cx - rx * 0.5) + 1, Math.round(cy - ry * 0.55), mixc(WHITE, o.c1, 0.3));
   // spots
   for (let k = 0; k < 4; k++) {
-    const x = cx + (hash2(k, 1, 4) - 0.5) * rx * 1.4, y = cy + (hash2(k, 2, 4) - 0.3) * ry * 0.9;
+    const [x, y] = offFace(cx + (hash2(k, 1, 4) - 0.5) * rx * 1.4, cy + (hash2(k, 2, 4) - 0.3) * ry * 0.9);
     const sr = Math.max(0.8, u * 0.9), sr2 = Math.max(0.8, u * 0.7);
     p.ellipse(x, y, sr, sr2, A[1]);
     if (sr >= 1.4) { p.set(Math.round(x - sr * 0.4), Math.round(y - sr2 * 0.4), A[2]); }
@@ -1100,13 +1103,13 @@ function blobFrame(o, D, pose) {
   }
   // face
   const ey = Math.round(cy - ry * 0.05);
-  const ew = Math.max(2, Math.min(4, Math.round(u * 0.95))), eh = ew + 1;
-  const c3 = C(o.c3);
+  const ew = Math.max(2, Math.min(7, Math.round(u * 0.85))), eh = ew + 1;
+  const c3 = C(o.c3), hi = light(c3, 1.4);
   for (const sg of [-1, 1]) {
     const x = Math.round(cx + sg * rx * 0.32 - (sg < 0 ? ew - 1 : 0));
     if (pose.hurt) { for (let k = 0; k < eh; k++) { p.set(x + Math.round(k * (ew - 1) / (eh - 1)), ey + k, EYE_DARK); p.set(x + ew - 1 - Math.round(k * (ew - 1) / (eh - 1)), ey + k, EYE_DARK); } continue; }
-    p.rect(x, ey, ew, eh, c3); e.rect(x, ey, ew, eh, c3);
-    p.set(x + (sg < 0 ? 0 : ew - 1), ey, light(c3, 1.4)); e.set(x + (sg < 0 ? 0 : ew - 1), ey, light(c3, 1.4));
+    if (ew >= 4) { p.rrect(x, ey, ew, eh, c3, 1); e.rrect(x, ey, ew, eh, c3, 1); p.rect(x + 1, ey + 1, Math.max(1, ew >> 1), Math.max(1, eh >> 1), hi); e.rect(x + 1, ey + 1, Math.max(1, ew >> 1), Math.max(1, eh >> 1), hi); }
+    else { p.rect(x, ey, ew, eh, c3); e.rect(x, ey, ew, eh, c3); p.set(x + (sg < 0 ? 0 : ew - 1), ey, hi); e.set(x + (sg < 0 ? 0 : ew - 1), ey, hi); }
     p.rect(x, ey + eh, ew, 1, dark(o.c1, 0.6));
   }
   if (pose.mouth) {
