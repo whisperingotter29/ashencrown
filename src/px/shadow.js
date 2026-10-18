@@ -10,7 +10,7 @@
 //
 // Drawables opt in with castShadow(sctx); the renderer calls drawCastShadows() in its shadow stage,
 // before any sprite is drawn, so shadows never cover sprites.
-import { Pix, bayer } from './pix.js';
+import { Pix, ART, bayer } from './pix.js';
 import { view } from './view.js';
 import { atmo, sunElevation } from '../world/atmosphere.js';
 import { BIOMES } from '../data/world.js';
@@ -62,7 +62,7 @@ export function updateSun() {
 // o.cap: heights above this many px are treated as a flat roof (buildings), so their depth doesn't
 // stretch the shadow; o.thr: minimum source alpha that casts (skips baked soft shadow ovals)
 let budget = 0;
-const BUDGET = 60000;    // source pixels baked per frame before falling back to a stale bake
+const BUDGET = Math.round(60000 * ART * ART);   // source pixels baked per frame (sprites carry ART^2 more pixels now)
 function bake(p, lx, lz, cap, thr) {
   const w = p.w, h = p.h, oy = p.oy, d = p.d;
   // forward-map every casting pixel (x relative to the sprite, y relative to the pivot); sub-steps

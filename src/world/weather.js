@@ -2,6 +2,7 @@
 // embers) wrap around the view, with lightning strikes and ground splashes.
 import { lightning as boltFx, flash, burst } from '../render/vfx.js';
 import { scene } from '../px/scene.js';
+import { ART, ap } from '../px/pix.js';
 import { view } from '../px/view.js';
 import { BIOMES } from '../data/world.js';
 import { G } from '../game.js';
@@ -30,9 +31,11 @@ export const WEATHER_DEFS = {
 // Ambient particles by biome (always present at low intensity)
 const AMBIENT = { wastes: [['embers', 0.5], ['dust', 0.25]], gilded: [['pollen', 0.6]], verdant: [['pollen', 0.3], ['fireflies', 0]], frost: [['snow', 0.12]], coast: [['pollen', 0.15]], maw: [['motes', 0.4], ['embers', 0.2]], deep: [['deepmotes', 1]] };
 
-// Screen-wrapped pixel weather layers. Speeds in low-res px/s; `glow` layers are drawn after
-// lighting so embers, glass and spores shine at night.
-const LAYERS = {
+// Screen-wrapped pixel weather layers. Speeds, wobble and streak lengths are written in the old
+// design pixels (10 px/unit) and scaled to the art grid below, so rain falls as fast across the
+// world as it always did; flakes and motes stay 1-2 px. `glow` layers are drawn after lighting so
+// embers, glass and spores shine at night.
+const LAYERS0 = {
   rain: { n: 650, vel: [40, 330], len: 5, color: '#a8bcd0', alpha: 0.55, streak: true },
   snow: { n: 420, vel: [10, 26], wob: 9, color: '#ffffff', alpha: 0.9, size: 1 },
   blizzard: { n: 900, vel: [170, 55], wob: 14, color: '#ffffff', alpha: 0.85, streak: true, len: 3 },
@@ -48,6 +51,7 @@ const LAYERS = {
   motes: { n: 200, vel: [2, -5], wob: 12, color: '#a060ff', alpha: 1, glow: true, twinkle: 1 },
   deepmotes: { n: 180, vel: [1, -3], wob: 10, color: '#60e0ff', alpha: 0.9, glow: true, twinkle: 1 },
 };
+const LAYERS = Object.fromEntries(Object.entries(LAYERS0).map(([k, c]) => [k, { ...c, vel: [c.vel[0] * ART, c.vel[1] * ART], wob: (c.wob || 0) * ART, len: c.len ? ap(c.len) : 0 }]));
 
 const layers = {};
 const state = {
@@ -61,11 +65,11 @@ const state = {
   rng: new RNG(1234),
 };
 
-const MARGIN = 40;
+const MARGIN = ap(40);
 function makeLayer(id, cfg) {
   const n = cfg.n;
   const P = new Float32Array(n * 3);
-  for (let i = 0; i < n; i++) { P[i * 3] = Math.random() * 2000; P[i * 3 + 1] = Math.random() * 2000; P[i * 3 + 2] = Math.random(); }
+  for (let i = 0; i < n; i++) { P[i * 3] = Math.random() * 3200; P[i * 3 + 1] = Math.random() * 3200; P[i * 3 + 2] = Math.random(); }
   layers[id] = { cfg, P, alpha: 0 };
 }
 // draw every visible layer of the given kind (lit or glowing) into the low-res buffer
@@ -88,10 +92,14 @@ function drawLayers(ctx, glow) {
       ctx.globalAlpha = Math.min(1, a);
       const X = Math.round(x), Y = Math.round(y);
       if (c.streak) {
-        const len = c.len || 3, sp = Math.hypot(vx, vy) || 1;
+        // a 1-px streak along the motion, a little shorter for the far (slow) particles
+        const len = Math.max(2, Math.round((c.len || 5) * (0.7 + s * 0.3))), sp = Math.hypot(vx, vy) || 1;
         for (let k = 0; k < len; k++) ctx.fillRect(Math.round(X - (vx / sp) * k), Math.round(Y - (vy / sp) * k), 1, 1);
-      } else if (c.size >= 3) { ctx.fillRect(X - 1, Y, 3, 1); ctx.fillRect(X, Y - 1, 1, 3); }
-      else ctx.fillRect(X, Y, s > 0.8 ? 2 : 1, s > 0.8 ? 2 : 1);
+      } else if (c.size >= 3) {
+        // dust puff: a small diamond, the core denser than the rim
+        ctx.fillRect(X - 2, Y, 5, 1); ctx.fillRect(X - 1, Y - 1, 3, 3); ctx.fillRect(X, Y - 2, 1, 5);
+      } else if (s > 0.9) { ctx.fillRect(X - 1, Y, 3, 1); ctx.fillRect(X, Y - 1, 1, 3); }
+      else ctx.fillRect(X, Y, s > 0.6 ? 2 : 1, s > 0.6 ? 2 : 1);
     }
   }
   ctx.globalAlpha = 1;
@@ -112,9 +120,12 @@ function drawSplashes(ctx) {
     const sp = splashes[i];
     const u = (now - sp.t) / 0.25;
     if (u >= 1) { splashes.splice(i, 1); continue; }
-    const x = Math.round(sp.x - view.x0), y = Math.round(sp.y - view.y0), r = 1 + Math.round(u * 2);
+    const x = Math.round(sp.x - view.x0), y = Math.round(sp.y - view.y0), r = 1 + Math.round(u * 3);
     ctx.globalAlpha = 0.7 * (1 - u);
-    ctx.fillRect(x - r, y, 1, 1); ctx.fillRect(x + r, y, 1, 1); ctx.fillRect(x, y - 1, 1, 1);
+    // a flat crisp ring opening outward, with a droplet hopping up in the middle at first
+    ctx.fillRect(x - r, y, 1, 1); ctx.fillRect(x + r, y, 1, 1);
+    if (r > 1) { ctx.fillRect(x - r + 1, y - 1, 1, 1); ctx.fillRect(x + r - 1, y - 1, 1, 1); ctx.fillRect(x - r + 1, y + 1, 1, 1); ctx.fillRect(x + r - 1, y + 1, 1, 1); }
+    if (u < 0.5) ctx.fillRect(x, y - 1 - Math.round(u * 4), 1, 1);
   }
   ctx.globalAlpha = 1;
 }
