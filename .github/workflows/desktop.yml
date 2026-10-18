@@ -1,0 +1,47 @@
+# Builds the desktop app on Windows, Linux and macOS. Run it from the Actions tab
+# ("Desktop builds" -> Run workflow) or push a tag like v0.1.0. Downloads appear under the run's
+# Artifacts section. The unpacked folders are what goes to Steam (see desktop/README.md).
+name: Desktop builds
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ['v*']
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            target: win
+          - os: ubuntu-latest
+            target: linux
+          - os: macos-latest
+            target: mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install game
+        run: npm ci
+      - name: Install desktop shell
+        working-directory: desktop
+        run: npm ci
+      - name: Build
+        working-directory: desktop
+        run: npm run dist:${{ matrix.target }}
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+      - name: Upload downloads (zip / AppImage / tar.gz)
+        uses: actions/upload-artifact@v4
+        with:
+          name: AshenCrown-${{ matrix.target }}
+          path: |
+            desktop/release/*.zip
+            desktop/release/*.AppImage
+            desktop/release/*.tar.gz
+          retention-days: 30

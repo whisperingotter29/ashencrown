@@ -26,6 +26,7 @@ import { bus } from '../core/events.js';
 import { trackedObjectiveMarkers } from '../systems/quests.js';
 import { R, applySettings } from '../render/renderer.js';
 import { saveGame, saveSettings } from '../core/save.js';
+import { desktop } from '../core/desktop.js';
 import { dangerLevel, primaryBiome } from '../world/terrainGen.js';
 import { input } from '../core/input.js';
 
@@ -835,6 +836,7 @@ export function openPause() {
   mk('Settings', openSettings);
   mk('Controls', openControls);
   if (c) mk('Quit to title', () => { saveGame(0); location.reload(); }, 'danger');
+  if (desktop) mk('Quit to desktop', () => { if (c) saveGame(0); desktop.quit(); }, 'danger');
   col.appendChild(btns);
   body.appendChild(col);
   openModal('pause', w);
@@ -870,6 +872,10 @@ export function openSettings() {
   row('Music', slider('music', 0, 1, 0.05, () => bus.emit('volume')), 'music');
   row('Effects', slider('sfx', 0, 1, 0.05, () => bus.emit('volume')), 'sfx');
   col.appendChild(el('div', 'sec-h', '<span>Display</span>'));
+  if (desktop) {
+    S.fullscreen = desktop.isFullscreen();
+    row('Window', choice('fullscreen', [[true, 'Fullscreen'], [false, 'Windowed']], () => desktop.setFullscreen(S.fullscreen)), 'window');
+  }
   row('Pixel size', choice('pixel', [['auto', 'Auto'], [2, '2x'], [3, '3x'], [4, '4x'], [5, '5x']], () => { R.settings.pixel = S.pixel; applySettings(); }), 'pixel');
   row('Camera', choice('camera', [['cinematic', 'Cinematic (tilt + depth of field)'], ['flat', 'Flat 2D']], () => bus.emit('settingsChanged', 'camera')), 'camera');
   row('Depth of field', choice('dof', [[true, 'On'], [false, 'Off']], () => bus.emit('settingsChanged', 'dof')), 'dof');

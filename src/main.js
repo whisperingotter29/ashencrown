@@ -53,6 +53,8 @@ import { talkTo, closeDialogue, dialogueOpen, dialogueKey } from './ui/dialogue.
 import { startFateTable, updateFate, fateActive } from './ui/fate.js';
 import { initAudio, setMusic, audioReady } from './audio/audio.js';
 import { xpToNext } from './systems/stats.js';
+import { desktop } from './core/desktop.js';
+import './systems/achievements.js';
 
 // ============================================================================ boot
 loadSettings();
@@ -124,6 +126,11 @@ function showTitle() {
   const cb = el('button', '', 'Controls');
   cb.onclick = () => openControls();
   menu.append(sb, cb);
+  if (desktop) {
+    const qb = el('button', '', 'Quit');
+    qb.onclick = () => desktop.quit();
+    menu.appendChild(qb);
+  }
   titleUI.appendChild(menu);
   titleUI.appendChild(el('div', 'credits', 'Click to awaken the music · Best with headphones'));
   root().appendChild(titleUI);

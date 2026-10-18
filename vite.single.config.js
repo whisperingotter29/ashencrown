@@ -4,4 +4,6 @@ import { viteSingleFile } from 'vite-plugin-singlefile';
 export default defineConfig({
   plugins: [viteSingleFile()],
   build: { outDir: 'dist-single', assetsInlineLimit: 1e8 },
+  server: { watch: { ignored: ['**/desktop/**'] } },
+  optimizeDeps: { entries: ['index.html'] },
 });

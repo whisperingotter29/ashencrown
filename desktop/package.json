@@ -1,0 +1,76 @@
+{
+  "name": "ashen-crown-desktop",
+  "productName": "Ashen Crown",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Ashen Crown desktop build (Electron) for Steam and itch.io",
+  "main": "main.cjs",
+  "author": "Ashen Crown",
+  "scripts": {
+    "build:game": "npm --prefix .. run build && node scripts/copy-game.cjs",
+    "start": "npm run build:game && electron .",
+    "start:steam-test": "npm run build:game && electron . --steam-test",
+    "dist": "npm run build:game && electron-builder",
+    "dist:win": "npm run build:game && electron-builder --win --x64",
+    "dist:linux": "npm run build:game && electron-builder --linux --x64",
+    "dist:mac": "npm run build:game && electron-builder --mac --universal",
+    "steam:upload": "node scripts/steam-upload.cjs"
+  },
+  "build": {
+    "appId": "com.ashencrown.game",
+    "productName": "Ashen Crown",
+    "executableName": "AshenCrown",
+    "copyright": "Ashen Crown",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.cjs",
+      "preload.cjs",
+      "steam.cjs",
+      "steam.json",
+      "package.json",
+      "build/icon.png",
+      "game/**/*"
+    ],
+    "asarUnpack": [
+      "node_modules/steamworks.js/**"
+    ],
+    "artifactName": "AshenCrown-${version}-${os}-${arch}.${ext}",
+    "win": {
+      "target": [
+        "dir",
+        "zip"
+      ],
+      "icon": "build/icon.png"
+    },
+    "linux": {
+      "target": [
+        "dir",
+        "AppImage",
+        "tar.gz"
+      ],
+      "icon": "build/icon.png",
+      "category": "Game"
+    },
+    "mac": {
+      "target": [
+        "dir",
+        "zip"
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.role-playing-games",
+      "x64ArchFiles": "Contents/Resources/app.asar.unpacked/node_modules/steamworks.js/dist/osx/**"
+    },
+    "publish": null
+  },
+  "dependencies": {
+    "steamworks.js": "^0.4.0"
+  },
+  "devDependencies": {
+    "electron": "^44.9.0",
+    "electron-builder": "^26.15.3"
+  },
+  "desktopName": "ashen-crown.desktop"
+}
