@@ -6,7 +6,7 @@ import { hash3, mulberry32 } from '../core/rng.js';
 import { N1, N2, N3 } from '../core/noise.js';
 import { TOWNS, DEEP_TOWNS, DUNGEONS, WAYSTONES, LANDMARKS, SHRINES, RELICS } from '../data/world.js';
 
-import { PPU } from '../px/pix.js';
+import { PPU, ART } from '../px/pix.js';
 const propIndex = Object.fromEntries(PROP_IDS.map((k, i) => [k, i]));
 
 // Places where scatter must stay clear (towns, entrances, landmarks)
@@ -41,6 +41,33 @@ const bay = (x, y) => (BAYER[(y & 3) * 4 + (x & 3)] + 0.5) / 16;
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 // posterise a channel with an ordered-dither offset: gives the pixel-art banding/texture
 const post = (v, d, step = 9) => clamp(Math.floor(v / step + d) * step, 0, 255);
+
+// World-size micro features, in art pixels. The ground used to be painted at 10 px per unit; the
+// features below are sized so they cover the same patch of world at today's density, with the
+// extra pixels spent on shape (lit tips, bevels, shadow sides) rather than on bigger blocks.
+const A = ART, iA = 1 / ART;
+const BLADE = 5;                      // grass blade cell (one short blade per lucky cell)
+const FLOWER = 7;                     // flower cell
+const MOSS = 4;                       // moss cushion cell
+const PEB = 6;                        // road pebble cell
+const FLAG = Math.round(12 * A);      // plaza flagstone size
+const SANDPEB = 9;                    // grit on sand
+const GLINT = 13;                     // water glint cell
+const md = (v, m) => ((v % m) + m) % m;
+const PETALS = [[236, 84, 72], [242, 236, 222], [244, 202, 74], [150, 126, 236], [232, 122, 204]];
+// crack network from a noise isoline: dark seam, a lit lip on one side and a shaded lip on the other
+const crackTex = (v, w) => (v > -w && v < w ? 0.72 : v >= w && v < w * 2.2 ? 1.08 : v <= -w && v > -w * 2.2 ? 0.9 : 1);
+// Low-frequency texture noise sampled on a coarse grid over the chunk and interpolated per pixel
+// (one noise call per step x step pixels instead of one per pixel); built on first use.
+function noiseGrid(fn, f, step, wx0, wz0, P) {
+  const n = P / step + 2, g = new Float32Array(n * n);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) g[j * n + i] = fn((wx0 + i * step) * f, (wz0 + j * step) * f);
+  const inv = 1 / step;
+  return (px, py) => {
+    const fx = px * inv, fy = py * inv, i = fx | 0, j = fy | 0, tx = fx - i, ty = fy - j, k = j * n + i;
+    return (g[k] * (1 - tx) + g[k + 1] * tx) * (1 - ty) + (g[k + n] * (1 - tx) + g[k + n + 1] * tx) * ty;
+  };
+}
 
 // material ids per sample
 const M_GRASS = 1, M_SAND = 2, M_SNOW = 3, M_ROCK = 4, M_ASH = 5, M_ROAD = 6, M_PLAZA = 7, M_DIRT = 8, M_GLASS = 9, M_CAVE = 10, M_MOSS = 11;
@@ -102,6 +129,8 @@ function buildChunk(m) {
   let emis = null;
   const glints = [];
   const seed = (cx * 7919 + cz * 104729 + (realm === 'deep' ? 99 : 0)) | 0;
+  const WX0 = x0 * PPU, WZ0 = z0 * PPU;
+  let gPatch = null, gTone = null, gCrack = null, gAsh = null;
   for (let py = 0; py < P; py++) {
     const fz = py / PPU + 1, j = Math.floor(fz), tz = fz - j;
     for (let px = 0; px < P; px++) {
@@ -125,46 +154,122 @@ function buildChunk(m) {
       // cliff faces on steep south-facing slopes read as walls in the 3/4 view
       const cliff = steep > 1.05 + (d - 0.5) * 0.1 && dhdz < -0.6;
       if (steep > 1.0) sh *= 0.92;
-      if (cliff) { sh *= 0.66 + 0.08 * ((wx % 3 === 0) ? 1 : 0); CLIFF[py * P + px] = 1; }
+      if (cliff) {
+        // columnar joints on the face: a dark seam, a lit edge beside it, blocky per-column tone
+        const cm = md(wx, 5);
+        sh *= cm === 0 ? 0.6 : cm === 1 ? 0.75 : 0.65 + h2(Math.floor(wx / 5), Math.floor(wz / 7), 17) * 0.07;
+        CLIFF[py * P + px] = 1;
+      }
       sh = clamp(sh, 0.45, 1.45);
-      // micro texture
+      // micro texture (world-sized features, see the constants at the top)
       const n = h2(wx, wz, 3);
       let tex = 1;
       switch (mat) {
         case M_GRASS: case M_MOSS: {
-          if (n < 0.07) tex = 1.16; else if (n < 0.13) tex = 0.84;
-          if (h2(wx, wz + 1, 3) < 0.07) tex = 1.1;   // two-pixel blades
-          if (mat === M_MOSS && h2(wx >> 1, wz >> 1, 9) < 0.08) tex = 0.8;
-          if (h2(wx >> 2, wz >> 2, 11) < 0.012) { r = r * 0.3 + 230 * 0.7; g = g * 0.3 + (h2(wx >> 2, wz >> 2, 12) < 0.5 ? 200 : 90) * 0.7; b = b * 0.4 + 90 * 0.6; } // flecks of flowers
+          // light / dark sward patches with dithered, chunky borders
+          const pv = (gPatch ||= noiseGrid(N3, 0.32 / PPU, 4, WX0, WZ0, P))(px, py);
+          if (pv > 0.42) tex = 1.07; else if (pv < -0.45) tex = 0.93;
+          if (n < 0.03) tex *= 1.16; else if (n < 0.06) tex *= 0.84;
+          // short blades: root dark, tip lit, the tip leaning one pixel
+          const bcx = Math.floor(wx / BLADE);
+          for (let k = 0; k < 3; k++) {
+            const bcz = Math.floor((wz + k) / BLADE);
+            if (k && bcz === Math.floor((wz + k - 1) / BLADE)) continue;
+            if (h2(bcx, bcz, 31) > 0.3) continue;
+            const bz = bcz * BLADE + Math.floor(h2(bcx, bcz, 32) * BLADE), dz = bz - wz;
+            if (dz < 0 || dz > 2) continue;
+            const lean = dz === 2 ? Math.floor(h2(bcx, bcz, 33) * 3) - 1 : 0;
+            if (bcx * BLADE + Math.floor(h2(bcx, bcz, 34) * BLADE) + lean !== wx) continue;
+            tex = dz === 0 ? 0.8 : dz === 1 ? 1.16 : 1.34;
+            break;
+          }
+          if (mat === M_MOSS) {
+            const mcx = Math.floor(wx / MOSS), mcz = Math.floor(wz / MOSS);
+            if (h2(mcx, mcz, 9) < 0.12) {
+              const ddx = wx - mcx * MOSS - 1 - Math.floor(h2(mcx, mcz, 10) * 2), ddz = wz - mcz * MOSS - 1 - Math.floor(h2(mcx, mcz, 11) * 2);
+              if (Math.abs(ddx) + Math.abs(ddz) <= 1) tex = ddz < 0 ? 1.0 : 0.8;
+            }
+          }
+          // flowers: five-pixel blossoms, petals lit up-left, a warm eye
+          const fcx = Math.floor(wx / FLOWER), fcz = Math.floor(wz / FLOWER);
+          if (h2(fcx, fcz, 11) < 0.014) {
+            const ddx = wx - fcx * FLOWER - 2 - Math.floor(h2(fcx, fcz, 13) * 3), ddz = wz - fcz * FLOWER - 2 - Math.floor(h2(fcx, fcz, 14) * 3);
+            if (Math.abs(ddx) + Math.abs(ddz) <= 1) {
+              const P = PETALS[Math.floor(h2(fcx, fcz, 12) * PETALS.length)];
+              const k = ddx === 0 && ddz === 0 ? -1 : ddx < 0 || ddz < 0 ? 1.12 : 0.82;
+              if (k < 0) { r = 250; g = 226; b = 120; } else { r = P[0] * k; g = P[1] * k; b = P[2] * k; }
+              tex = 1;
+            }
+          }
           break;
         }
         case M_SAND: {
-          const rip = Math.sin(wx * 0.11 + wz * 0.045 + N1(wx * 0.004, wz * 0.004) * 4);
-          tex = rip > 0.82 ? 1.1 : rip < -0.9 ? 0.92 : 1;
-          if (n < 0.025) tex *= 0.88;
+          // wind ripples: a lit crest line with its shadow just behind it
+          const ph = wx * (0.11 * iA) + wz * (0.045 * iA) + N1(wx * (0.004 * iA), wz * (0.004 * iA)) * 4;
+          const rip = Math.sin(ph), rip2 = Math.sin(ph - 0.55);
+          tex = rip > 0.86 ? 1.09 : rip2 > 0.9 ? 0.93 : 1;
+          if (n < 0.02) tex *= 0.86; else if (n > 0.99) tex *= 1.1;
+          const scx = Math.floor(wx / SANDPEB), scz = Math.floor(wz / SANDPEB);
+          if (h2(scx, scz, 41) < 0.05) {
+            const ddx = wx - scx * SANDPEB - 2 - Math.floor(h2(scx, scz, 42) * 4), ddz = wz - scz * SANDPEB - 2 - Math.floor(h2(scx, scz, 43) * 4);
+            if (ddx >= 0 && ddx <= 1 && ddz >= 0 && ddz <= 1) tex = ddx + ddz === 0 ? 1.12 : ddx + ddz === 2 ? 0.8 : 0.94;
+            else if (ddz === 2 && ddx >= 0 && ddx <= 1) tex = 0.9;
+          }
           break;
         }
-        case M_SNOW: tex = n < 0.012 ? 1.25 : n < 0.06 ? 0.95 : 1; break;
+        case M_SNOW: {
+          const ph = wx * (0.07 * iA) - wz * (0.03 * iA) + N1(wx * (0.003 * iA), wz * (0.003 * iA)) * 5;
+          tex = Math.sin(ph) > 0.92 ? 0.96 : 1;
+          if (n < 0.01) tex = 1.25; else if (n < 0.05) tex *= 0.96;
+          break;
+        }
         case M_ROCK: case M_CAVE: {
-          const cr = h2(wx >> 1, wz >> 1, 5);
-          tex = cr < 0.08 ? 0.78 : cr > 0.92 ? 1.12 : 1;
-          if (((wx + (wz >> 2)) % 7 === 0) && h2(wx >> 3, wz >> 2, 6) < 0.4) tex *= 0.85;
+          const pv = (gTone ||= noiseGrid(N1, 0.9 / PPU, 4, WX0, WZ0, P))(px, py);
+          tex = pv > 0.5 ? 1.07 : pv < -0.5 ? 0.9 : 1;
+          tex *= crackTex((gCrack ||= noiseGrid(N2, 0.75 / PPU, 2, WX0, WZ0, P))(px, py), 0.035);
+          if (n < 0.04) tex *= 0.85; else if (n > 0.97) tex *= 1.1;
           break;
         }
-        case M_ASH: tex = n < 0.05 ? 0.7 : n > 0.97 ? 1.5 : 1; if (n > 0.995) { r = 255; g = 120; b = 40; } break;
-        case M_ROAD: {
-          // packed dirt with pebbles
-          tex = n < 0.08 ? 0.82 : n > 0.94 ? 1.14 : 1;
+        case M_ASH: {
+          tex = n < 0.05 ? 0.7 : n > 0.97 ? 1.5 : 1;
+          const ck = crackTex((gAsh ||= noiseGrid(N2, 0.6 / PPU, 2, WX0, WZ0, P))(px, py), 0.03);
+          tex *= ck;
+          if (n > 0.996 || (ck < 0.8 && n > 0.93)) { r = 255; g = 110 + n * 40; b = 40; }
+          break;
+        }
+        case M_ROAD: case M_DIRT: {
+          // packed dirt with lit pebbles and their shadows
+          tex = n < 0.07 ? 0.84 : n > 0.95 ? 1.12 : 1;
+          const pcx = Math.floor(wx / PEB), pcz = Math.floor(wz / PEB);
+          if (h2(pcx, pcz, 51) < (mat === M_ROAD ? 0.2 : 0.1)) {
+            const big = h2(pcx, pcz, 54) < 0.4;
+            const ddx = wx - pcx * PEB - 1 - Math.floor(h2(pcx, pcz, 52) * 3), ddz = wz - pcz * PEB - 1 - Math.floor(h2(pcx, pcz, 53) * 3);
+            const w = big ? 2 : 1;
+            if (ddx >= 0 && ddx <= w && ddz >= 0 && ddz <= (big ? 1 : 0)) tex = ddx === 0 && ddz === 0 ? 1.2 : ddz > 0 || ddx === w ? 0.92 : 1.08;
+            else if (ddz === (big ? 2 : 1) && ddx >= 1 && ddx <= w) tex = 0.8;
+          }
           break;
         }
         case M_PLAZA: {
-          // flagstones: grid with mortar lines and per-stone tone
-          const bxs = Math.floor((wx + ((Math.floor(wz / 12) & 1) * 6)) / 12), bzs = Math.floor(wz / 12);
-          const mx = (wx + ((Math.floor(wz / 12) & 1) * 6)) % 12, mz = wz % 12;
-          tex = (mx === 0 || mz === 0) ? 0.72 : 0.92 + h2(bxs, bzs, 8) * 0.16;
+          // flagstones: offset courses, 1-px mortar, a bevel lit on the top-left, per-stone tone
+          const row = Math.floor(wz / FLAG), off = (row & 1) * (FLAG >> 1);
+          const bxs = Math.floor((wx + off) / FLAG);
+          const mx = md(wx + off, FLAG), mz = md(wz, FLAG);
+          if (mx === 0 || mz === 0) tex = 0.7;
+          else {
+            tex = 0.9 + h2(bxs, row, 8) * 0.16;
+            if (mx === 1 || mz === 1) tex *= 1.08; else if (mx === FLAG - 1 || mz === FLAG - 1) tex *= 0.88;
+            // the odd cracked slab: a jagged hairline across part of the stone
+            const ch = h2(bxs, row, 13);
+            if (ch < 0.09) {
+              const sl = (h2(bxs, row, 14) - 0.5) * 1.6, c0 = 3 + h2(bxs, row, 15) * (FLAG - 6);
+              const zz = mz + (md(mz, 4) === 0 ? 1 : 0);
+              if (Math.abs(mx - Math.round(c0 + (zz - FLAG / 2) * sl)) < 1 && mz > 2 && mz < FLAG - 2 - ch * 40) tex *= 0.8;
+            }
+            if (n < 0.03) tex *= 0.9;
+          }
           break;
         }
-        case M_DIRT: tex = n < 0.1 ? 0.85 : 1; break;
       }
       if (mat === M_PLAZA) { r = r * 0.55 + 168 * 0.45; g = g * 0.55 + 156 * 0.45; b = b * 0.55 + 136 * 0.45; }
       if (mat === M_ROAD && realm === 'surface') { /* colour already tinted by colorAt */ }
@@ -177,7 +282,7 @@ function buildChunk(m) {
         const depth = wl - h;
         if (wt === 2) {
           // lava: bright cracks in a dark crust
-          const fl = N2(wx * 0.025, wz * 0.025) + N1(wx * 0.07, wz * 0.07) * 0.5;
+          const fl = N2(wx * (0.025 * iA), wz * (0.025 * iA)) + N1(wx * (0.07 * iA), wz * (0.07 * iA)) * 0.5;
           const crust = fl > 0.25;
           r = crust ? 60 : 255; g = crust ? 22 : 120 + fl * 160; b = crust ? 20 : 30;
           if (!emis) emis = new Uint8ClampedArray(P * P * 4);
@@ -189,12 +294,16 @@ function buildChunk(m) {
           else { r = 52 - t * 40; g = 140 - t * 92; b = 158 - t * 70; }
           // shore foam and wave bands
           if (depth < 0.22 + (d - 0.5) * 0.12) { r = 225; g = 238; b = 235; }
-          else if (Math.sin(wx * 0.05 + wz * 0.21 + N1(wx * 0.01, wz * 0.01) * 6) > 0.93 && depth < 3) { r += 40; g += 40; b += 30; }
+          else if (depth < 3) {
+            // wave bands: a lit crest with a darker trough line under it
+            const wv = wx * (0.05 * iA) + wz * (0.21 * iA) + N1(wx * (0.01 * iA), wz * (0.01 * iA)) * 6;
+            if (Math.sin(wv) > 0.94) { r += 40; g += 40; b += 30; } else if (Math.sin(wv - 0.42) > 0.97) { r -= 10; g -= 12; b -= 8; }
+          }
           if (glow) {
             if (!emis) emis = new Uint8ClampedArray(P * P * 4);
             emis[o] = r * 0.7; emis[o + 1] = g * 1.1; emis[o + 2] = b * 1.1; emis[o + 3] = 120;
           }
-          if (depth > 0.5 && h2(wx >> 3, wz >> 3, 21) < 0.02 && glints.length < 60) glints.push(x0 + px / PPU, z0 + py / PPU);
+          if (depth > 0.5 && md(wx, GLINT) === 6 && md(wz, GLINT) === 6 && glints.length < 120 && h2(Math.floor(wx / GLINT), Math.floor(wz / GLINT), 21) < 0.035) glints.push(x0 + px / PPU, z0 + py / PPU);
         }
       }
       img[o] = post(r, d - 0.5);
