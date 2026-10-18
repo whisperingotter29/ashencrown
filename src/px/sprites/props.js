@@ -53,11 +53,11 @@ export function blob(p, cx, cy, rx, ry, base, rnd, o = {}) {
 
 // ------------------------------------------------------------------ local helpers
 // five-tone ramp: deep shadow, shadow, base, light, highlight (shadows cool, lights warm)
-function ramp5(base) { base = C(base); return [dark(base, 0.42), dark(base, 0.66), base, light(base, 1.14), light(base, 1.32)]; }
-const pal = (...hex) => hex.map((h) => C(h));
+export function ramp5(base) { base = C(base); return [dark(base, 0.42), dark(base, 0.66), base, light(base, 1.14), light(base, 1.32)]; }
+export const pal = (...hex) => hex.map((h) => C(h));
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 // smooth value noise (organic clusters instead of salt-and-pepper speckle)
-function vn(x, y, cell, seed) {
+export function vn(x, y, cell, seed) {
   const fx = x / cell, fy = y / cell, ix = Math.floor(fx), iy = Math.floor(fy);
   let tx = fx - ix, ty = fy - iy; tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
   const a = hash2(ix, iy, seed), b = hash2(ix + 1, iy, seed), c = hash2(ix, iy + 1, seed), d = hash2(ix + 1, iy + 1, seed);
@@ -117,7 +117,7 @@ function sway(pix, amps = [-1, 0, 1, 0]) {
 }
 
 // a tapered limb (branch, root, stem) shaded across its width: lit on the side facing up-left
-function limb(p, x0, y0, x1, y1, w0, w1, R, o = {}) {
+export function limb(p, x0, y0, x1, y1, w0, w1, R, o = {}) {
   const dx = x1 - x0, dy = y1 - y0, L2 = dx * dx + dy * dy || 1, L = Math.sqrt(L2);
   let nx = -dy / L, ny = dx / L;
   if (nx * -0.6 + ny * -0.8 < 0) { nx = -nx; ny = -ny; }
@@ -136,7 +136,7 @@ function limb(p, x0, y0, x1, y1, w0, w1, R, o = {}) {
   }
 }
 // vertical trunk with root flare, bark fissures and a lit left side
-function trunk(p, cx, yb, yt, w0, w1, R, rnd, o = {}) {
+export function trunk(p, cx, yb, yt, w0, w1, R, rnd, o = {}) {
   const seed = Math.floor(rnd() * 999), H = Math.max(1, yb - yt), flare = o.flare ?? Math.max(2, w0 * 0.6);
   for (let y = Math.floor(yt); y <= yb; y++) {
     const t = (y - yt) / H;
@@ -167,7 +167,7 @@ function trunk(p, cx, yb, yt, w0, w1, R, rnd, o = {}) {
 }
 // leafy crown: many small lit clumps inside a set of ellipses, back to front, each with its own
 // highlight and a dark crease under it, so foliage reads as chunky clusters rather than noise
-function crown(p, parts, R, rnd, o = {}) {
+export function crown(p, parts, R, rnd, o = {}) {
   let X0 = 1e9, X1 = -1e9, Y0 = 1e9, Y1 = -1e9;
   for (const [cx, cy, rx, ry] of parts) { X0 = Math.min(X0, cx - rx); X1 = Math.max(X1, cx + rx); Y0 = Math.min(Y0, cy - ry); Y1 = Math.max(Y1, cy + ry); }
   const CX = (X0 + X1) / 2, CY = (Y0 + Y1) / 2, RX = Math.max(1, (X1 - X0) / 2), RY = Math.max(1, (Y1 - Y0) / 2);
@@ -237,7 +237,7 @@ function blades(p, x, yb, n, h, R, rnd, o = {}) {
   for (let k = -Math.round(spread * 0.6); k <= Math.round(spread * 0.6); k++) p.set(Math.round(x + k), yb, R[0]);
 }
 // zig-zag crack over existing pixels
-function crack(p, x, y, len, c, rnd, dir = 1) {
+export function crack(p, x, y, len, c, rnd, dir = 1) {
   for (let k = 0; k < len; k++) {
     p.over(Math.round(x), Math.round(y), c);
     y += 1; x += (rnd() < 0.5 ? 0 : dir) * (rnd() < 0.7 ? 1 : 0);
@@ -245,7 +245,7 @@ function crack(p, x, y, len, c, rnd, dir = 1) {
   }
 }
 // moss / snow cap: covers the top few pixels of every column, with drips
-function capTop(p, R, rnd, amt = 1, o = {}) {
+export function capTop(p, R, rnd, amt = 1, o = {}) {
   const seed = Math.floor(rnd() * 999);
   for (let x = 0; x < p.w; x++) {
     let top = -1;
@@ -263,7 +263,7 @@ function capTop(p, R, rnd, amt = 1, o = {}) {
 
 // ---------- faceted boulder: polygonal outline, Voronoi facets lit from the top-left, crisp facet
 // edges (dark cracks on the shadow side, a 1-px ridge where two lit faces meet), sparse specks
-function boulder(p, cx, cy, rx, ry, R, rnd, o = {}) {
+export function boulder(p, cx, cy, rx, ry, R, rnd, o = {}) {
   const seed = Math.floor(rnd() * 1000);
   const lobes = o.lobes ?? 5, bump = o.bump ?? 0.12, flatB = o.flatBottom ?? 0.55;
   const nf = o.facets ?? Math.max(4, Math.round((rx * ry) / (16 * A * A)));
