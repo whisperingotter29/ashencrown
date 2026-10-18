@@ -16,13 +16,14 @@ import { dealDamage, targetsInArc, hostile } from '../systems/combat.js';
 import { slash } from '../render/vfx.js';
 import { S } from '../data/items.js';
 
+// outfit colours from the palette's cloth ramps (src/px/palette.js)
 const ROLE_GEAR = {
-  merchant: { shirt: '#8a6a3a', pants: '#4a3a2a' }, blacksmith: { shirt: '#4a3a30', pants: '#2a2420', apron: '#3a2a1a' },
-  enchanter: { shirt: '#4a3a7a', pants: '#2a2440' }, innkeeper: { shirt: '#a07040', pants: '#4a3020' },
-  stable: { shirt: '#6a5a3a', pants: '#3a3020' }, bounty: { shirt: '#3a3a3a', pants: '#2a2a2a' },
-  trainer: { shirt: '#7a2a20', pants: '#3a2a20' }, tome: { shirt: '#2a3a6a', pants: '#1a2440' },
-  faction: { shirt: '#c8a040', pants: '#3a3020' }, elder: { shirt: '#6a5040', pants: '#3a3028' }, seer: { shirt: '#3a2050', pants: '#1a1028' },
-  guard: { shirt: '#5a5a60', pants: '#3a3a40' }, quest: { shirt: '#5a4a3a', pants: '#3a3028' }, villager: { shirt: '#7a6a50', pants: '#4a3a2a' },
+  merchant: { shirt: '#94603c', pants: '#3f2622' }, blacksmith: { shirt: '#5e4a47', pants: '#2a1a1c', apron: '#3f2622' },
+  enchanter: { shirt: '#4a3266', pants: '#2e1f45' }, innkeeper: { shirt: '#b07e52', pants: '#5a3628' },
+  stable: { shirt: '#557048', pants: '#3f2622' }, bounty: { shirt: '#2f2c38', pants: '#1f1d26' },
+  trainer: { shirt: '#8a3434', pants: '#3f2622' }, tome: { shirt: '#243e7b', pants: '#172d64' },
+  faction: { shirt: '#c99a3a', pants: '#3f2622' }, elder: { shirt: '#674952', pants: '#3f2622' }, seer: { shirt: '#4a1a48', pants: '#1d0814' },
+  guard: { shirt: '#4e4b53', pants: '#2f2c38' }, quest: { shirt: '#2f7070', pants: '#3f2622' }, villager: { shirt: '#8a6a52', pants: '#5a3628' },
 };
 
 export class NPC extends Entity {

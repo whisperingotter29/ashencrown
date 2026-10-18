@@ -32,17 +32,17 @@ import { mulberry32 } from '../core/rng.js';
 // cloak thrown over one shoulder; fighters show their face and wear a plain cape from their armour.
 // An equipped helm always replaces the default hood.
 const OUTFIT = {
-  ranger: ['#3e5a34', '#b8f070', '#2e3a26', '#8a9a7a'],
-  assassin: ['#2a2836', '#ff4a6a', '#1e1c26', '#7a7a8a'],
-  pyromancer: ['#7a2a1c', '#ffb040', '#3a2420', '#a8907a'],
-  cryomancer: ['#2e4a78', '#80e8ff', '#2a3448', '#a8b8c8'],
-  necromancer: ['#2c3e6e', '#c070ff', '#24202e', '#9aaa94'],
-  alchemist: ['#2e5a56', '#a0ffb0', '#3a3228', '#9a8a70'],
-  warden: ['#4a5a2e', '#d0ff80', '#2e3420', '#8a9070'],
-  cleric: ['#d8ccb0', '#ffe8a0', '#5a4a3a', '#c8b898'],
+  ranger: ['#4a6e36', '#c8f070', '#22341f', '#94a866'],
+  assassin: ['#4a1a48', '#e48fb0', '#1d0814', '#827d82'],
+  pyromancer: ['#8a3434', '#f8b848', '#3f2622', '#b08a64'],
+  cryomancer: ['#6aa0d0', '#a8e8f8', '#2a3240', '#b6bdbd'],
+  necromancer: ['#3973af', '#c860f0', '#2a1838', '#828882'],
+  alchemist: ['#2f7070', '#a0f0b8', '#3f2622', '#b08a64'],
+  warden: ['#557048', '#d8f080', '#2c3d32', '#a29c9c'],
+  cleric: ['#e2c494', '#fff0b0', '#5a3628', '#c4bdb6'],
 };
 // fighters keep their face bare and wear a plain class cape until their armour brings a better one
-const CAPE = { knight: ['#2e3e6e', '#e0c070'], berserker: ['#5a2418', '#c89a60'], duelist: ['#6a1a2a', '#e8d0a0'], bard: ['#4a2a6a', '#f0c060'] };
+const CAPE = { knight: ['#243e7b', '#e8c35a'], berserker: ['#60282c', '#e2c494'], duelist: ['#4a1a48', '#f3e1b5'], bard: ['#4a3266', '#e8c35a'] };
 function classOutfit(id) {
   const o = OUTFIT[id];
   if (!o) return CAPE[id] ? { cape: CAPE[id][0], capeTrim: CAPE[id][1] } : {};
@@ -93,7 +93,7 @@ export class Player extends Entity {
     const rnd = mulberry32(this.char.name.length * 31 + this.char.race.length);
     const app = this.char.appearance || (this.char.appearance = { skin: Math.floor(rnd() * lk.skin.length), hair: Math.floor(rnd() * lk.hair.length) });
     const cls = CLASS_BY_ID[this.char.cls];
-    this.baseLook = { ...raceLook(lk, app, { shirt: cls.color, pants: '#3a3028', longHair: rnd() < 0.4 }), ...classOutfit(cls.id) };
+    this.baseLook = { ...raceLook(lk, app, { shirt: cls.color, pants: '#3f2622', longHair: rnd() < 0.4 }), ...classOutfit(cls.id) };
     const actor = new Actor(this, { type: 'human', look: this.baseLook, scale: lk.scale });
     if (this.model) this.removeModel();
     this.removed = false;

@@ -4,18 +4,21 @@
 // bright edge, a fuller and a shaded back; grips are wrapped; guards and pommels catch the light.
 // Elemental and high-rarity weapons get an emissive edge layer that glows at night and under the
 // bloom pass. `len` is the reach from the pivot to the tip in pixels.
-import { Pix, C, light, dark, mixc } from '../pix.js';
+import { Pix, C, light, dark, mixc, CREAM } from '../pix.js';
+import { tone } from '../lookTone.js';
 
+// element glows from the palette's accent ends (aether, ember, frost, ...): bright, never neon
 export const ELEM_GLOW = {
-  fire: '#ff7a20', frost: '#70d0ff', lightning: '#c8d0ff', rot: '#90e040', nature: '#80d040', void: '#a060ff', holy: '#ffd860',
-  water: '#40b0f0', sand: '#e0b060', blood: '#e02030', sound: '#e070f0', earth: '#c09060',
+  fire: '#ec7a2a', frost: '#8cc8ec', lightning: '#c8d0f0', rot: '#a8c860', nature: '#90ac5c', void: '#c860f0', holy: '#f6e39a',
+  water: '#5a9ad0', sand: '#e2c494', blood: '#cc4a5a', sound: '#e48fb0', earth: '#b07e52',
 };
-const WOOD = C('#7a5232'), GRIP = C('#4a2c1c');
+// wood, grip leather and the cream glint (src/px/palette.js ramps)
+const WOOD = C('#77492f'), GRIP = C('#3f2622'), GLINT = C('#fff4dc'), STRING = C('#efdab4');
 const cache = new Map();
 
 function mk(w, h, ox, oy) { const p = new Pix(w, h); p.ox = ox; p.oy = oy; return p; }
-function metal(col) { col = C(col); const m = mixc(col, '#e8ecf0', 0.35); return { hi: light(m, 1.3), mid: m, md: mixc(m, dark(m, 0.66), 0.5), lo: dark(m, 0.66), dk: dark(m, 0.5), edge: mixc(m, '#ffffff', 0.6) }; }
-function trimR(T) { T = C(T); return { l: light(T, 1.25), m: T, d: dark(T, 0.72), dd: dark(T, 0.5) }; }
+function metal(col) { col = C(tone(col)); const m = mixc(col, '#e2e6e0', 0.22); return { hi: light(m, 1.26), mid: m, md: mixc(m, dark(m, 0.66), 0.5), lo: dark(m, 0.64), dk: dark(m, 0.48), edge: mixc(light(m, 1.3), CREAM, 0.55) }; }
+function trimR(T) { T = C(tone(T)); return { l: light(T, 1.25), m: T, d: dark(T, 0.72), dd: dark(T, 0.5) }; }
 function done(p, e, extra = {}) {
   p.outline();
   let any = false;
@@ -38,7 +41,7 @@ export function weaponSprite(spec) {
 // a glowing edge for elemental / epic+ weapons
 function edgeGlow(spec) {
   if (spec.element && spec.element !== 'physical' && ELEM_GLOW[spec.element]) return C(ELEM_GLOW[spec.element]);
-  if ((spec.rarity || 0) >= 4) return C(spec.trim || '#ffb040');
+  if ((spec.rarity || 0) >= 4) return C(spec.trim || '#ec7a2a');
   return null;
 }
 
@@ -68,7 +71,7 @@ function blade(p, e, x0, x1, cy, w, M, glow, o = {}) {
     if (glow && (x - x0) % 2 === 0) { e.set(x, top, glow); if (bot > top + 1) e.set(x, bot, glow); }
   }
   // a glint near the base of the edge
-  if (x1 - x0 > 6) { const gx = x0 + 2, off = o.curve ? Math.round(o.curve(2 / (x1 - x0))) : 0; const hh = Math.round(o.width ? o.width(0.1, half) : half); p.set(gx, cy - hh + off, '#ffffff'); }
+  if (x1 - x0 > 6) { const gx = x0 + 2, off = o.curve ? Math.round(o.curve(2 / (x1 - x0))) : 0; const hh = Math.round(o.width ? o.width(0.1, half) : half); p.set(gx, cy - hh + off, GLINT); }
 }
 // crossguard: lit top, shaded underside, darker quillon tips
 function guard(p, x, cy, half, T, w = 2) {
@@ -94,7 +97,7 @@ function grip(p, x0, x1, cy, col = GRIP, thick = 2) {
 function sizer(s) { const g = s.sz || 1; return { g, G: (v) => Math.max(1, Math.round(v * g)), odd: (w) => 2 * Math.round(((w - 1) / 2) * g) + 1 }; }
 function pommel(p, x, cy, T, g = 1) {
   const R = trimR(T);
-  if (g > 1.3) { const r = 1.6 * g; p.disc(x + 0.5, cy + 0.5, r, R.m); p.disc(x, cy, r * 0.55, R.l); p.set(x - 1, cy - 1, '#ffffff'); p.set(x + Math.round(r * 0.6), cy + Math.round(r * 0.6), R.dd); return; }
+  if (g > 1.3) { const r = 1.6 * g; p.disc(x + 0.5, cy + 0.5, r, R.m); p.disc(x, cy, r * 0.55, R.l); p.set(x - 1, cy - 1, GLINT); p.set(x + Math.round(r * 0.6), cy + Math.round(r * 0.6), R.dd); return; }
   p.set(x, cy - 1, R.l); p.set(x + 1, cy - 1, R.m); p.set(x - 1, cy, R.m); p.set(x, cy, R.l); p.set(x + 1, cy, R.m);
   p.set(x, cy + 1, R.d); p.set(x + 1, cy + 1, R.dd); p.set(x - 1, cy - 1 + 1, R.d);
 }
@@ -112,7 +115,7 @@ const GEN = {
   // grows its geometry natively by it; 1-px edges, glints and wraps stay 1 px
   sword(s) {
     const b = s.base || 'Arming Sword', z = sizer(s);
-    const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
+    const M = metal(s.color || '#828882'), T = C(tone(s.trim || '#c99a3a')), gl = edgeGlow(s);
     const cfg = {
       'Arming Sword': { L: 19, w: 5, fuller: true },
       Longsword: { L: 24, w: 5, fuller: true, gripL: 7 },
@@ -141,7 +144,7 @@ const GEN = {
   },
   greatsword(s) {
     const b = s.base || 'Greatsword', z = sizer(s);
-    const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
+    const M = metal(s.color || '#828882'), T = C(tone(s.trim || '#c99a3a')), gl = edgeGlow(s);
     const cfg = {
       Greatsword: { L: 27, w: 7, fuller: true },
       Zweihander: { L: 30, w: 7, fuller: true, hooks: true },
@@ -169,7 +172,7 @@ const GEN = {
   },
   dagger(s) {
     const b = s.base || 'Dagger', z = sizer(s);
-    const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
+    const M = metal(s.color || '#828882'), T = C(tone(s.trim || '#c99a3a')), gl = edgeGlow(s);
     const cfg = {
       Dagger: { L: 11, w: 5 }, Kris: { L: 13, w: 5, curve: (t) => Math.round(Math.sin(t * 11)) * 0.8 * z.g },
       Stiletto: { L: 14, w: 3 }, Dirk: { L: 13, w: 5, fuller: true }, 'Sickle-Knife': { L: 11, w: 5, curve: (t) => t * t * 6 * z.g },
@@ -185,13 +188,13 @@ const GEN = {
   },
   mace(s) {
     const b = s.base || 'Mace', z = sizer(s), G = z.G;
-    const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
+    const M = metal(s.color || '#828882'), T = C(tone(s.trim || '#c99a3a')), gl = edgeGlow(s);
     const L = G(18), H = z.odd(23), cy = H >> 1, pr = G(2), W = 2 + pr + G(4) + L + G(14), ox = 2 + pr + G(1);
     const p = mk(W, H, ox, cy), e = mk(W, H, ox, cy);
     pommel(p, 1 + pr - 1, cy, T, z.g);
     const g0 = 2 + pr, g1 = g0 + G(4) - 1;
     grip(p, g0, g1, cy, GRIP, G(2));
-    shaft(p, g1 + 1, g1 + L - 2, cy - 1, dark(s.color || '#8a8a8a', 0.8), G(2));
+    shaft(p, g1 + 1, g1 + L - 2, cy - 1, dark(tone(s.color || '#827d82'), 0.8), G(2));
     const R = trimR(T);
     p.rect(g1 + 1, cy - 1, 1, G(2), R.m); p.set(g1 + 1, cy - 2, R.l);           // collar above the grip
     const hx = g1 + L + G(2);
@@ -205,8 +208,8 @@ const GEN = {
       for (let x = hx + a; x <= hx + a + G(5); x++) { const hh = x < hx + a + G(3) ? G(1) : 0; for (let y = cy - hh; y <= cy + hh; y++) p.set(x, y, y < cy ? M.hi : y > cy ? M.lo : M.edge); }
       p.rect(hx - a - G(2), cy - G(3), G(2), G(8), R.m); p.rect(hx - a - G(2), cy - G(3), 1, G(8), R.l);
     } else if (b === 'Scepter-Mace') {
-      const gem = C(s.element ? ELEM_GLOW[s.element] || '#ff4060' : '#ff4060');
-      p.disc(hx, cy + 0.5, 5 * z.g, R.m); p.disc(hx - G(1), cy - 0.5, 3 * z.g, R.l); p.disc(hx, cy + 0.5, 2.6 * z.g, gem); p.set(hx - G(1), cy - G(1), '#ffffff');
+      const gem = C(s.element ? ELEM_GLOW[s.element] || '#cc6a86' : '#cc6a86');
+      p.disc(hx, cy + 0.5, 5 * z.g, R.m); p.disc(hx - G(1), cy - 0.5, 3 * z.g, R.l); p.disc(hx, cy + 0.5, 2.6 * z.g, gem); p.set(hx - G(1), cy - G(1), GLINT);
       e.disc(hx, cy + 0.5, 2.6 * z.g, gem);
       for (const [dx, dy] of [[6, 0], [-1, -6], [-1, 7], [4, -4], [4, 5]]) { p.set(hx + G(dx), cy + G(dy), R.l); p.set(hx + G(dx), cy + G(dy) + 1, R.d); }
     } else {
@@ -222,7 +225,7 @@ const GEN = {
     return done(p, e, { len: hx - ox + G(2) });
   },
   club(s) {
-    const col = C(s.color || '#6a4a2a'), z = sizer(s), G = z.G;
+    const col = C(tone(s.color || '#77492f')), z = sizer(s), G = z.G;
     const Ln = G(33), H = z.odd(19), cy = H >> 1, W = Ln + 2;
     const p = mk(W, H, G(3), cy), e = mk(W, H, G(3), cy);
     for (let x = 1; x < Ln; x++) {
@@ -236,7 +239,7 @@ const GEN = {
   },
   spear(s) {
     const b = s.base || 'Spear', z = sizer(s), G = z.G;
-    const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
+    const M = metal(s.color || '#828882'), T = C(tone(s.trim || '#c99a3a')), gl = edgeGlow(s);
     const L = G(32), H = z.odd(19), cy = H >> 1, W = L + G(19), ox = G(10);
     const p = mk(W, H, ox, cy), e = mk(W, H, ox, cy);
     const R = trimR(T), th = G(2);
@@ -259,7 +262,7 @@ const GEN = {
   },
   halberd(s) {
     const b = s.base || 'Halberd', z = sizer(s), G = z.G;
-    const M = metal(s.color || '#9aa4ae'), T = C(s.trim || '#c8a050'), gl = edgeGlow(s);
+    const M = metal(s.color || '#828882'), T = C(tone(s.trim || '#c99a3a')), gl = edgeGlow(s);
     const L = G(35), H = z.odd(33), cy = H >> 1, W = L + G(19), ox = G(11);
     const p = mk(W, H, ox, cy), e = mk(W, H, ox, cy);
     const R = trimR(T), th = G(2);
@@ -297,11 +300,11 @@ const GEN = {
   },
   staff(s) {
     const b = s.base || 'Staff', z = sizer(s), G = z.G;
-    const T = C(s.trim || '#c8a050'), R = trimR(T);
-    const orb = C(s.element && ELEM_GLOW[s.element] ? ELEM_GLOW[s.element] : s.orb || '#a080ff');
+    const T = C(tone(s.trim || '#c99a3a')), R = trimR(T);
+    const orb = C(s.element && ELEM_GLOW[s.element] ? ELEM_GLOW[s.element] : s.orb || '#c860f0');
     const L = G(32), H = z.odd(19), cy = H >> 1, W = L + G(14), ox = G(13);
     const p = mk(W, H, ox, cy), e = mk(W, H, ox, cy);
-    const wood = b === 'Rod of Office' ? T : b === 'Battle Staff' ? C('#5a5048') : WOOD;
+    const wood = b === 'Rod of Office' ? T : b === 'Battle Staff' ? C('#4e4b53') : WOOD;
     const th = G(3), t0 = cy - (th >> 1);
     for (let x = 0; x <= L; x++) {
       const wob = b === 'Elder Staff' ? Math.round(Math.sin(x * 0.45 / z.g) * 0.8 * z.g) : 0;
@@ -317,16 +320,16 @@ const GEN = {
     p.set(L + G(4), cy - G(6), R.l); p.set(L + G(4), cy + G(6), R.dd);
     if (b === 'Elder Staff') { p.line(L, cy, L + G(6), cy - G(6), wood, G(2)); p.line(L + G(6), cy - G(6), L + G(9), cy - G(1), wood, G(2)); p.set(L + G(6), cy - G(7), light(wood, 1.3)); }
     const r = 4.2 * z.g;
-    p.disc(ocx + 0.5, cy + 0.5, r, orb); p.disc(ocx - 0.5, cy - 0.5, r * 0.57, mixc(orb, '#ffffff', 0.35));
-    p.set(ocx - G(1), cy - G(2), '#ffffff'); p.set(ocx - G(2), cy - G(1), mixc(orb, '#ffffff', 0.7)); p.set(ocx + G(2), cy + G(3), dark(orb, 0.7)); p.set(ocx + G(3), cy + G(2), dark(orb, 0.75));
-    e.disc(ocx + 0.5, cy + 0.5, r, orb); e.disc(ocx - 0.5, cy - 0.5, r * 0.48, '#ffffff');
+    p.disc(ocx + 0.5, cy + 0.5, r, orb); p.disc(ocx - 0.5, cy - 0.5, r * 0.57, mixc(orb, '#fff4fb', 0.35));
+    p.set(ocx - G(1), cy - G(2), '#fff4fb'); p.set(ocx - G(2), cy - G(1), mixc(orb, '#fff4fb', 0.7)); p.set(ocx + G(2), cy + G(3), dark(orb, 0.7)); p.set(ocx + G(3), cy + G(2), dark(orb, 0.75));
+    e.disc(ocx + 0.5, cy + 0.5, r, orb); e.disc(ocx - 0.5, cy - 0.5, r * 0.48, '#fff4fb');
     return done(p, e, { len: ocx - ox, orb: [ocx - ox, 0], orbColor: orb });
   },
   wand(s) {
     const b = s.base || 'Wand';
-    const T = C(s.trim || '#c8a050'), R = trimR(T);
-    const orb = C(s.element && ELEM_GLOW[s.element] ? ELEM_GLOW[s.element] : '#c0a0ff');
-    const wood = b === 'Bone Wand' ? C('#e0d8c4') : b === 'Crystal Wand' ? mixc(orb, '#ffffff', 0.4) : b === 'Willow Wand' ? C('#8a7a4a') : C('#4a3020');
+    const T = C(tone(s.trim || '#c99a3a')), R = trimR(T);
+    const orb = C(s.element && ELEM_GLOW[s.element] ? ELEM_GLOW[s.element] : '#c860f0');
+    const wood = b === 'Bone Wand' ? C('#efdab4') : b === 'Crystal Wand' ? mixc(orb, '#fff4fb', 0.4) : b === 'Willow Wand' ? C('#94603c') : C('#5a3628');
     const W = 24, H = 13, cy = 6;
     const p = mk(W, H, 3, cy), e = mk(W, H, 3, cy);
     for (let x = 1; x <= 16; x++) {
@@ -336,7 +339,7 @@ const GEN = {
     }
     if (b === 'Rune Wand') for (let x = 6; x <= 16; x += 3) e.set(x, cy, orb);
     p.rect(6, cy - 1, 1, 4, R.m); p.set(6, cy - 1, R.l); p.set(7, cy - 1, R.d); p.set(7, cy + 2, R.d);
-    p.disc(19, cy + 0.5, 2.7, orb); p.set(18, cy - 1, '#ffffff'); p.set(20, cy + 2, dark(orb, 0.7));
+    p.disc(19, cy + 0.5, 2.7, orb); p.set(18, cy - 1, '#fff4fb'); p.set(20, cy + 2, dark(orb, 0.7));
     e.disc(19, cy + 0.5, 2.7, orb);
     return done(p, e, { len: 16, orb: [16, 0], orbColor: orb });
   },
@@ -344,8 +347,8 @@ const GEN = {
   bow(s) {
     const b = s.base || 'Shortbow';
     const draw = s.draw || 0;
-    const wood = b === 'Composite Bow' ? C('#c8b080') : b === 'Warbow' ? C('#5a3a22') : WOOD;
-    const T = C(s.trim || '#c8a050'), gl = edgeGlow(s), R = trimR(T);
+    const wood = b === 'Composite Bow' ? C('#cfa978') : b === 'Warbow' ? C('#5a3628') : WOOD;
+    const T = C(tone(s.trim || '#c99a3a')), gl = edgeGlow(s), R = trimR(T);
     const Hh = b === 'Longbow' || b === 'Warbow' ? 16 : b === 'Shortbow' || b === 'Hunting Bow' ? 11 : 13;
     const W = 35, H = Hh * 2 + 7, cy = Hh + 3;
     const gx = 19;            // grip column
@@ -368,20 +371,20 @@ const GEN = {
     for (const yy of [-Hh, Hh]) { p.set(pts[yy < 0 ? 0 : pts.length - 1][0], cy + yy, R.l); }
     const tipX = pts[0][0], nock = gx - bend - pull;
     // string: two segments meeting at the nock point
-    p.line(tipX, cy - Hh, nock, cy, '#e8e0d0');
-    p.line(tipX, cy + Hh, nock, cy, '#e8e0d0');
+    p.line(tipX, cy - Hh, nock, cy, STRING);
+    p.line(tipX, cy + Hh, nock, cy, STRING);
     // nocked arrow
     if (draw > 0.05) {
-      p.line(nock, cy, gx + 10, cy, '#c8a878');
-      p.set(gx + 10, cy, '#d8dce4'); p.set(gx + 11, cy, '#ffffff'); p.set(gx + 12, cy, '#e8ecf0');
-      p.set(gx + 9, cy - 1, '#a8acb4'); p.set(gx + 9, cy + 1, '#a8acb4'); p.set(gx + 10, cy - 1, '#c8ccd4');
+      p.line(nock, cy, gx + 10, cy, '#b07e52');
+      p.set(gx + 10, cy, '#b6bdbd'); p.set(gx + 11, cy, GLINT); p.set(gx + 12, cy, '#e2e6e0');
+      p.set(gx + 9, cy - 1, '#828882'); p.set(gx + 9, cy + 1, '#6a7276'); p.set(gx + 10, cy - 1, '#b6bdbd');
       p.set(nock + 1, cy - 1, R.m); p.set(nock + 2, cy - 1, R.m); p.set(nock + 1, cy + 1, R.d); p.set(nock + 2, cy + 1, R.d);
       if (gl) { e.set(gx + 11, cy, gl); e.set(gx + 10, cy, gl); e.set(gx + 12, cy, gl); }
     }
     return done(p, e, { len: 10, bow: true });
   },
   crossbow(s) {
-    const T = C(s.trim || '#c8a050'), M = metal(s.color || '#9aa4ae'), gl = edgeGlow(s), R = trimR(T);
+    const T = C(tone(s.trim || '#c99a3a')), M = metal(s.color || '#828882'), gl = edgeGlow(s), R = trimR(T);
     const loaded = s.draw !== 0;
     const W = 35, H = 29, cy = 14;
     const p = mk(W, H, 10, cy), e = mk(W, H, 10, cy);
@@ -395,8 +398,8 @@ const GEN = {
     for (let y = -11; y <= 11; y++) { const x = px - Math.round(Math.abs(y) * 0.3); const c = Math.abs(y) < 3 ? R.m : y < 0 ? M.hi : M.lo; p.set(x, cy + y, c); p.set(x + 1, cy + y, Math.abs(y) < 3 ? R.d : M.md); }
     p.line(px + 2, cy - 2, px + 5, cy - 2, M.mid); p.line(px + 2, cy + 2, px + 5, cy + 2, M.lo); p.line(px + 5, cy - 2, px + 5, cy + 2, M.mid);
     const sx = loaded ? 11 : px - 1;
-    p.line(px - 3, cy - 11, sx, cy - 1, '#e8e0d0'); p.line(px - 3, cy + 11, sx, cy - 1, '#e8e0d0');
-    if (loaded) { p.line(sx, cy - 2, px + 6, cy - 2, '#c8a878'); p.set(px + 6, cy - 2, M.edge); p.set(px + 7, cy - 2, '#ffffff'); p.set(px + 5, cy - 3, M.hi); if (gl) { e.set(px + 7, cy - 2, gl); e.set(px + 6, cy - 2, gl); } }
+    p.line(px - 3, cy - 11, sx, cy - 1, STRING); p.line(px - 3, cy + 11, sx, cy - 1, STRING);
+    if (loaded) { p.line(sx, cy - 2, px + 6, cy - 2, '#b07e52'); p.set(px + 6, cy - 2, M.edge); p.set(px + 7, cy - 2, GLINT); p.set(px + 5, cy - 3, M.hi); if (gl) { e.set(px + 7, cy - 2, gl); e.set(px + 6, cy - 2, gl); } }
     // trigger and lock
     p.set(14, cy + 2, M.lo); p.set(14, cy + 3, M.lo); p.set(15, cy + 4, M.mid); p.rect(12, cy - 1, 3, 2, M.mid); p.set(12, cy - 1, M.hi);
     return done(p, e, { len: 16 });
@@ -410,9 +413,10 @@ export function shieldSprite(spec) {
   let s = cache.get(key);
   if (s) return s;
   const b = spec.base || 'Round Shield';
-  const M = metal(spec.color || '#8a8a8a'), T = C(spec.trim || '#c8a050'), TR = trimR(T);
-  const face = C(spec.face || mixc(spec.color || '#8a8a8a', '#6a3a2a', 0.45));
-  const emb = spec.emblem ? C(spec.emblem) : null;
+  const M = metal(spec.color || '#827d82'), T = C(tone(spec.trim || '#c99a3a')), TR = trimR(T);
+  // the painted face: a cloth colour from the palette, darkened toward the shield's metal
+  const face = C(tone(spec.face || mixc(tone(spec.color || '#827d82'), '#60282c', 0.5)));
+  const emb = spec.emblem ? C(tone(spec.emblem)) : null;
   const shapes = {
     Buckler: { w: 11, h: 11, kind: 'round' }, 'Round Shield': { w: 17, h: 17, kind: 'round' }, 'Kite Shield': { w: 16, h: 22, kind: 'kite' },
     'Heater Shield': { w: 16, h: 19, kind: 'heater' }, 'Tower Shield': { w: 17, h: 26, kind: 'tower' }, Pavise: { w: 19, h: 26, kind: 'tower' },
@@ -475,19 +479,19 @@ export function tomeSprite(color = '#6a2a20', glow = '#ffd080') {
   const key = 'tome' + color + glow;
   let s = cache.get(key);
   if (s) return s;
-  const c = C(color), g = C(glow);
+  const c = C(tone(color)), g = C(glow);
   const p = mk(15, 15, 7, 13), e = mk(15, 15, 7, 13);
   // cover with a lit top edge and a dark lower edge, a spine, page edges, corner caps
   p.rect(1, 1, 12, 12, c);
   p.rect(1, 1, 12, 1, light(c, 1.3)); p.rect(1, 12, 12, 1, dark(c, 0.6)); p.rect(12, 2, 1, 10, dark(c, 0.72));
-  p.rect(13, 2, 1, 11, '#e8e0c8'); p.rect(2, 13, 11, 1, '#d8ccb0'); p.set(13, 12, '#c0b498');
-  for (let y = 3; y < 12; y += 2) p.set(13, y, '#c8bca0');
+  p.rect(13, 2, 1, 11, '#efdab4'); p.rect(2, 13, 11, 1, '#e2c494'); p.set(13, 12, '#cfa978');
+  for (let y = 3; y < 12; y += 2) p.set(13, y, '#cfa978');
   p.rect(1, 1, 2, 12, dark(c, 0.7)); p.rect(1, 1, 1, 12, dark(c, 0.55));
-  for (const [x, y] of [[3, 1], [11, 1], [3, 12], [11, 12]]) p.set(x, y, '#e8c060');
+  for (const [x, y] of [[3, 1], [11, 1], [3, 12], [11, 12]]) p.set(x, y, '#e8c35a');
   // a glowing rune on the cover
   const rune = [[7, 3], [7, 4], [6, 5], [8, 5], [5, 6], [9, 6], [7, 6], [6, 7], [8, 7], [7, 8], [7, 9], [7, 10]];
   for (const [x, y] of rune) { p.set(x, y, g); e.set(x, y, g); }
-  e.set(7, 6, '#ffffff'); p.set(7, 6, mixc(g, '#ffffff', 0.6));
+  e.set(7, 6, '#fff4fb'); p.set(7, 6, mixc(g, '#fff4fb', 0.6));
   p.outline();
   s = { pix: p, emis: e };
   cache.set(key, s);
@@ -499,31 +503,31 @@ export function ammoSprite(kind, color) {
   const key = 'ammo' + kind + color;
   let s = cache.get(key);
   if (s) return s;
-  const c = C(color || '#e8dcc0');
+  const c = C(color || '#efdab4');
   let p, e = null;
   if (kind === 'arrow' || kind === 'bolt') {
     const L = kind === 'bolt' ? 13 : 16;
     p = mk(L + 3, 7, Math.floor(L / 2), 3);
-    p.line(2, 3, L - 2, 3, '#c8a878'); p.line(4, 3, L - 3, 3, '#b89868');
+    p.line(2, 3, L - 2, 3, '#b07e52'); p.line(4, 3, L - 3, 3, '#94603c');
     // head
-    p.set(L, 3, '#ffffff'); p.set(L - 1, 3, '#e8ecf0'); p.set(L - 2, 2, '#c8ccd4'); p.set(L - 2, 4, '#8a8e96'); p.set(L - 3, 2, '#a8acb4'); p.set(L - 3, 4, '#7a7e86');
+    p.set(L, 3, GLINT); p.set(L - 1, 3, '#e2e6e0'); p.set(L - 2, 2, '#b6bdbd'); p.set(L - 2, 4, '#6a7276'); p.set(L - 3, 2, '#828882'); p.set(L - 3, 4, '#4a5259');
     // fletching
     p.set(1, 2, c); p.set(2, 2, c); p.set(3, 2, light(c, 1.15)); p.set(0, 1, c); p.set(1, 1, c);
     p.set(1, 4, dark(c, 0.8)); p.set(2, 4, dark(c, 0.8)); p.set(3, 4, c); p.set(0, 5, dark(c, 0.8)); p.set(1, 5, dark(c, 0.8));
-    if (color && color !== '#e8dcc0') { e = mk(p.w, p.h, p.ox, p.oy); e.set(L, 3, c); e.set(L - 1, 3, c); e.set(L - 2, 2, c); e.set(L - 2, 4, c); }
+    if (color && color !== '#efdab4') { e = mk(p.w, p.h, p.ox, p.oy); e.set(L, 3, c); e.set(L - 1, 3, c); e.set(L - 2, 2, c); e.set(L - 2, 4, c); }
   } else if (kind === 'shard' || kind === 'thorn') {
     p = mk(16, 8, 8, 4);
     p.poly([[1, 4], [8, 1], [15.5, 4.5], [8, 7.5]], c);
     p.poly([[3, 4], [8, 2], [13, 4]], light(c, 1.25));
     p.line(3, 4, 13, 4, light(c, 1.5)); p.line(5, 5, 12, 5, dark(c, 0.8));
-    p.set(14, 4, '#ffffff');
+    p.set(14, 4, '#fff4fb');
     e = p.clone();
   } else {
     p = mk(15, 15, 7, 7);
-    p.disc(7.5, 7.5, 5.8, c); p.disc(7, 7, 4, light(c, 1.25)); p.disc(6.5, 6.5, 2.2, light(c, 1.5)); p.set(5, 5, '#ffffff'); p.set(6, 5, '#ffffff');
+    p.disc(7.5, 7.5, 5.8, c); p.disc(7, 7, 4, light(c, 1.25)); p.disc(6.5, 6.5, 2.2, light(c, 1.5)); p.set(5, 5, '#fff4fb'); p.set(6, 5, '#fff4fb');
     e = p.clone();
   }
-  p.outline(dark(c, 0.4));
+  p.outline();
   s = { pix: p, emis: e };
   cache.set(key, s);
   return s;

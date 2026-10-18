@@ -10,7 +10,7 @@ export const RACES = [
       { id: 'adaptable', name: 'Adaptable', desc: '+10% experience from all sources.' },
       { id: 'silver_tongue', name: 'Silver Tongue', desc: 'Merchants give 10% better prices.' },
     ],
-    look: { skin: ['#e8c4a0', '#c89878', '#8a5a3a'], hair: ['#3a2a1e', '#8a6a3a', '#d8b878', '#2a1a14'], scale: 1.0, build: 1.0 },
+    look: { skin: ['#f0bea0', '#d9967e', '#8a5048'], hair: ['#3f2622', '#94603c', '#e2c494', '#2a1a1c'], scale: 1.0, build: 1.0 },
     prologue: [
       'The bells of Aurelion\'s Rest ring once at dawn, as they have every dawn since the empire died.',
       'You were born in a house built from a fallen temple\'s stones. Gilded letters on the lintel still praise a god nobody remembers.',
@@ -28,7 +28,7 @@ export const RACES = [
       { id: 'ember_blood', name: 'Ember Blood', desc: '+25% fire resistance. Fire spells cost 10% less mana.' },
       { id: 'heat_walker', name: 'Heat Walker', desc: 'Immune to sandstorm slow. Desert heat never tires you.' },
     ],
-    look: { skin: ['#5a2a22', '#3a1a18', '#6a3020'], hair: ['#1a0a08', '#ff7030'], glowSkin: '#ff6a20', scale: 1.0, build: 1.0 },
+    look: { skin: ['#60323a', '#3b1e22', '#662b2c'], hair: ['#2a0e18', '#ec7a2a'], glowSkin: '#ec7a2a', scale: 1.0, build: 1.0 },
     prologue: [
       'The well at Emberwell has never run with water. It runs with a slow, golden flame that the Ashborn drink to keep their embers lit.',
       'This morning the flame guttered. Elder Sarqa says something below the cistern is drinking it first.',
@@ -45,7 +45,7 @@ export const RACES = [
       { id: 'keen_sight', name: 'Keen Sight', desc: '+8% critical chance with bows and crossbows.' },
       { id: 'old_blood', name: 'Old Blood', desc: '+15% nature resistance. Night does not dim your vision.' },
     ],
-    look: { skin: ['#f0dcc0', '#d8c0a0', '#c0a888'], hair: ['#e8e0c0', '#2a3a2a', '#a8582a', '#c8c8d0'], ears: 'long', scale: 1.04, build: 0.88 },
+    look: { skin: ['#ecc6a8', '#f0bea0', '#d9a08a'], hair: ['#efdab4', '#22341f', '#8a4238', '#c4bdb6'], ears: 'long', scale: 1.04, build: 0.88 },
     prologue: [
       'Sylvanhold hangs between the boughs of trees that were saplings when the first emperor was crowned.',
       'The roots under the city have begun to rot. The Wardens blame a blight. The old songs blame something that woke when the crown broke.',
@@ -62,7 +62,7 @@ export const RACES = [
       { id: 'stoneblood', name: 'Stoneblood', desc: '+10% armor. +20% frost resistance.' },
       { id: 'master_smith', name: 'Master Smith', desc: 'Blacksmith upgrades cost 25% less.' },
     ],
-    look: { skin: ['#e0b090', '#c08868', '#a07050'], hair: ['#8a3a1a', '#2a1a14', '#c8c8c8', '#d8a050'], beard: true, scale: 0.78, build: 1.35 },
+    look: { skin: ['#d9967e', '#b07062', '#9c615b'], hair: ['#8a4238', '#2a1a1c', '#c4bdb6', '#c99a3a'], beard: true, scale: 0.78, build: 1.35 },
     prologue: [
       'The great gate of Kharak Dun opened for the first time in three hundred years, and the cold rushed in like a creditor.',
       'Something is moving in the old mines below the forge, and it has been eating the lanterns.',
@@ -79,7 +79,7 @@ export const RACES = [
       { id: 'bloodrush', name: 'Bloodrush', desc: 'Below 35% health, deal 20% more damage.' },
       { id: 'thick_hide', name: 'Thick Hide', desc: '+15% max health. +10% lightning resistance.' },
     ],
-    look: { skin: ['#5a7a4a', '#4a6a3a', '#6a6a4a', '#7a5a4a'], hair: ['#1a1a14', '#3a2a1a'], tusks: true, scale: 1.1, build: 1.3 },
+    look: { skin: ['#557048', '#4a6e36', '#6f8a52', '#7b576f'], hair: ['#152018', '#2a1a1c'], tusks: true, scale: 1.1, build: 1.3 },
     prologue: [
       'In the clans, the young earn their names in the Trial Caves beneath Skarrow, where the frost bears sleep.',
       'This year the bears do not sleep. They come down from the caves maddened, with frost in their eyes and the smell of the Deep on their breath.',
@@ -96,7 +96,7 @@ export const RACES = [
       { id: 'gills', name: 'Gills', desc: 'Move freely through deep water. +15% water and frost resistance.' },
       { id: 'tidecaller', name: 'Tidecaller', desc: 'In rain or fog, regenerate 2% health per second out of combat.' },
     ],
-    look: { skin: ['#5a9aa0', '#4a8a9a', '#6aa0a8', '#3a7a8a'], hair: ['#1a3a4a', '#c8e0e0', '#2a5a5a'], fins: true, scale: 1.0, build: 0.95 },
+    look: { skin: ['#4a9488', '#2f7070', '#7cbca8', '#396586'], hair: ['#172d50', '#c4bdb6', '#245458'], fins: true, scale: 1.0, build: 0.95 },
     prologue: [
       'Under the Drowned Coast the old temples still ring their bells. Only the Tidekin can hear them.',
       'Last night the bells stopped. Then the smugglers of Brinehollow\'s caves started pulling sealed reliquaries out of the deep.',
@@ -113,7 +113,7 @@ export const RACES = [
       { id: 'marble_skin', name: 'Marble Skin', desc: '+15% armor. Immune to bleed.' },
       { id: 'unmoving', name: 'Unmoving', desc: 'Cannot be knocked back. Blocking costs 25% less stamina.' },
     ],
-    look: { skin: ['#d8d0c0', '#c8c0b0', '#b8b0a0', '#9a9488'], hair: ['#c8c0b0', '#b0a890'], stone: true, scale: 1.08, build: 1.2 },
+    look: { skin: ['#c4bdb6', '#a29c9c', '#b6bdbd', '#827d82'], hair: ['#c4bdb6', '#a29c9c'], stone: true, scale: 1.08, build: 1.2 },
     prologue: [
       'You remember one order, carved behind your eyes: GUARD THE HEIR.',
       'You woke in the Hall of Effigies with a crack running down your chest and dust in your joints. A thousand other statues stood around you, and none of them were breathing.',
@@ -130,7 +130,7 @@ export const RACES = [
       { id: 'glamour', name: 'Glamour', desc: '15% chance for enemies to lose track of you after a dodge.' },
       { id: 'fae_luck', name: 'Fae Luck', desc: '+15% chance to find higher-rarity loot.' },
     ],
-    look: { skin: ['#e8d8f0', '#d0e8d8', '#f0d8e0'], hair: ['#c070ff', '#70e0c0', '#f0a0d0', '#ffffff'], wings: true, glowSkin: '#c080ff', scale: 0.95, build: 0.85 },
+    look: { skin: ['#c8a4dc', '#7cbca8', '#f4bccf'], hair: ['#a87cc0', '#4a9488', '#e48fb0', '#f3e1b5'], wings: true, glowSkin: '#c860f0', scale: 0.95, build: 0.85 },
     prologue: [
       'You don\'t remember being born. You remember a ring of mushrooms, a song, and waking up a hundred years later with the song still stuck in your head.',
       'The spore-caves of Mirewisp Hollow have begun to glow out of season. The fae who live there only bloom like that when a queen is dying.',
@@ -147,7 +147,7 @@ export const RACES = [
       { id: 'predator', name: 'Predator', desc: '+15% damage to enemies below 50% health.' },
       { id: 'swift', name: 'Swift', desc: '+8% movement speed. Dodge costs 15% less stamina.' },
     ],
-    look: { skin: ['#a87a50', '#6a5a4a', '#c8a070', '#3a3030'], hair: ['#a87a50', '#2a2020', '#e8e0d0', '#c86a30'], beastEars: true, tail: true, scale: 1.0, build: 1.0 },
+    look: { skin: ['#b07e52', '#5e4a47', '#cfa978', '#3f2622'], hair: ['#b07e52', '#2a1a1c', '#efdab4', '#b04a3e'], beastEars: true, tail: true, scale: 1.0, build: 1.0 },
     prologue: [
       'The tide brought the dead crabs first. Then the dead gulls. Then something large enough to swallow a boat, glimpsed once beneath the Saltfang tidepools.',
       'Your pack lives by the tide. When it turns against you, someone must go into the pools and bite back.',
@@ -163,7 +163,7 @@ export const RACES = [
       { id: 'deathless', name: 'Deathless', desc: 'Once per 5 minutes, survive a killing blow with 1 health.' },
       { id: 'grave_chill', name: 'Grave Chill', desc: '+25% rot and frost resistance. Healing received is 10% weaker.' },
     ],
-    look: { skin: ['#a8b0b0', '#98a0a8', '#b0a8a0'], hair: ['#d0d0d0', '#2a2a30', '#5a5a60'], eyesGlow: '#80e0ff', scale: 1.0, build: 0.9 },
+    look: { skin: ['#b6bdbd', '#96a2bc', '#a29c9c'], hair: ['#c4bdb6', '#2f2c38', '#4e4b53'], eyesGlow: '#8cc8ec', scale: 1.0, build: 0.9 },
     prologue: [
       'You died in the year the crown broke. You remember the cold, a voice, and a door that would not stay shut.',
       'The Choir found you clawing your way out of a burial niche in the Ossuary of Kings, three centuries late.',
@@ -180,7 +180,7 @@ export const RACES = [
       { id: 'draconic_scales', name: 'Draconic Scales', desc: '+8% armor and +15% fire resistance.' },
       { id: 'ancestral_roar', name: 'Ancestral Roar', desc: 'Your first hit on each enemy deals 25% more damage.' },
     ],
-    look: { skin: ['#8a3a2a', '#3a5a4a', '#5a3a6a', '#2a2a3a', '#a0702a'], hair: ['#1a1a1a'], horns: true, scales: true, scale: 1.08, build: 1.1 },
+    look: { skin: ['#8a3434', '#245458', '#4a3266', '#2a3240', '#9a6424'], hair: ['#1f1d26'], horns: true, scales: true, scale: 1.08, build: 1.1 },
     prologue: [
       'The Cinder Spire was the last aerie of Aurelion\'s dragons. Its stones are still warm.',
       'You were raised on stories of wings. Last night you dreamed of them, and woke with your horns smoking.',
@@ -197,7 +197,7 @@ export const RACES = [
       { id: 'void_sight', name: 'Void Sight', desc: 'See hidden shrines and secret passages from twice as far away.' },
       { id: 'abyssal', name: 'Abyssal', desc: '+25% void resistance. Spells have a 10% chance to cost no mana.' },
     ],
-    look: { skin: ['#4a4a5a', '#3a3a4a', '#5a5060'], hair: ['#0a0a10', '#e0e0ff', '#5a3a7a'], voidMarks: '#a070ff', eyesGlow: '#c090ff', scale: 1.0, build: 0.95 },
+    look: { skin: ['#4e4b53', '#2f2c38', '#674952'], hair: ['#1f1d26', '#c8a4dc', '#4a3266'], voidMarks: '#c860f0', eyesGlow: '#f5afd6', scale: 1.0, build: 0.95 },
     prologue: [
       'Riftwatch was built to watch the Maw. You were born in the shadow of its wall, and the marks on your skin have glowed ever since.',
       'Three nights ago the Maw exhaled. The watchmen on the rim lost their voices. Something climbed up through the Rim Caverns, and the marks on your arms have not stopped burning.',
