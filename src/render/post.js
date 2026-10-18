@@ -53,11 +53,14 @@ void main() {
     float m = pow(band, 5.) * smoothstep(1.25, .05, uv.y + uv.x * .45);
     col += rayCol * m * rays * .2;
   }
-  // grade: a touch more contrast and colour, cool shadows, warm highlights
+  // grade (see docs/ART_STYLE.md): shadows lean plum-violet, highlights warm cream, muted
+  // midtones keep their dusty look while saturated accents (aether, eyes, pickups) stay vivid
   float l = dot(col, vec3(.299, .587, .114));
-  col = mix(vec3(l), col, 1. + .1 * grade);
-  col = (col - .5) * (1. + .07 * grade) + .5;
-  col += grade * (vec3(-.012, -.004, .02) * (1. - l) + vec3(.02, .01, -.012) * l);
+  float sat = max(col.r, max(col.g, col.b)) - min(col.r, min(col.g, col.b));
+  col = mix(vec3(l), col, 1. + grade * (.16 * smoothstep(.18, .5, sat) - .05));
+  col = (col - .5) * (1. + .06 * grade) + .5;
+  float sh = smoothstep(.45, 0., l), hi = smoothstep(.55, 1., l);
+  col += grade * (vec3(.016, -.006, .03) * sh + vec3(.018, .01, -.014) * hi);
   o = vec4(clamp(col, 0., 1.), 1.);
 }`;
 
