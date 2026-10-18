@@ -17,7 +17,7 @@ import { bus } from '../core/events.js';
 import { input } from '../core/input.js';
 import { scene as world, addObject, removeObject } from '../px/scene.js';
 import { view } from '../px/view.js';
-import { Pix, PPU, C, light, dark, mixc, hash2, srand } from '../px/pix.js';
+import { Pix, PPU, ap, C, light, dark, mixc, hash2, srand } from '../px/pix.js';
 import { columnSprite } from '../px/sprites/buildings.js';
 import { dungeonTiles } from '../px/sprites/dprops.js';
 
@@ -77,7 +77,8 @@ function tableSprite() {
 function buildHall() {
   const objs = [];
   const add = (o) => { objs.push(o); addObject(o); return o; };
-  const tiles = dungeonTiles({ name: 'fatehall', floor: '#3a3230', wall: '#2a2422', accent: '#6a5048', layout: 'rooms' }, 36, 26);
+  const FT = Math.round(3.6 * PPU);   // floor tile: 3.6 world units
+  const tiles = dungeonTiles({ name: 'fatehall', floor: '#3a3230', wall: '#2a2422', accent: '#6a5048', layout: 'rooms' }, FT, ap(26));
   const prevGround = world.ground;
   world.ground = (ctx) => {
     ctx.fillStyle = '#0c0a0e'; ctx.fillRect(0, 0, view.W, view.H);
@@ -85,7 +86,7 @@ function buildHall() {
     for (let j = -6; j <= 6; j++) for (let i = -6; i <= 6; i++) {
       if (i * i + j * j > 34) continue;
       const h = ((i * 73856093) ^ (j * 19349663)) >>> 0;
-      ctx.drawImage(tiles.floor[h % 6].canvas(), Math.round(ox + i * 36 - 18), Math.round(oy + j * 36 - 18));
+      ctx.drawImage(tiles.floor[h % 6].canvas(), Math.round(ox + i * FT - FT / 2), Math.round(oy + j * FT - FT / 2));
     }
   };
   // ring of ruined columns
