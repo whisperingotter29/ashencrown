@@ -98,7 +98,7 @@ for (const [body, list] of Object.entries(byBody)) {
     let frames, k;
     if (sp.type === 'human') {
       k = upscaleFor(sp.scale, true);
-      const hs = humanSprites({ ...sp.look, scale: Math.max(0.8, Math.min(3, sp.scale)) });
+      const hs = humanSprites({ ...sp.look, scale: Math.max(0.8, Math.min(7, sp.scale)) });
       frames = [hs.frame('down', {}), hs.frame('side', { legs: 'run', ph: 1, bob: 1, lean: 1 }), hs.frame('up', {})];
       if (sp.weapon) { const w = weaponSprite(sp.weapon); frames.push(w); }
     } else {

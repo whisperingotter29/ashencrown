@@ -184,7 +184,7 @@ export class Actor {
     if (spec.type === 'human') {
       const s = spec.scale || 1;
       this.k = upscaleFor(s, true);
-      const ms = Math.max(0.8, Math.min(3, s));
+      const ms = Math.max(0.8, Math.min(7, s));
       this.look = { ...spec.look, scale: ms };
       this.spr = humanSprites(this.look);
       this.kind = spec.kind || 'humanoid';
