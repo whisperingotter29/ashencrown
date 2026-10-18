@@ -7,9 +7,9 @@
 import { R, requestLight, glowPx, rgbStr } from './renderer.js';
 import { scene } from '../px/scene.js';
 import { view } from '../px/view.js';
-import { PPU, C, bayer, Pix, light, dark } from '../px/pix.js';
+import { PPU, ART, C, bayer, Pix, light, dark } from '../px/pix.js';
 import { ammoSprite } from '../px/sprites/weapons.js';
-import { drawText, textWidth, FONT_H } from '../px/font.js';
+import { drawText, textWidth, fontFor } from '../px/font.js';
 import { G } from '../game.js';
 import { magicOn, gpart, gburst, updateMagic, clearMagic } from './magic.js';
 import { orbFx, shardTrailFx, impactFx, ringFx, pillarFx, boltFx, beamFx, zoneFx, arcFx, flareFx, shellFx } from './spellfx.js';
@@ -125,39 +125,65 @@ function updateParticles(dt) {
     if (p.y < p.gy + 0.02 && p.g < 0) { p.y = p.gy + 0.02; p.vy *= -0.25; p.vx *= 0.6; p.vz *= 0.6; }
   }
 }
-const _c3 = [0, 0, 0];
+const _c3 = [0, 0, 0], _hi = [0, 0, 0], _lo = [0, 0, 0];
+const PMAX_PX = Math.round(4 * ART);          // biggest pixel particle, in art pixels
+// Round pixel blob of diameter n (1 px, 2x2, plus, then clipped discs); solid ones get a lit
+// top-left and a shaded bottom-right pixel rim so dust and debris read as little lumps.
+function blob(layer, x, y, n, c, shaded) {
+  if (n === 1) { layer.px(x, y, c, 1); return; }
+  if (n === 2) { layer.rect(x, y, 2, 2, c, 1); if (shaded) layer.px(x + 1, y + 1, _lo, 1); return; }
+  const r = n / 2, o = (n - 1) / 2;
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const dx = i - o, dy = j - o;
+    if (dx * dx + dy * dy > r * r * 0.85) continue;
+    let cc = c;
+    if (shaded) { const e = dx + dy; if (e >= r * 0.6) cc = _lo; else if (e < -r * 0.9 && n >= 4) cc = _hi; }
+    layer.px(x - Math.floor(o) + i, y - Math.floor(o) + j, cc, 1);
+  }
+}
+// four-point sparkle: white-hot core, coloured arms that fade toward the tips
+function sparkle(layer, x, y, n, c) {
+  const arm = Math.max(1, Math.round(n * 0.55));
+  layer.px(x, y, WHITE, 1);
+  for (let k = 1; k <= arm; k++) {
+    const cc = k === 1 && n >= 5 ? _hi : c, a = k === arm && arm > 1 ? 0.6 : 1;
+    layer.px(x - k, y, cc, a); layer.px(x + k, y, cc, a); layer.px(x, y - k, cc, a); layer.px(x, y + k, cc, a);
+  }
+  if (n >= 5) { layer.px(x - 1, y - 1, c, 0.7); layer.px(x + 1, y - 1, c, 0.7); layer.px(x - 1, y + 1, c, 0.7); layer.px(x + 1, y + 1, c, 0.7); }
+}
 function drawParticles(layer, additive) {
+  const m = PMAX_PX + 2;
   for (const p of vfx.parts) {
     if (p.add !== additive) continue;
     const u = p.age / p.life;
     const x = Math.round(PX(p.x)), y = Math.round(PY(p.z, p.y - p.gy));
-    if (x < -4 || y < -4 || x > layer.w + 4 || y > layer.h + 4) continue;
+    if (x < -m || y < -m || x > layer.w + m || y > layer.h + m) continue;
     const sz = p.size + (p.size1 - p.size) * u;
-    const n = Math.max(1, Math.min(4, Math.round(sz * PPU * 0.45)));
+    const n = Math.max(1, Math.min(PMAX_PX, Math.round(sz * PPU * 0.45)));
     let c = p.c0;
     if (p.c1) { _c3[0] = p.c0[0] + (p.c1[0] - p.c0[0]) * u; _c3[1] = p.c0[1] + (p.c1[1] - p.c0[1]) * u; _c3[2] = p.c0[2] + (p.c1[2] - p.c0[2]) * u; c = _c3; }
     const a = p.a0 * (u > 0.6 ? 1 - (u - 0.6) / 0.4 : 1);
     // dithered fade keeps pixels hard-edged
     if (a < 0.98 && bayer(x, y) > a + 0.1) continue;
-    if (n === 1) layer.px(x, y, c, 1);
-    else if (n === 2) layer.rect(x, y, 2, 2, c, 1);
-    else if (additive && n >= 3) {
-      // little four-point sparkle with a white-hot core
-      layer.px(x, y, WHITE, 1); layer.px(x - 1, y, c, 1); layer.px(x + 1, y, c, 1); layer.px(x, y - 1, c, 1); layer.px(x, y + 1, c, 1);
-      if (n >= 4) { layer.px(x - 2, y, c, 0.6); layer.px(x + 2, y, c, 0.6); layer.px(x, y - 2, c, 0.6); layer.px(x, y + 2, c, 0.6); }
-    } else layer.rect(x - (n >> 1), y - (n >> 1), n, n, c, 1);
+    if (n >= 3) {
+      _hi[0] = Math.min(255, c[0] * 1.2 + 30); _hi[1] = Math.min(255, c[1] * 1.2 + 26); _hi[2] = Math.min(255, c[2] * 1.2 + 20);
+      _lo[0] = c[0] * 0.66; _lo[1] = c[1] * 0.66 + 2; _lo[2] = c[2] * 0.7 + 8;
+    } else if (n === 2) { _lo[0] = c[0] * 0.72; _lo[1] = c[1] * 0.72 + 2; _lo[2] = c[2] * 0.75 + 6; }
+    if (additive && n >= 3) sparkle(layer, x, y, n, c);
+    else blob(layer, x, y, n, c, !additive);
   }
 }
 const WHITE = [255, 255, 255];
 function glowParticles(ctx) {
   let n = 0;
+  const m = 6 * ART;
   for (const p of vfx.parts) {
     if (!p.halo || n > 420) continue;
     const u = p.age / p.life;
     const x = PX(p.x), y = PY(p.z, p.y - p.gy);
-    if (x < -10 || y < -10 || x > view.W + 10 || y > view.H + 10) continue;
+    if (x < -m || y < -m || x > view.W + m || y > view.H + m) continue;
     n++;
-    glowPx(ctx, x + 0.5, y + 0.5, rgbStr(p.c1 && u > 0.5 ? p.c1 : p.c0), Math.max(3, p.size * PPU * 0.9), 0.32 * (1 - u));
+    glowPx(ctx, x + 0.5, y + 0.5, rgbStr(p.c1 && u > 0.5 ? p.c1 : p.c0), Math.max(3 * ART, p.size * PPU * 0.9), 0.32 * (1 - u));
   }
 }
 
@@ -173,12 +199,13 @@ export function slash(x, y, z, facing, o = {}) {
   const a0 = Math.atan2(Math.cos(facing), Math.sin(facing));
   const dir = o.reverse ? -1 : 1;
   const start = a0 - dir * arc / 2, sweep = dir * arc;
-  const c = col(o.color || '#fff0d0'), lc = light(c, 1.3), hi = WHITE;
+  const c = col(o.color || '#fff0d0'), lc = light(c, 1.3), hi = WHITE, dc = dark(c, 0.78);
   const dur = o.dur || 0.16;
   const lift = o.h ?? 0.7;
   const gy = ground(x, z);
   const heavy = (o.dur || 0) >= 0.24;
-  const R0 = r, thickMax = Math.max(4, r * (heavy ? 0.5 : 0.4));
+  const R0 = r, thickMax = Math.max(4 * ART, r * (heavy ? 0.5 : 0.4));
+  const rim = heavy ? 2.6 : 1.5;                                 // white-hot outer edge, in px
   const physical = o.physical ?? (o.color === undefined || /^#(ff(f|e)|c8dcff)/i.test(o.color));
   return addFx({
     update(f, dt) { f.t += dt; return f.t < dur; },
@@ -204,7 +231,8 @@ export function slash(x, y, z, facing, o = {}) {
         if (depth > th) continue;
         if (t < 0.3 && bayer(px, py) > t / 0.3) continue;        // dithered tail
         if (fadeOut < 1 && bayer(px, py) > fadeOut) continue;
-        Ly.px(px, py, depth < (heavy ? 2 : 1.2) || t > 0.93 ? hi : depth < th * 0.45 ? lc : c, 1);
+        // bands from the rim inward: white-hot edge, light, swing colour, a 1px darker inner lip
+        Ly.px(px, py, depth < rim || t > 0.94 ? hi : depth < th * 0.42 ? lc : depth > th - 1 && th > 3 ? dc : c, 1);
       }
     },
     glow(ctx) {
@@ -222,7 +250,7 @@ function thrustStreak(x, y, z, facing, o) {
   const c = col(o.color || '#fff0d0'), lc = light(c, 1.3);
   const ux = Math.sin(facing), uz = Math.cos(facing);
   const lift = o.h ?? 0.7, gy = ground(x, z);
-  const w0 = o.width || 3;
+  const w0 = (o.width || 3) * ART;                               // callers give the width in design px
   return addFx({
     update(f, dt) { f.t += dt; return f.t < dur; },
     glowPx(Ly) {
@@ -247,10 +275,11 @@ function thrustStreak(x, y, z, facing, o) {
 // crisp radial hit spark (melee impacts)
 export function hitSpark(x, y, z, o = {}) {
   if (magicOn() && (o.size || 1) >= 1.5) flareFx(x, y, z, { size: 0.8, color: o.color || '#fff4d0', color2: o.color || '#ffd080', dur: 0.12, star: true });
-  const c = col(o.color || '#fff4d0');
-  const n = o.rays || 6, len = (o.size || 1) * 6, dur = o.dur || 0.14;
+  const c = col(o.color || '#fff4d0'), lc = light(c, 1.2);
+  const n = o.rays || 6, len = (o.size || 1) * 6 * ART, dur = o.dur || 0.14;
   const gy = ground(x, z);
   const rot = Math.random() * Math.PI;
+  const big = (o.size || 1) >= 1.5;
   return addFx({
     update(f, dt) { f.t += dt; return f.t < dur; },
     glowPx(Ly) {
@@ -259,9 +288,22 @@ export function hitSpark(x, y, z, o = {}) {
       for (let k = 0; k < n; k++) {
         const a = rot + k / n * Math.PI * 2, l = len * (k % 2 ? 0.6 : 1);
         const r0 = l * u * 0.8, r1 = l * (0.35 + u * 0.9);
-        for (let s = r0; s <= r1; s += 0.7) Ly.px(cx + Math.cos(a) * s, cy + Math.sin(a) * s, s > r1 - 1.5 ? c : WHITE, 1);
+        const ca = Math.cos(a), sa = Math.sin(a);
+        // long rays get a second pixel of width near the root, then thin to a 1px coloured tip
+        for (let s = r0; s <= r1; s += 0.6) {
+          const tip = s > r1 - 2.4;
+          Ly.px(cx + ca * s, cy + sa * s, tip ? c : WHITE, 1);
+          if (!(k % 2) && s < r0 + (r1 - r0) * 0.45 && u < 0.6) Ly.px(cx + ca * s - sa * 0.9, cy + sa * s + ca * 0.9, lc, 1);
+        }
       }
-      if (u < 0.35) Ly.rect(cx - 1, cy - 1, 3, 3, WHITE, 1);
+      if (u < 0.35) {
+        // hot core: a little plus that fills in to a disc on big hits
+        const r = big ? 2 : 1;
+        for (let j = -r - 1; j <= r + 1; j++) for (let i = -r - 1; i <= r + 1; i++) {
+          const d = i * i + j * j;
+          if (d <= r * r + 1) Ly.px(cx + i, cy + j, d <= r * r ? WHITE : lc, 1);
+        }
+      }
     },
     glow(ctx) { if (o.glow !== false) glowPx(ctx, PX(x), PY(z, y - gy), rgbStr(c), len * 1.1, 0.3 * (1 - this.t / dur)); },
   });
@@ -279,7 +321,7 @@ export function ring(x, y, z, o = {}) {
     glowPx(Ly) {
       const u = this.t / dur;
       const rr = r0 + (r1 - r0) * easeOut(u);
-      const th = Math.max(1, 3 * (1 - u));
+      const th = Math.max(1, 3 * ART * (1 - u));
       const cx = PX(x), cy = PY(z, h);
       ringPx(Ly, cx, cy, rr, th, c, 1 - u * 0.7, u);
     },
@@ -289,13 +331,14 @@ export function ring(x, y, z, o = {}) {
     },
   });
 }
+// expanding ring: 1px white-hot rim, a solid band of the colour, then a dithered inner wash
 function ringPx(Ly, cx, cy, rr, th, c, a, u = 0) {
-  const x0 = Math.floor(cx - rr - 1), x1 = Math.ceil(cx + rr + 1);
+  const x0 = Math.floor(cx - rr - 1), x1 = Math.ceil(cx + rr + 1), wash = 2 * ART;
   for (let py = Math.floor(cy - rr - 1); py <= Math.ceil(cy + rr + 1); py++) for (let px = x0; px <= x1; px++) {
     const d = Math.hypot(px + 0.5 - cx, py + 0.5 - cy);
-    if (d > rr || d < rr - th - 2) continue;
+    if (d > rr || d < rr - th - wash) continue;
     if (d >= rr - th) { if (bayer(px, py) < a + 0.15) Ly.px(px, py, d > rr - 1 ? WHITE : c, 1); }
-    else if (bayer(px, py) < (1 - u) * 0.35) Ly.px(px, py, c, 1);
+    else if (bayer(px, py) < (1 - u) * 0.35 * (1 - (rr - th - d) / wash)) Ly.px(px, py, c, 1);
   }
 }
 
@@ -311,7 +354,8 @@ export function shockwave(x, y, z, o = {}) {
     let a = (i / n) * Math.PI * 2 + Math.random() * 0.5, px = 0, py = 0;
     const pts = [[0, 0]];
     const len = R * (0.35 + Math.random() * 0.35);
-    for (let d = 0; d < len; d += 2.5) { a += (Math.random() - 0.5) * 0.7; px += Math.cos(a) * 2.5; py += Math.sin(a) * 2.5 * 0.8; pts.push([px, py]); }
+    const st = 2.5 * ART;
+    for (let d = 0; d < len; d += st) { a += (Math.random() - 0.5) * 0.7; px += Math.cos(a) * st; py += Math.sin(a) * st * 0.8; pts.push([px, py]); }
     cracks.push(pts);
   }
   if (o.dust !== false) for (let i = 0; i < 26; i++) {
@@ -333,6 +377,7 @@ export function shockwave(x, y, z, o = {}) {
             if (u > 0.55 && bayer(X, Y) < (u - 0.55) / 0.45) continue;
             Ly.px(X, Y, crackC, 0.9);
             if (i < 2) Ly.px(X + 1, Y, crackC, 0.9);
+            if (i < m * 0.6) Ly.px(X, Y + 1, c, 0.35);           // pale broken lip under the crack
           }
         }
       }
@@ -341,10 +386,11 @@ export function shockwave(x, y, z, o = {}) {
       const t = this.t;
       if (t > 0.28) return;
       const u = t / 0.28, cx = PX(x), cy = PY(z, 0);
-      const rr = R * easeOut(u), th = Math.max(1, 3 * (1 - u));
+      const rr = R * easeOut(u), th = Math.max(1, 3 * ART * (1 - u));
       // squashed ring so it reads as lying on the ground
-      for (let k = 0; k < 360; k++) {
-        const a = (k / 360) * Math.PI * 2;
+      const N = Math.max(360, Math.ceil(rr * 8.5));
+      for (let k = 0; k < N; k++) {
+        const a = (k / N) * Math.PI * 2;
         if (u > 0.5 && bayer(k, 1) < (u - 0.5) * 2) continue;
         for (let w = 0; w < th; w++) Ly.px(cx + Math.cos(a) * (rr - w), cy + Math.sin(a) * (rr - w) * 0.75, w < 1 ? WHITE : c, 1);
       }
@@ -356,27 +402,28 @@ export function shockwave(x, y, z, o = {}) {
 // Red ground warnings: the fill (lit, under sprites) grows toward the strike; a blinking crisp
 // outline stays bright on top so it reads even in dark dungeons.
 export function telegraph(o) {
-  const c = col(o.color || '#ff3020');
+  const c = col(o.color || '#ff3020'), lc = light(c, 1.35);
   const dur = o.dur || 1;
   const handle = { done: false, follow: o.follow };
   const st = { x: o.x, z: o.z, facing: o.facing || 0 };
   const shape = o.shape || 'circle';
   const R0 = (o.radius || 3) * PPU, ang = ((o.angle || 90) * Math.PI) / 180, wid = (o.width || 2) * PPU, len = (o.length || 10) * PPU;
-  // inside test in local px; returns [inside, edge, progressCoord]
+  // inside test in local px; returns [inside, distance to the nearest edge in px, progressCoord]
   const test = (dx, dy) => {
-    if (shape === 'circle') { const d = Math.hypot(dx, dy); return [d <= R0, d > R0 - 1.2, d / R0]; }
+    if (shape === 'circle') { const d = Math.hypot(dx, dy); return [d <= R0, R0 - d, d / R0]; }
     const a0 = Math.atan2(Math.cos(st.facing), Math.sin(st.facing));
     if (shape === 'cone') {
       const d = Math.hypot(dx, dy);
       let a = Math.atan2(dy, dx) - a0; while (a < -Math.PI) a += Math.PI * 2; while (a > Math.PI) a -= Math.PI * 2;
       const inA = Math.abs(a) <= ang / 2;
-      return [d <= R0 && inA, d > R0 - 1.2 || (Math.abs(Math.abs(a) - ang / 2) * d < 1.1), d / R0];
+      return [d <= R0 && inA, Math.min(R0 - d, (ang / 2 - Math.abs(a)) * d), d / R0];
     }
     // line: along the facing
     const ux = Math.cos(a0), uy = Math.sin(a0);
     const along = dx * ux + dy * uy, across = -dx * uy + dy * ux;
-    return [along >= 0 && along <= len && Math.abs(across) <= wid / 2, Math.abs(across) > wid / 2 - 1.1 || along > len - 1.1, along / len];
+    return [along >= 0 && along <= len && Math.abs(across) <= wid / 2, Math.min(wid / 2 - Math.abs(across), len - along), along / len];
   };
+  const EDGE = 2.2;                                             // rim: 1px bright edge + 1px colour
   const bounds = () => (shape === 'line' ? len + wid : R0) + 2;
   const raster = (Ly, fill) => {
     const u = clamp01(fx.t / dur);
@@ -389,7 +436,7 @@ export function telegraph(o) {
       if (fill) {
         if (prog <= u) { if (bayer(px, py) < 0.42 + (prog > u - 0.08 ? 0.5 : 0)) Ly.px(px, py, c, 0.85); }
         else if (bayer(px, py) < 0.12) Ly.px(px, py, c, 0.7);
-      } else if (edge && blink) Ly.px(px, py, u > 0.85 ? WHITE : c, 1);
+      } else if (edge < EDGE && blink) Ly.px(px, py, edge < 1.1 ? (u > 0.85 ? WHITE : lc) : u > 0.85 ? lc : c, 1);
     }
   };
   const fx = addFx({
@@ -414,7 +461,7 @@ function strokeGlow(ctx, pts, color, w, a) {
     pts.forEach(([x, y], i) => (i ? ctx.lineTo(x * s, y * s) : ctx.moveTo(x * s, y * s)));
     ctx.stroke();
   };
-  pass(w * 4, 0.12 * a, color); pass(w * 2, 0.3 * a, color); pass(w, 0.9 * a, color); pass(Math.max(0.6, w * 0.4), a, '#ffffff');
+  pass(w * 4, 0.12 * a, color); pass(w * 2, 0.3 * a, color); pass(w, 0.9 * a, color); pass(Math.max(1, w * 0.4), a, '#ffffff');
   ctx.globalAlpha = 1;
 }
 export function beam(ax, ay, az, bx, by, bz, o = {}) {
@@ -439,7 +486,7 @@ export function lightning(ax, ay, az, bx, by, bz, o = {}) {
     return f;
   }
   const segs = o.segs || 10, jag = (o.jag || 0.8) * PPU;
-  const c = o.color || '#c0d0ff', dur = o.dur || 0.18;
+  const c = o.color || '#c0d0ff', dur = o.dur || 0.18, cc = light(col(c), 1.2);
   const ga = ground(ax, az), gb = ground(bx, bz);
   const A = [PX(ax) + view.x0, PY(az, ay - ga) + view.y0], B = [PX(bx) + view.x0, PY(bz, by - gb) + view.y0];
   const pts = [];
@@ -450,14 +497,18 @@ export function lightning(ax, ay, az, bx, by, bz, o = {}) {
   const f = addFx({
     update(fx, dt) { fx.t += dt; return fx.t < dur; },
     glowPx(Ly) {
-      // a hard 1px bolt core on the pixel layer
+      // a hard 1px white bolt core with a 1px coloured fringe on the pixel layer
       for (let i = 0; i < pts.length - 1; i++) {
         const [x0, y0] = pts[i], [x1, y1] = pts[i + 1];
         const n = Math.ceil(Math.hypot(x1 - x0, y1 - y0));
+        for (let k = 0; k <= n; k++) {
+          const X = x0 + (x1 - x0) * k / n - view.x0, Y = y0 + (y1 - y0) * k / n - view.y0;
+          Ly.px(X + 1, Y, cc, 1); Ly.px(X, Y + 1, cc, 1);
+        }
         for (let k = 0; k <= n; k++) Ly.px(x0 + (x1 - x0) * k / n - view.x0, y0 + (y1 - y0) * k / n - view.y0, WHITE, 1);
       }
     },
-    glow(ctx) { strokeGlow(ctx, pts.map(([x, y]) => [x - view.x0, y - view.y0]), c, 1.6, 1 - this.t / dur); },
+    glow(ctx) { strokeGlow(ctx, pts.map(([x, y]) => [x - view.x0, y - view.y0]), c, 1.6 * ART, 1 - this.t / dur); },
   });
   for (let i = 0; i < 4; i++) {
     const t = Math.random();
@@ -490,7 +541,7 @@ export function pillar(x, y, z, o = {}) {
           Ly.px(px, py, dx < 0.35 ? WHITE : dx < 0.7 ? lc : dx < 0.9 ? c : dc, 1);
         }
       }
-      ringPx(Ly, cx, PY(z, 0), r * (1 + u * 0.8), 1.5, c, 1 - u, u);
+      ringPx(Ly, cx, PY(z, 0), r * (1 + u * 0.8), 1.5 * ART, c, 1 - u, u);
     },
     glow(ctx) {
       const u = this.t / dur;
@@ -503,19 +554,39 @@ export function pillar(x, y, z, o = {}) {
 // ================================================================== projectiles & zones
 // Projectile drawable: rotated ammo sprite (arrows, bolts, shards) or a hard-edged glowing orb.
 const orbCache = new Map();
+// shaded pixel orb of radius r px: lit from the top left, a cool shadow crescent, a 1px bounce
+// rim on the shadow side and a white specular glint
 function orbSprite(color, r) {
   const key = color + r;
   let s = orbCache.get(key);
   if (s) return s;
-  const n = r * 2 + 3, c = C(color);
+  const n = r * 2 + 3, c = C(color), R = r + 0.4, m = n / 2;
+  const hi2 = light(c, 1.6), hi = light(c, 1.3), dk = dark(c, 0.62), rim = light(c, 1.05);
   const p = new Pix(n, n); p.ox = p.oy = Math.floor(n / 2);
-  p.disc(n / 2, n / 2, r + 0.4, c);
-  p.disc(n / 2 - 0.4, n / 2 - 0.4, r * 0.62, light(c, 1.45));
-  p.disc(n / 2 - 0.6, n / 2 - 0.6, Math.max(0.6, r * 0.28), [255, 255, 255, 255]);
+  for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) {
+    const dx = i + 0.5 - m, dy = j + 0.5 - m, d = Math.hypot(dx, dy);
+    if (d > R) continue;
+    const nz = Math.sqrt(Math.max(0, 1 - (d / R) ** 2));
+    const l = (-dx * 0.55 - dy * 0.65) / R + nz * 0.55;
+    let cc = l > 0.78 ? hi2 : l > 0.45 ? hi : l > 0.02 ? c : dk;
+    if (d > R - 1.1 && dx + dy > R * 0.5) cc = rim;
+    p.set(i, j, cc);
+  }
+  const gx = Math.round(m - R * 0.45 - 0.5), gy = Math.round(m - R * 0.45 - 0.5);
+  p.set(gx, gy, [255, 255, 255, 255]);
+  if (r >= 5) { p.set(gx + 1, gy, [255, 255, 255, 255]); p.set(gx, gy + 1, [255, 255, 255, 255]); }
   p.outline(dark(c, 0.35));
   s = { pix: p, emis: p };
   orbCache.set(key, s);
   return s;
+}
+// little pixel ellipse on the ground (rw, rh: half sizes in px; rh 0 = a single row)
+function blobShadow(ctx, cx, cy, rw, rh, a = 0.32) {
+  ctx.fillStyle = `rgba(10,6,12,${a})`;
+  for (let j = -rh; j <= rh; j++) {
+    const k = Math.round(rw * Math.sqrt(Math.max(0, 1 - (j / (rh + 0.6)) ** 2)));
+    ctx.fillRect(cx - k, cy + j, k * 2 + 1, 1);
+  }
 }
 export function projectileDrawable(p, size = 0.3) {
   const kind = p.kind;
@@ -524,7 +595,7 @@ export function projectileDrawable(p, size = 0.3) {
     if (!pointed) {
       // shader orb: only a ground shadow stays in the pixel world
       const o = { sortZ: p.pos.z, p, gl: orbFx(p, size), draw() { this.sortZ = p.pos.z; },
-        shadow(ctx) { const r = Math.max(1, Math.round(size * PPU * 0.6)); ctx.fillStyle = 'rgba(10,6,12,0.3)'; ctx.fillRect(Math.round(PX(p.pos.x)) - r, Math.round(PY(p.pos.z, 0)), r * 2 + 1, 1); } };
+        shadow(ctx) { const r = Math.max(2, Math.round(size * PPU * 0.6)); blobShadow(ctx, Math.round(PX(p.pos.x)), Math.round(PY(p.pos.z, 0)), r, r >= 6 ? 1 : 0, 0.3); } };
       scene.objects.add(o);
       return o;
     }
@@ -539,18 +610,22 @@ export function projectileDrawable(p, size = 0.3) {
           ctx.save(); ctx.translate(x, y); ctx.rotate(a); ctx.drawImage(spr.pix.canvas(), -spr.pix.ox, -spr.pix.oy); ctx.restore();
         },
         emissive(ctx) { this.draw(ctx); },
-        shadow(ctx) { ctx.fillStyle = 'rgba(10,6,12,0.35)'; ctx.fillRect(Math.round(PX(p.pos.x)) - 1, Math.round(PY(p.pos.z, 0)), 3, 1); },
+        shadow(ctx) { blobShadow(ctx, Math.round(PX(p.pos.x)), Math.round(PY(p.pos.z, 0)), 2, 0, 0.35); },
       };
       scene.objects.add(o);
       return o;
     }
   }
-  const spr = pointed ? ammoSprite(kind, p.element !== 'physical' || kind === 'shard' || kind === 'thorn' ? p.color : null) : orbSprite(p.color, Math.max(2, Math.round(size * PPU * 0.9)));
-  const glowR = pointed ? (p.element !== 'physical' ? 6 : 0) : size * PPU * 2.6;
+  const orbR = Math.max(3, Math.round(size * PPU * 0.9));
+  const spr = pointed ? ammoSprite(kind, p.element !== 'physical' || kind === 'shard' || kind === 'thorn' ? p.color : null) : orbSprite(p.color, orbR);
+  const glowR = pointed ? (p.element !== 'physical' ? 6 * ART : 0) : size * PPU * 2.6;
   const o = {
     sortZ: p.pos.z, p,
     pos() { const gy = ground(p.pos.x, p.pos.z); return [Math.round(PX(p.pos.x)), Math.round(PY(p.pos.z, p.pos.y - gy)), gy]; },
-    shadow(ctx) { const gy = ground(p.pos.x, p.pos.z); ctx.fillStyle = 'rgba(10,6,12,0.35)'; ctx.fillRect(Math.round(PX(p.pos.x)) - 1, Math.round(PY(p.pos.z, 0)), 3, 1); void gy; },
+    shadow(ctx) {
+      const r = pointed ? 2 : Math.max(2, Math.round(size * PPU * 0.6));
+      blobShadow(ctx, Math.round(PX(p.pos.x)), Math.round(PY(p.pos.z, 0)), r, r >= 6 ? 1 : 0, 0.35);
+    },
     draw(ctx) {
       this.sortZ = p.pos.z;
       const [x, y] = this.pos();
@@ -572,7 +647,7 @@ export function projectileDrawable(p, size = 0.3) {
   scene.objects.add(o);
   // crisp trail: recent positions joined by a tapering pixel ribbon (magic) or a thin streak
   // (arrows); once the projectile dies the tail keeps collapsing into the impact point
-  const trail = [], TL = pointed ? 4 : 7, headW = pointed ? 0.5 : Math.max(1.5, size * PPU * 0.75);
+  const trail = [], TL = pointed ? 4 : 7, headW = pointed ? 0.5 : Math.max(1.5 * ART, Math.min(orbR - 1, size * PPU * 0.75));
   const c = col(p.color), tc = pointed ? (p.element !== 'physical' ? light(c, 1.2) : [235, 230, 220]) : light(c, 1.25), dc = dark(c, 0.75);
   addFx({
     update() {
@@ -583,6 +658,8 @@ export function projectileDrawable(p, size = 0.3) {
     glowPx(Ly) {
       const n = trail.length;
       if (n < 2) return;
+      // the ribbon starts behind a live orb so the shaded orb sprite stays visible
+      const [hx, hy, hz] = trail[0], HX = PX(hx), HY = PY(hz, hy - ground(hx, hz)), clear = pointed || o.gone ? 0 : orbR + 0.5;
       for (let i = 0; i < n - 1; i++) {
         const [ax, ay, az] = trail[i], [bx, by, bz] = trail[i + 1];
         const x0 = PX(ax), y0 = PY(az, ay - ground(ax, az)), x1 = PX(bx), y1 = PY(bz, by - ground(bx, bz));
@@ -591,11 +668,12 @@ export function projectileDrawable(p, size = 0.3) {
           const t = (i + k / steps) / (TL - 1);                     // 0 at the head, 1 at the tail
           const xx = x0 + (x1 - x0) * k / steps, yy = y0 + (y1 - y0) * k / steps;
           if (t > 0.45 && bayer(Math.round(xx), Math.round(yy)) > (1 - t) / 0.55) continue;
+          if (clear && Math.hypot(xx - HX, yy - HY) < clear) continue;
           const w = headW * (1 - t * 0.85);
           if (w <= 0.6) { Ly.px(xx, yy, t < 0.4 ? tc : pointed ? tc : c, 1); continue; }
           for (let dy = -Math.ceil(w); dy <= Math.ceil(w); dy++) for (let dx = -Math.ceil(w); dx <= Math.ceil(w); dx++) {
             const d = Math.hypot(dx, dy);
-            if (d > w) continue;
+            if (d > w || (clear && Math.hypot(xx + dx - HX, yy + dy - HY) < clear)) continue;
             Ly.px(xx + dx, yy + dy, d < w * 0.45 && t < 0.5 ? tc : t > 0.7 ? dc : c, 1);
           }
         }
@@ -612,7 +690,7 @@ export function worldSprite(x, z, spr, update) {
   const gy = ground(x, z);
   const o = {
     sortZ: z, t: 0, rise: 1, alpha: 1,
-    shadow(ctx) { const w = Math.max(3, Math.round(spr.pix.w * 0.35)); ctx.fillStyle = 'rgba(10,6,12,0.3)'; ctx.fillRect(Math.round(PX(x)) - w, Math.round(PY(z, 0)) - 1, w * 2 + 1, 2); },
+    shadow(ctx) { blobShadow(ctx, Math.round(PX(x)), Math.round(PY(z, 0)) - 1, Math.max(5, Math.round(spr.pix.w * 0.35)), 1, 0.3 * this.alpha * Math.min(1, this.rise * 2)); },
     blitTo(ctx, p) {
       const X = Math.round(PX(x)), Y = Math.round(PY(z, 0));
       const vis = Math.max(1, Math.round(p.h * this.rise));
@@ -632,7 +710,7 @@ export function worldSprite(x, z, spr, update) {
 
 // Persistent ground zone (hazards): dithered fill + rotating dashed rim + soft glow.
 export function zoneDrawable(h, opacity = 0.4) {
-  const c = col(h.color);
+  const c = col(h.color), lc = light(c, 1.35);
   const gl = magicOn() && h.element !== 'physical' ? zoneFx(h) : null;
   return addFx({
     gl,
@@ -649,15 +727,17 @@ export function zoneDrawable(h, opacity = 0.4) {
         if (bayer(px + Math.floor(h.age * 3), py) < a * (0.25 + edge * edge * 0.6)) Ly.px(px, py, c, 0.9);
       }
     },
+    // rim: short 1px dashes marching around the edge, each led by a brighter pixel
     glowPx(Ly) {
       const cx = PX(h.x), cy = PY(h.z, 0), r = h.radius * PPU;
-      const n = Math.max(12, Math.round(r * 1.2));
-      const fade = Math.min(1, h.life * 2);
+      const n = Math.max(24, Math.ceil(r * Math.PI * 2));
+      const fade = Math.min(1, h.life * 2), run = h.age * 0.6 * r, per = Math.round(7 * ART);
       for (let k = 0; k < n; k++) {
-        if ((k + Math.floor(h.age * 8)) % 4 === 0) continue;
-        const a = (k / n) * Math.PI * 2 + h.age * 0.6;
+        const ph = ((k + run) % per + per) % per;
+        if (ph >= per * 0.55) continue;
+        const a = (k / n) * Math.PI * 2;
         if (bayer(k, 0) > fade) continue;
-        Ly.px(cx + Math.cos(a) * r, cy + Math.sin(a) * r, c, 1);
+        Ly.px(cx + Math.cos(a) * r, cy + Math.sin(a) * r, ph >= per * 0.55 - 1 ? lc : c, 1);
       }
     },
     glow(ctx) { if (!this.gl) glowPx(ctx, PX(h.x), PY(h.z, 0), rgbStr(c), h.radius * PPU * 1.1, 0.16 * Math.min(1, h.life)); },
@@ -677,18 +757,23 @@ export function floatText(x, y, z, text, o = {}) {
   });
   if (vfx.numbers.length > 60) vfx.numbers.shift();
 }
+// Each size is its own native font (never a scaled one): regular numbers pop in for a couple of
+// frames in the big font, crits use the big font and pop in white. Glyphs are shaded in three
+// bands (bright top, colour, darker foot) under a 1px dark ring.
 const NUM_OUT = [24, 12, 20];
 function drawNumbers(Ly) {
   for (const n of vfx.numbers) {
-    const base = n.crit ? 2 : 1;
-    const s = n.t < 0.07 && !n.small ? base + 1 : base;
+    const pop = n.t < 0.07 && !n.small;
+    const F = fontFor(n.text, n.crit || pop ? 2 : 1);
     const gy = ground(n.x, n.z);
-    const w = textWidth(n.text) * s;
-    const px = Math.round(PX(n.x) - w / 2), py = Math.round(PY(n.z, n.y - gy) - FONT_H * s);
-    if (px > Ly.w || py > Ly.h || px + w < 0 || py + FONT_H * s < 0) continue;
+    const w = textWidth(n.text, F), H = F.h;
+    const px = Math.round(PX(n.x) - w / 2), py = Math.round(PY(n.z, n.y - gy) - H);
+    if (px > Ly.w || py > Ly.h || px + w < 0 || py + H + 4 < 0) continue;
     if (n.t > n.life * 0.72 && Math.floor(n.t * 24) % 2) continue;   // blink out
-    const hi = light(n.c, 1.25);
-    drawText(Ly, px, py, n.text, (gx, gyy) => (gyy < 2 ? hi : n.c), s, NUM_OUT);
+    if (!n.hi) { n.hi = light(n.c, 1.3); n.lo = dark(n.c, n.small ? 0.7 : 0.8); }
+    const flashWhite = n.crit && n.t < 0.06;
+    const top = Math.round(H * 0.3), foot = Math.round(H * 0.78);
+    drawText(Ly, px, py, n.text, flashWhite ? WHITE : (gx, r) => (r < top ? n.hi : r >= foot ? n.lo : n.c), F, NUM_OUT);
   }
 }
 
@@ -725,7 +810,7 @@ scene.persist.glows.push((ctx) => {
   for (const f of vfx.flashes) {
     const u = f.t / f.dur;
     const gy = ground(f.x, f.z);
-    glowPx(ctx, PX(f.x), PY(f.z, Math.max(0, f.y - gy) * 0.5), f.color, Math.min(60, f.dist * PPU * 0.45), Math.min(0.55, f.intensity / 40) * (1 - u));
+    glowPx(ctx, PX(f.x), PY(f.z, Math.max(0, f.y - gy) * 0.5), f.color, Math.min(60 * ART, f.dist * PPU * 0.45), Math.min(0.55, f.intensity / 40) * (1 - u));
   }
 });
 

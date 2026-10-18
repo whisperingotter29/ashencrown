@@ -427,7 +427,7 @@ export function boltFx(ax, ay, az, bx, by, bz, o = {}) {
       const u = f.t / dur;
       const flick = (0.65 + Math.random() * 0.35) * (1 - u * u);
       const toX = mxw, toY = myw;
-      const core = Math.max(1.3, UPX * 0.07) * width, glow = Math.max(4, UPX * 0.3) * width;
+      const core = Math.max(1, Math.max(1.3, UPX * 0.07) * width), glow = Math.max(3, Math.max(4, UPX * 0.3) * width);   // art px: keep a 1px core
       for (const p of paths) {
         const pts = p.pts;
         for (let i = 0; i < pts.length - 1; i++) boltSeg(toX(pts[i][0]), toY(pts[i][1]), toX(pts[i + 1][0]), toY(pts[i + 1][1]), core * p.w, glow * p.w, flick * p.a, c1);
