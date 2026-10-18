@@ -86,7 +86,13 @@ export function shiftDark(c, k) {
   let [h, s, l] = rgb2hsl(c[0], c[1], c[2]);
   const amt = Math.min(1, Math.max(0, 1 - k));
   if (s < 0.06) { h = 265 / 360; s = 0.06 + amt * 0.16; }
-  else { h = towardHue(h, SHADOW_HUE, amt * 0.11); s = Math.min(1, s * (1 + amt * 0.45)); }
+  else {
+    h = towardHue(h, SHADOW_HUE, amt * 0.11);
+    // HSL saturation inflates chroma when a pale colour drops below mid lightness, so also cap
+    // by the source chroma: pale skin shades to dusky rose, not vivid orange
+    const chroma = (1 - Math.abs(2 * l - 1)) * s * (1 + amt * 0.45), room = 1 - Math.abs(2 * l * k - 1);
+    s = Math.min(1, s * (1 + amt * 0.45), room > 0 ? chroma / room : 1);
+  }
   l = l * k;
   const o = hsl2rgb(h, s, l);
   o.push(c[3]);
