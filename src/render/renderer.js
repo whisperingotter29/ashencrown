@@ -242,7 +242,8 @@ export function renderFrame(time) {
   ctx.drawImage(R.low, 0, 0, W, H, ox - s, oy - s, W * s, H * s);
   // ---- full-res glows. They gather in their own buffer where overlapping glows take the brighter
   // of the two instead of adding up (a row of wall torches used to sum to pure white), then the
-  // buffer is added to the frame once.
+  // buffer is screened over the frame once (screen, not add: on a pale marble floor an added glow
+  // clipped to a flat white disc, screen brightens toward white but never past it).
   if (R.settings.glow !== false) {
     const main = R.ctx;
     if (!glowCv || glowCv.width !== main.canvas.width || glowCv.height !== main.canvas.height) {
@@ -274,8 +275,8 @@ export function renderFrame(time) {
       ctx.globalAlpha = 1;
     }
     ctx.restore();
-    main.globalCompositeOperation = 'lighter';
-    main.globalAlpha = 0.9;
+    main.globalCompositeOperation = 'screen';
+    main.globalAlpha = 0.95;
     main.drawImage(glowCv, 0, 0);
     main.globalAlpha = 1;
     main.globalCompositeOperation = 'source-over';

@@ -28,6 +28,28 @@ import { requestLight, R } from '../render/renderer.js';
 import { magic } from '../render/magic.js';
 import { mulberry32 } from '../core/rng.js';
 
+// Class silhouettes. Rogues and casters wear a deep hood (eyes glowing out of the shadow) and a
+// cloak thrown over one shoulder; fighters show their face and wear a plain cape from their armour.
+// An equipped helm always replaces the default hood.
+const OUTFIT = {
+  ranger: ['#3e5a34', '#b8f070', '#2e3a26', '#8a9a7a'],
+  assassin: ['#2a2836', '#ff4a6a', '#1e1c26', '#7a7a8a'],
+  pyromancer: ['#7a2a1c', '#ffb040', '#3a2420', '#a8907a'],
+  cryomancer: ['#2e4a78', '#80e8ff', '#2a3448', '#a8b8c8'],
+  necromancer: ['#2c3e6e', '#c070ff', '#24202e', '#9aaa94'],
+  alchemist: ['#2e5a56', '#a0ffb0', '#3a3228', '#9a8a70'],
+  warden: ['#4a5a2e', '#d0ff80', '#2e3420', '#8a9070'],
+  cleric: ['#d8ccb0', '#ffe8a0', '#5a4a3a', '#c8b898'],
+};
+// fighters keep their face bare and wear a plain class cape until their armour brings a better one
+const CAPE = { knight: ['#2e3e6e', '#e0c070'], berserker: ['#5a2418', '#c89a60'], duelist: ['#6a1a2a', '#e8d0a0'], bard: ['#4a2a6a', '#f0c060'] };
+function classOutfit(id) {
+  const o = OUTFIT[id];
+  if (!o) return CAPE[id] ? { cape: CAPE[id][0], capeTrim: CAPE[id][1] } : {};
+  const [cloak, eyes, pants, boots] = o;
+  return { hoodDefault: { kind: 'hood', color: cloak, eyes }, cloak, pants, bootsColor: boots };
+}
+
 export class Player extends Entity {
   constructor(char) {
     super();
@@ -71,7 +93,7 @@ export class Player extends Entity {
     const rnd = mulberry32(this.char.name.length * 31 + this.char.race.length);
     const app = this.char.appearance || (this.char.appearance = { skin: Math.floor(rnd() * lk.skin.length), hair: Math.floor(rnd() * lk.hair.length) });
     const cls = CLASS_BY_ID[this.char.cls];
-    this.baseLook = raceLook(lk, app, { shirt: cls.color, pants: '#3a3028', longHair: rnd() < 0.4 });
+    this.baseLook = { ...raceLook(lk, app, { shirt: cls.color, pants: '#3a3028', longHair: rnd() < 0.4 }), ...classOutfit(cls.id) };
     const actor = new Actor(this, { type: 'human', look: this.baseLook, scale: lk.scale });
     if (this.model) this.removeModel();
     this.removed = false;
@@ -167,6 +189,17 @@ export class Player extends Entity {
 
   get buffStat() { return this.buffAgg || {}; }
 
+  // A short body/arm animation for abilities that don't run a full action (volleys, buffs, throws,
+  // blinks): the pose plays through its wind-up, strike and follow-through over `dur` seconds.
+  playPose(kind, dur = 0.4) { this.poseAnim = { kind, t: 0, dur }; this.st.action = 'attack'; this.st.kind = kind; this.st.actionT = 0; }
+  stepPose(dt) {
+    const a = this.poseAnim;
+    if (!a) return;
+    a.t += dt;
+    if (this.action || this.drawing) { if (a.t >= a.dur) this.poseAnim = null; return; }
+    if (a.t >= a.dur) { this.poseAnim = null; if (this.st.kind === a.kind) this.st.action = null; return; }
+    this.st.action = 'attack'; this.st.kind = a.kind; this.st.actionT = a.t / a.dur;
+  }
   // -------------------------------------------------------------- update
   update(dt) {
     if (this.dead) {
@@ -306,6 +339,7 @@ export class Player extends Entity {
     this.st.combat = inCombat || this.drawing || this.blocking;
     // lights
     if (this.lantern || G.realm !== 'surface' || G.dungeon) requestLight(this.pos.x, this.pos.y + 3, this.pos.z, G.realm === 'deep' ? '#c0d8ff' : '#ffc890', G.realm === 'surface' && !this.lantern ? 0 : G.realm === 'deep' ? 14 : 10, G.realm === 'deep' ? 21 : 16);
+    this.stepPose(dt);
     // Mythic and rarer fates shed a few motes of their rarity colour
     const fr = G.char && (rarityOfRace(G.char.race).index >= rarityOfClass(G.char.cls).index ? rarityOfRace(G.char.race) : rarityOfClass(G.char.cls));
     if (fr && fr.index >= 3 && !this.stealthed && Math.random() < dt * (fr.index * 2.2)) {

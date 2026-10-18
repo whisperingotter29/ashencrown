@@ -61,25 +61,29 @@ function norm(o) {
     stone: !!o.stone, skeleton: !!o.skeleton, bark: !!o.bark, golem: !!o.golem, scales: !!o.scales,
     scale: o.scale || 1, build: o.build || 1,
     shirt: o.shirt || '#6a5a4a', pants: o.pants || '#4a3a30', boots: o.bootsColor || '#3a2a20',
-    helm: o.helm || null, chest: o.chest || null, gloves: o.gloves || null, legs: o.legs || null, bootsGear: o.bootsGear || null,
-    cape: o.cape || null, apron: o.apron || null, crown: o.crown || null, scarf: o.scarf || null, quiver: !!o.quiver,
+    // a class's default hood is worn when no helm is equipped; hooded figures get a cloak that
+    // wraps across the chest
+    helm: o.helm || o.hoodDefault || null, chest: o.chest || null, gloves: o.gloves || null, legs: o.legs || null, bootsGear: o.bootsGear || null,
+    cape: o.cape || o.cloak || null, capeTrim: o.capeTrim || null, cloak: !!o.cloak && (!o.helm || o.helm.kind === 'hood'), apron: o.apron || null, crown: o.crown || null, scarf: o.scarf || null, quiver: !!o.quiver,
     canopy: o.canopy || null, knots: o.knots || null, crystals: o.crystals || null, core: o.core || null,
     iris: IRIS[vs % IRIS.length],
   };
 }
 
+// Heroic proportions: a small head (about a fifth of the height), long torso and legs, so the
+// silhouette is carried by the big shapes (hood, cloak, boots, weapon) rather than the face.
 function metrics(L) {
   const s = L.scale, b = L.build;
-  const headW = L.skeleton ? 9 : b > 1.3 ? 12 : b > 1.12 ? 11 : 10;
-  const headH = L.skeleton ? 8 : 9;
-  const torsoW = Math.max(6, Math.min(13, Math.round(8 * Math.pow(b, 0.75))));
-  const torsoH = Math.max(4, Math.min(11, Math.round(6.6 * s + (b > 1.25 ? 1 : 0))));
-  const legH = Math.max(3, Math.min(10, Math.round(6 * s)));
+  const headW = L.skeleton ? 7 : b > 1.3 ? 10 : b > 1.12 ? 9 : 8;
+  const headH = 7;
+  const torsoW = Math.max(5, Math.min(12, Math.round(7 * Math.pow(b, 0.8))));
+  const torsoH = Math.max(5, Math.min(12, Math.round(8.4 * s + (b > 1.25 ? 1 : 0))));
+  const legH = Math.max(4, Math.min(12, Math.round(8.6 * s)));
   const legTop = FEET - legH + 1;
   const torsoTop = legTop - torsoH;
-  const headTop = torsoTop - headH + 2;
+  const headTop = torsoTop - headH + 1;
   const armW = L.skeleton ? 1 : b > 1.3 ? 3 : 2;
-  const armL = Math.max(4, Math.round(torsoH * 0.78 + 1));
+  const armL = Math.max(5, Math.round(torsoH * 0.85 + 1));
   const pad = L.chest && (L.chest.weight === 'plate' || L.chest.weight === 'mail') ? 1 : 0;
   return { headW, headH, torsoW, torsoH, legH, legTop, torsoTop, headTop, armW, armL, pad, cx: CX, feet: FEET };
 }
@@ -147,6 +151,7 @@ function fig(L, m, view, pose) {
   if (cw && cw !== 'cloth' && !L.golem) pauldrons(p, F);
   if (L.golem) boulders(p, e, F);
   if (L.cape && up) cape(p, F);
+  if (L.cloak && !up && pose.legs !== 'ride') drape(p, F);
   if (L.quiver && up) quiver(p, F, false);
   if (L.scarf) scarf(p, F, hx, hy);
   // ---- head
@@ -166,7 +171,7 @@ function legs(p, F) {
   const armoured = L.legs && !L.skeleton;
   const plateLegs = armoured && L.chest?.weight === 'plate';
   const hipY = ty1 + 1;
-  const bootRows = L.bootsGear ? 3 : 2;
+  const bootRows = 3;
   if (L.skeleton) {
     const bone = C('#ddd4be'), boneD = dark(bone, 0.72);
     const draw = (x, f, far) => {
@@ -202,8 +207,9 @@ function legs(p, F) {
       p.line(hipX, hipY, kx, kneeY, R.d);
       // boot: shaft + foot pointing forward
       for (let y = ankleY - bootRows + 1; y <= ankleY + 1; y++) for (let i = 0; i < th; i++) p.set(fx + i - (th > 2 ? 1 : 0), y, y === ankleY - bootRows + 1 ? B.l : B.m);
-      p.rect(fx, ankleY + 1, 3 + (th > 2 ? 1 : 0), 1, B.d);
-      p.set(fx + 2 + (th > 2 ? 1 : 0), ankleY + 1, B.d); p.set(fx + 1, ankleY, B.l);
+      p.rect(fx - 1, ankleY + 1, 5 + (th > 2 ? 1 : 0), 1, B.dd);
+      p.rect(fx, ankleY, 4 + (th > 2 ? 1 : 0), 1, B.m);
+      p.set(fx + 3 + (th > 2 ? 1 : 0), ankleY, B.d); p.set(fx + 1, ankleY, B.l); p.set(fx - 1, ankleY, B.m);
     };
     leg(ft.b, true);
     leg(ft.a, false);
@@ -224,6 +230,9 @@ function legs(p, F) {
       if (!boot && y === Math.round((hipY + yb) / 2) && i === 0 && !up) c = plateLegs ? light(R.l, 1.25) : armoured ? R.l : c;
       p.set(x0 + i, y, c);
     }
+    // chunky boots: a pixel wider than the leg on the outside, a pale cuff and a dark sole
+    const ox = outer < 0 ? x0 - 1 : x0 + lw;
+    for (let y = yb - bootRows + 1; y <= yb; y++) p.set(ox, y, y === yb ? bootR.dd : y === yb - bootRows + 1 ? bootR.l : outer < 0 ? bootR.l : bootR.d);
     // toe cap catches the light
     if (!up) p.set(x0 + (outer < 0 ? 0 : lw - 1), yb - 1, light(bootR.m, 1.25));
   };
@@ -328,6 +337,15 @@ function torso(p, e, F) {
     }
     belt(p, F, ty1 - 1, { m: C('#4a2e1c'), l: C('#6a4630'), d: C('#2e1c12'), ll: C('#e8c050') });
   }
+  // a cloth skirt under the belt for mail and plate, with a stitched rune band
+  if ((cw === 'plate' || cw === 'mail') && !side) {
+    const S = ramp(L.chest.trim ? mixc(L.chest.trim, '#3a2a4a', 0.55) : '#4a3a5a', 0.66, 1.18), Rn = C(L.chest.trim || '#40c0c0');
+    for (let y = ty1 + 1; y <= ty1 + 3; y++) for (let x = tl + (y > ty1 + 2 ? 1 : 0); x <= tr - (y > ty1 + 2 ? 1 : 0); x++) {
+      let c = x === tl ? S.l : x === tr ? S.d : S.m;
+      if (y === ty1 + 2 && (x - tl) % 3 === 1) c = Rn;
+      p.set(x, y, c);
+    }
+  }
   // runes / embers / void marks / constructs' core on bare chests
   if (L.glowSkin && !L.chest) { e.set(midX + 1, ty0 + 1, L.glowSkin); e.set(midX + 1, ty0 + 2, L.glowSkin); e.set(midX, ty0 + 3, L.glowSkin); e.set(midX - 1, ty0 + 2, L.glowSkin); }
   if (L.voidMarks && !L.chest) { for (let x = tl + 1; x <= tr - 1; x++) if ((x & 1) === 0) e.set(x, ty0 + 2, L.voidMarks); }
@@ -342,7 +360,9 @@ function belt(p, F, y, T, plate) {
   for (let x = tl; x <= tr; x++) p.set(x, y, x === tl ? strap.l : x === tr ? strap.d : strap.m);
   if (up) return;
   const bx = side ? tr - 1 : Math.floor((tl + tr) / 2);
-  p.set(bx, y, '#f0d070'); if (!side) p.set(bx + 1, y, '#a88830');
+  // a chunky buckle that hangs one pixel below the strap
+  p.set(bx, y, '#f0d070'); p.set(bx, y + 1, '#c09838');
+  if (!side) { p.set(bx + 1, y, '#a88830'); p.set(bx + 1, y + 1, '#7a5a20'); }
 }
 
 function apron(p, F) {
@@ -418,6 +438,7 @@ function boulders(p, e, F) {
 function cape(p, F) {
   const { L, side, up, tl, tr, ty0, pose } = F;
   const R = ramp(L.cape, 0.62, 1.16);
+  const TR = C(L.capeTrim || mixc(light(L.cape, 1.7), '#f0e0b0', 0.5));
   const lining = dark(mixc(L.cape, '#201018', 0.35), 0.8);
   const ph = (pose.cape | 0) % 4, sway = pose.sway | 0;
   const wave = [0, 1, 0, -1][ph];
@@ -434,8 +455,9 @@ function cape(p, F) {
         const fx = (x - x0) % 3;
         if (fx === 0) c = R.l; else if (fx === 2) c = R.d;
         if (x === x1) c = R.dd;
+        if (x === x0 && L.cloak) c = TR;
         if (y === ty0) c = R.l;
-        if (y === bottom) c = (x + y) & 1 ? R.d : R.dd;
+        if (y === bottom) c = L.cloak ? TR : (x + y) & 1 ? R.d : R.dd;
         p.set(x, y, c);
       }
     }
@@ -450,7 +472,7 @@ function cape(p, F) {
       const t = (y - ty0) / Math.max(1, bottom - ty0);
       const flare = Math.round(t * (1.5 + sway * 1.6) + (t > 0.4 ? wave * t : 0));
       const x0 = back - 1 - flare, x1 = back + 1;
-      for (let x = x0; x <= x1; x++) p.set(x, y, x === x0 ? R.d : x === x0 + 1 ? R.m : lining);
+      for (let x = x0; x <= x1; x++) p.set(x, y, x === x0 ? (L.cloak ? TR : R.d) : x === x0 + 1 ? R.m : lining);
     }
     return;
   }
@@ -458,7 +480,38 @@ function cape(p, F) {
   for (let y = ty0 + 1; y <= bottom; y++) {
     const t = (y - ty0) / Math.max(1, bottom - ty0);
     const g = Math.floor(t * (1.8 + sway * 0.6)) + (t > 0.5 ? (wave > 0 ? 1 : 0) : 0);
-    for (let x = tl - 1 - g; x <= tr + 1 + g + (t > 0.5 && wave < 0 ? 1 : 0); x++) p.set(x, y, x < tl ? R.d : x > tr ? lining : R.dd);
+    const xa = tl - 1 - g, xb = tr + 1 + g + (t > 0.5 && wave < 0 ? 1 : 0);
+    for (let x = xa; x <= xb; x++) p.set(x, y, L.cloak && x === xa ? TR : x < tl ? R.d : x > tr ? lining : R.dd);
+  }
+}
+
+// a cloak thrown over one shoulder: it covers the off side of the body down past the hip, its
+// pale lining edge cutting diagonally across the chest
+function drape(p, F) {
+  const { L, side, tl, tr, ty0, ty1, tw, pose } = F;
+  const R = ramp(L.cape, 0.62, 1.16);
+  const TR = C(L.capeTrim || mixc(light(L.cape, 1.7), '#f0e0b0', 0.5));
+  const sw = pose.legs === 'run' || pose.legs === 'sprint' ? [0, 1, 1, 0, -1, -1][(pose.ph | 0) % 6] : 0;
+  const bottom = Math.min(FEET - 3, ty1 + 4);
+  if (side) {
+    // seen from the side the cloak wraps the shoulder and hangs over the back half
+    for (let y = ty0 - 1; y <= bottom; y++) {
+      const t = (y - ty0) / Math.max(1, bottom - ty0);
+      const x1 = F.bx + Math.round(1 - t * 2), x0 = F.bx - Math.floor(tw / 2) - 1 - Math.round(t * 2) + (y > ty1 ? sw : 0);
+      for (let x = x0; x <= x1; x++) p.set(x, y, x === x1 ? TR : x === x1 - 1 ? R.l : (x - x0) % 3 === 0 ? R.d : R.m);
+    }
+    return;
+  }
+  for (let y = ty0 - 1; y <= bottom; y++) {
+    const t = (y - ty0 + 1) / Math.max(1, bottom - ty0 + 1);
+    const edge = Math.round(tl + 1 + (tw - 1) * (0.1 + t * 0.62));
+    const x1 = tr + 1 + Math.round(t * 2.2) + (y > ty1 ? sw : 0);
+    for (let x = edge; x <= x1; x++) {
+      let c = x === edge ? TR : x === edge + 1 ? R.l : (x - edge) % 3 === 2 ? R.d : R.m;
+      if (x === x1) c = R.dd;
+      if (y === bottom && x > edge) c = (x & 1) ? R.d : R.dd;
+      p.set(x, y, c);
+    }
   }
 }
 
@@ -560,7 +613,7 @@ function head(p, e, F, dx, dy) {
   const helm = L.helm;
   const hairR = L.hair ? hairRamp(L.hair) : null;
   const S = skinRamp(skinOf(L));
-  const eyeY = y0 + (L.skeleton ? 3 : 4);
+  const eyeY = y0 + 3;
   const face = pose.face | 0;
   // ---- ears behind the skull
   if (L.ears === 'long' && helm?.kind !== 'great') {
@@ -571,7 +624,7 @@ function head(p, e, F, dx, dy) {
     }
   }
   // ---- skull: rounded, jaw narrower
-  const inset = L.skeleton ? [2, 1, 0, 0, 0, 0, 1, 2] : [2, 1, 0, 0, 0, 0, 0, 1, 2];
+  const inset = [1, 0, 0, 0, 0, 0, 1];
   for (let j = 0; j < h; j++) {
     const iL = inset[j] ?? 0;
     const iR = side && !L.skeleton ? Math.max(0, iL - (j >= 3 ? 1 : 0)) : iL;
@@ -709,7 +762,7 @@ function hair(p, F, x0, y0, x1, y1, eyeY, H, helm) {
   const style = L.hairStyle;
   if (style === 'bald') return;
   const capped = helm && (helm.kind === 'cap' || helm.kind === 'crown');
-  const rows = style === 'crop' || style === 'mohawk' ? 2 : 3;
+  const rows = style === 'crop' || style === 'mohawk' ? 1 : 2;
   const w = x1 - x0 + 1;
   // shade by column: lit on the left, falling into shadow on the right
   const col = (x, y) => {
@@ -811,6 +864,11 @@ function helmet(p, e, F, helm, x0, y0, x1, y1, eyeY) {
         for (let y = eyeY + 2; y < y1; y += 2) p.set(side ? x1 : Math.floor((x0 + x1) / 2) + 2, y, R.dd);
         if (!side) for (let x = x0; x <= x1; x++) p.set(x, y0 + 1, (x & 1) ? T : light(T, 1.15));
       } else for (let x = x0; x <= x1; x++) p.set(x, y0 + 1, T);
+      if (!helm.plume) {
+        // swept fins at the temples, angled back like a bird of prey
+        const fin = (bx, dir) => { const pts = [[bx, y0 + 2], [bx + dir, y0 + 1], [bx + dir * 2, y0], [bx + dir * 2, y0 - 1], [bx + dir * 3, y0 - 2], [bx + dir * 3, y0 - 3]]; for (let i = 0; i < pts.length; i++) p.set(pts[i][0], pts[i][1], i < 2 ? R.d : i % 2 ? R.l : R.m); p.set(bx + dir, y0 + 2, R.d); };
+        if (side) fin(x0 - 1, -1); else if (!up) { fin(x0 - 2, -1); fin(x1 + 2, 1); } else { fin(x0 - 2, -1); fin(x1 + 2, 1); }
+      }
       if (helm.crest) for (let k = 0; k < (side ? 6 : 3); k++) { const cx = side ? x0 + 1 + k : Math.floor((x0 + x1) / 2); p.set(cx, y0 - 2 - (side ? 0 : k), T); if (!side) p.set(cx + 1, y0 - 2 - k, light(T, 1.2)); }
       if (helm.plume) {
         const pc = C(helm.plume);
@@ -840,22 +898,45 @@ function helmet(p, e, F, helm, x0, y0, x1, y1, eyeY) {
       break;
     }
     case 'hood': {
-      const H = ramp(M, 0.6, 1.15);
-      for (let y = y0 - 2; y <= y1 + 1; y++) for (let x = x0 - 1; x <= x1 + 1; x++) {
-        if ((x === x0 - 1 || x === x1 + 1) && y <= y0 - 1) continue;
-        p.set(x, y, x === x1 + 1 ? H.d : x === x0 - 1 ? H.l : (x - x0) % 4 === 3 ? H.d : H.m);
+      // a deep pointed hood: the tip flops back, the cowl is wider than the head and spills onto
+      // the shoulders, and the face is lost in shadow apart from the eyes
+      const H = ramp(M, 0.58, 1.2);
+      const cx = Math.floor((x0 + x1) / 2) + (side ? -1 : 0);
+      const half = Math.floor((x1 - x0 + 1) / 2);
+      const top = y0 - 3, bot = y1 + 2;
+      for (let y = top; y <= bot; y++) {
+        const t = y - top;
+        // tapering cowl: narrow crown, widest at the cheeks, then the mantle over the shoulders
+        const hw = [1, 2, half - 1, half, half + 1][t] ?? (y > y1 ? half + 2 : half + 1);
+        const sh = side ? (t <= 2 ? -1 : 0) : (t <= 1 ? 1 : 0);
+        const xa = cx - hw + sh, xb = cx + hw + sh + ((x1 - x0) % 2 ? 1 : 0);
+        for (let x = xa; x <= xb; x++) {
+          const u = (x - xa) / Math.max(1, xb - xa);
+          let c = u < 0.22 ? H.l : u > 0.74 ? H.d : H.m;
+          if (y === top + 1 && u < 0.5) c = H.ll;
+          if (x === xb) c = H.dd;
+          if (!up && !side && (x - xa) % 4 === 3 && y > y1) c = H.d;            // folds in the mantle
+          if (up && x === Math.floor((xa + xb) / 2) && y > top + 1) c = H.d;    // back seam
+          p.set(x, y, c);
+        }
       }
-      p.set(Math.floor((x0 + x1) / 2), y0 - 3, H.m); p.set(Math.floor((x0 + x1) / 2) - 1, y0 - 2, H.l);
+      // the floppy tip, trailing back (side view) or to one side, curling down at the end
+      const dir = side ? -1 : 1, tx = cx + (side ? -1 : 2);
+      const tip = [[tx, top - 1], [tx + dir, top - 1], [tx + dir, top - 2], [tx + dir * 2, top - 2], [tx + dir * 3, top - 2], [tx + dir * 3, top - 1]];
+      tip.forEach(([x, y], i) => p.set(x, y, i === 0 ? H.l : i < 3 ? H.m : i === tip.length - 1 ? H.dd : H.d));
       if (!up) {
-        const fx0 = side ? x1 - 3 : x0 + 1, fx1 = side ? x1 + 1 : x1 - 1;
-        for (let y = y0 + 3; y <= y1; y++) for (let x = fx0; x <= fx1; x++) p.set(x, y, y === y0 + 3 ? H.dd : '#120c12');
-        // lower face lit just at the chin
-        for (let x = fx0 + 1; x < fx1; x++) p.set(x, y1, skinRamp(skinOf(F.L)).d);
-        const gl = F.L.eyes || null;
-        const ex = side ? [x1 - 1] : [x0 + 3, x1 - 3];
-        for (const xx of ex) { p.set(xx, eyeY + 1, gl || '#9a8a78'); if (gl) e.set(xx, eyeY + 1, gl); }
-      } else {
-        for (let y = y0 + 1; y <= y1 + 1; y++) p.set(Math.floor((x0 + x1) / 2), y, H.d);
+        // face opening: a dark oval with a lit rim along the top
+        const fx0 = side ? x1 - 2 : x0 + 1, fx1 = side ? x1 + 2 : x1 - 1;
+        for (let y = y0 + 1; y <= y1 + 1; y++) {
+          const ins = y === y0 + 1 ? 1 : y === y1 + 1 ? 1 : 0;
+          for (let x = fx0 + ins; x <= fx1 - ins; x++) p.set(x, y, y === y0 + 1 ? H.dd : '#0b070d');
+        }
+        const gl = F.L.eyes || helm.eyes || null;
+        const ex = side ? [x1] : [x0 + 2, x1 - 2];
+        for (const xx of ex) {
+          if (gl) { p.set(xx, eyeY, light(C(gl), 1.25)); e.set(xx, eyeY, light(C(gl), 1.25)); p.set(xx, eyeY + 1, gl); e.set(xx, eyeY + 1, gl); }
+          else { p.set(xx, eyeY, '#cfc2b0'); }
+        }
       }
       break;
     }

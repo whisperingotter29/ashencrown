@@ -378,8 +378,7 @@ export function useSkill(p, sk, combo) {
       floatText(p.pos.x, p.pos.y + 2.6, p.pos.z, sk.name, { color: '#ffe0a0', force: true });
       if (sk.fear) for (const e of entitiesNear(p.pos.x, p.pos.z, sk.radius, (e) => hostile(p, e))) applyStatus(e, 'fear', sk.fear);
       if (sk.id === 'bonebarrier') burst(p.pos.x, p.pos.y + 1, p.pos.z, { count: 30, speed: 4, color: '#e8e0d0', additive: false, life: 1, size: 0.4 });
-      p.st.action = 'attack'; p.st.kind = 'castup'; p.st.actionT = 0.5;
-      setTimeoutGame(0.3, () => { if (p.st.kind === 'castup') p.st.action = null; });
+      p.playPose('castup', 0.5);
       break;
     }
     case 'dash': {
@@ -472,7 +471,7 @@ export function useSkill(p, sk, combo) {
         spawnProjectile({ x: p.pos.x + Math.sin(a) * 0.6, y: p.pos.y + 1.35, z: p.pos.z + Math.cos(a) * 0.6, vx: Math.sin(a) * sp, vz: Math.cos(a) * sp, owner: p, dmg, crit, element: elA, kind: 'arrow', pierce: sk.pierce || 0, pull: sk.pull || 0, life: 1.4, status: elA === 'fire' ? { burn: 2 } : elA === 'lightning' ? { shock: 1 } : null, chain: p.derived.passives.arrowChain || 0, heavy: sk.type === 'shot' });
       }
       p.action = { type: 'shot', t: 0, dur: 0.3, faceAim: true };
-      p.st.action = 'attack'; p.st.kind = 'bowrelease'; p.st.actionT = 0;
+      p.playPose('bowrelease', 0.4);
       break;
     }
     case 'rain': {
@@ -485,7 +484,7 @@ export function useSkill(p, sk, combo) {
         });
       }
       p.action = { type: 'shot', t: 0, dur: 0.35, faceAim: true };
-      p.st.action = 'attack'; p.st.kind = 'bowrelease'; p.st.actionT = 0;
+      p.playPose('bowrelease', 0.4);
       break;
     }
     case 'barrage': {
@@ -498,11 +497,12 @@ export function useSkill(p, sk, combo) {
         setTimeoutGame(i * 0.035, () => spawnProjectile({ x: sp.x, y: p.pos.y + 1.3, z: sp.z, vx: Math.sin(a) * 20, vz: Math.cos(a) * 20, owner: p, dmg, element: el, kind: 'orb', size: 0.24, homing: 7, life: 1.4, dmgKind: 'spell' }));
       }
       p.action = { type: 'shot', t: 0, dur: 0.22, faceAim: true };
-      p.st.action = 'attack'; p.st.kind = 'cast'; p.st.actionT = 0;
+      p.playPose('cast', 0.4);
       break;
     }
-    case 'stealth': p.enterStealth(sk.duration); break;
+    case 'stealth': p.playPose('castup', 0.3); p.enterStealth(sk.duration); break;
     case 'teleport': {
+      p.playPose('cast', 0.32);
       let best = null, bd = sk.range * sk.range;
       for (const e of G.entities) {
         if (e.dead || !hostile(p, e)) continue;
@@ -530,6 +530,7 @@ export function useSkill(p, sk, combo) {
       break;
     }
     case 'dashblink': {
+      p.playPose('spearthrust', 0.3);
       const pt = aimPoint(p, sk.range);
       let tx = pt.x, tz = pt.z;
       if (G.realm === 'dungeon') for (let k = 10; k >= 0; k--) { const t = k / 10; const x = p.pos.x + (pt.x - p.pos.x) * t, z = p.pos.z + (pt.z - p.pos.z) * t; if (!dungeonWallAt(x, z) && dungeonLOS(p.pos.x, p.pos.z, x, z)) { tx = x; tz = z; break; } }
@@ -574,10 +575,11 @@ export function useSkill(p, sk, combo) {
       const T = 0.55;
       spawnProjectile({ x: p.pos.x, y: p.pos.y + 1.6, z: p.pos.z, vx: (pt.x - p.pos.x) / T, vy: 9, vz: (pt.z - p.pos.z) / T, gravity: -2 * 9 / T, owner: p, dmg: wd * sk.dmg * (1 + p.derived.spellPower / 200), element: fe, kind: 'orb', size: 0.25, explode: sk.radius, status: fe === 'fire' ? { burn: 3 } : fe === 'frost' ? { chill: 2 } : fe === 'rot' ? { poison: 3 } : { shock: 2 }, life: T + 0.3 });
       p.action = { type: 'shot', t: 0, dur: 0.35, faceAim: true };
-      p.st.action = 'attack'; p.st.kind = 'throw'; p.st.actionT = 0;
+      p.playPose('throw', 0.42);
       break;
     }
     case 'totem': {
+      p.playPose('slam', 0.45);
       const pt = aimPoint(p, 6);
       const h = spawnHazard({ x: pt.x, z: pt.z, radius: sk.radius, owner: p, dmg: wd * 0.25, tick: 1, life: sk.duration, element: 'nature', status: { root: 1, bleed: 1 }, kind: 'totem' });
       h.totem = true;
@@ -586,6 +588,7 @@ export function useSkill(p, sk, combo) {
       break;
     }
     case 'trap': {
+      p.playPose('throw', 0.4);
       const pt = aimPoint(p, 5);
       const h = spawnHazard({ x: pt.x, z: pt.z, radius: sk.radius, owner: p, dmg: 0, tick: 0.1, life: 30, element: 'physical', color: '#c0a060', opacity: 0.25 });
       h.onTick = (hz) => {
@@ -595,6 +598,7 @@ export function useSkill(p, sk, combo) {
       break;
     }
     case 'wall': {
+      p.playPose('bash', 0.45);
       const cx = p.pos.x + Math.sin(ang) * 3, cz = p.pos.z + Math.cos(ang) * 3;
       iceWall(cx, cz, ang, sk.duration, p);
       break;
