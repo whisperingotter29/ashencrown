@@ -129,6 +129,12 @@ function underside(L, cols, x0 = 0, x1 = L.w - 1) {
     for (let k = 0; k < cols.length; k++) if (L.a(x, y - k)) L.set(x, y - k, cols[k]);
   }
 }
+// fill 1-px pinholes a thin polygon leaves behind
+function fillGaps(L, c) {
+  const h = [];
+  for (let y = 1; y < L.h - 1; y++) for (let x = 1; x < L.w - 1; x++) if (!L.a(x, y) && ((L.a(x - 1, y) && L.a(x + 1, y)) || (L.a(x, y - 1) && L.a(x, y + 1)))) h.push(x, y);
+  for (let i = 0; i < h.length; i += 2) L.set(h[i], h[i + 1], c);
+}
 // clear the part of a layer that sits inside an ellipse (lets the form underneath keep its shading)
 function clipOut(L, cx, cy, rx, ry) {
   for (let y = Math.floor(cy - ry); y <= Math.ceil(cy + ry); y++) for (let x = Math.floor(cx - rx); x <= Math.ceil(cx + rx); x++) {
@@ -346,6 +352,7 @@ function quadFrame(o, D, pose) {
     fan.push(pts[pts.length - 1]);
     const n = fan.length, L = blank(p);
     L.poly(fan, Wr[2]);
+    fillGaps(L, Wr[2]);
     // scallops: a shallow bite out of each trailing-edge span
     const cxm = fan.reduce((a, q) => a + q[0], 0) / n, cym = fan.reduce((a, q) => a + q[1], 0) / n;
     for (let i = 2; i < n - 1; i++) {
@@ -1247,11 +1254,12 @@ function flyerFrame(o, D, pose) {
     switch (pose.w) {
       case 0: pts = [[shX, shY + fo], [shX - 3 * u, shY - 10 * u + fo], [shX - 8 * u, shY - 8 * u + fo], [shX - 5 * u, shY + fo]]; break;
       case 1: pts = [[shX, shY + fo], [shX - 6 * u, shY - 5 * u + fo], [shX - 12 * u, shY - 3 * u + fo], [shX - 4 * u, shY + one + fo]]; break;
-      case 2: pts = [[shX, shY + fo], [shX - 5 * u, shY + 5 * u + fo], [shX - 10 * u, shY + 7 * u + fo], [shX - 3 * u, shY + one + fo]]; break;
+      case 2: pts = [[shX, shY + fo], [shX - 5 * u, shY + 5 * u + fo], [shX - 10 * u, shY + 7 * u + fo], [shX - 6 * u, shY + 1.5 * u + fo]]; break;
       default: pts = [[shX, shY + fo], [shX - 6 * u, shY - 2 * u + fo], [shX - 12 * u, shY + fo], [shX - 4 * u, shY + 2 * one + fo]];
     }
     const L = blank(p);
     L.poly(pts, W[2]);
+    fillGaps(L, W[2]);
     // coverts: the inner part of the wing a tone lighter
     L.poly([pts[0], lerpP(pts[0], pts[1], 0.85), lerpP(pts[0], pts[2], 0.48), lerpP(pts[0], pts[3], 0.75)], W[3]);
     // primaries: notched feather tips along the outer and trailing edges, with separation lines
@@ -1261,7 +1269,6 @@ function flyerFrame(o, D, pose) {
       const d = Math.hypot(pts[0][0] - q[0], pts[0][1] - q[1]) || 1;
       const len = Math.max(2, 1.2 * u);
       L.line(q[0], q[1], q[0] + (pts[0][0] - q[0]) / d * len, q[1] + (pts[0][1] - q[1]) / d * len, W[1]);
-      L.clear(Math.round(q[0]), Math.round(q[1]));
     }
     // gull wingtips are black with a white mirror spot
     if (kind === 'gull') {

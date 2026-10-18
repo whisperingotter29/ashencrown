@@ -935,6 +935,9 @@ export class Actor {
   // ================================================================ creatures
   drawCreature(ctx, x, y) {
     const e = this.ent, st = e.st, k = this.k;
+    // motion offsets are authored in old design pixels: one is ART art pixels, times the old
+    // upscale big bodies used to get, so hover, lunges and knock-back cover the same world distance
+    const cs = this.spec.creature.s, mk = (PPU / 10) * (cs <= 2.6 ? 1 : Math.min(4, Math.ceil(cs / 2.6)));
     this._ax = x; this._ay = y;
     this._glows = null;
     const vName = this.pickView(e.facing);
@@ -957,28 +960,28 @@ export class Actor {
     // gx/gz move the body over the ground (its shadow follows), lift raises it off the ground
     let gx = 0, gz = 0, lift = 0, rot = 0;
     const hover = this.kind === 'wraith' || this.kind === 'eye';
-    if (hover) lift = Math.round((3 + Math.sin(this.t * 2.2 + (st.seed || 0)) * 1.5) * k);
+    if (hover) lift = Math.round((3 + Math.sin(this.t * 2.2 + (st.seed || 0)) * 1.5) * mk);
     if (kind && !e.dead) {
       const ph = phases(u, su);
       const big = this.kind === 'quadruped' || this.kind === 'dragon' || this.kind === 'arachnid' ? 3 : 2;
       const l = ph.inWind ? -easeOut(ph.w) * 1.5 : ph.inStrike ? lerp(-1.5, big, easeOut(ph.s)) : ph.inHold ? big : ph.inFollow ? big : lerp(big, 0, easeIO(ph.r));
-      gx += fx * l * k; gz += fz * l * k * 0.6;
+      gx += fx * l * mk; gz += fz * l * mk * 0.6;
       // crouch before the pounce, rise into it
-      if (ph.inWind && (this.kind === 'quadruped' || this.kind === 'arachnid')) lift -= Math.round(easeOut(ph.w) * k);
-      if (ph.inStrike && this.kind === 'quadruped') lift += Math.round(Math.sin(ph.s * Math.PI) * 2 * k);
+      if (ph.inWind && (this.kind === 'quadruped' || this.kind === 'arachnid')) lift -= Math.round(easeOut(ph.w) * mk);
+      if (ph.inStrike && this.kind === 'quadruped') lift += Math.round(Math.sin(ph.s * Math.PI) * 2 * mk);
     }
     if (this.moving && !hover && !e.dead && this.kind !== 'serpent' && this.kind !== 'blob' && this.kind !== 'flyer') {
       // gallop bob: down on the footfalls
-      lift -= [0, 1, 0, 0, 1, 0][Math.floor(this.ph) % 6] * k;
+      lift -= Math.round([0, 1, 0, 0, 1, 0][Math.floor(this.ph) % 6] * mk);
     }
-    if ((st.hitT || 0) > 0.35 && !e.dead) { const r = Math.round(((st.hitT || 0) - 0.35) * 3) * k; gx -= fx * r; gz -= fz * r * 0.6; }
+    if ((st.hitT || 0) > 0.35 && !e.dead) { const r = Math.round(((st.hitT || 0) - 0.35) * 3 * mk); gx -= fx * r; gz -= fz * r * 0.6; }
     if (e.dead) {
       const d = easeOut(clamp01(e.deathT * 3));
       if (this.kind === 'quadruped' || this.kind === 'arachnid' || this.kind === 'dragon') {
         if (e.deathT > 0.3) this._dead90 = true;
-        else lift += Math.round(Math.sin(e.deathT / 0.3 * Math.PI) * 2);
+        else lift += Math.round(Math.sin(e.deathT / 0.3 * Math.PI) * 2 * mk);
       }
-      if (this.kind === 'wraith' || this.kind === 'eye' || this.kind === 'flyer') lift -= Math.round(d * 4 * k);
+      if (this.kind === 'wraith' || this.kind === 'eye' || this.kind === 'flyer') lift -= Math.round(d * 4 * mk);
     }
     gx = Math.round(gx); gz = Math.round(gz);
     this.hoverPx = Math.max(0, lift);
@@ -1003,7 +1006,7 @@ export class Actor {
     } else if (e.dead && this._dead90 && e.deathT > 0.3) {
       const q = flip ? 3 : 1;
       const rp = variant(flip ? variant(fr.pix, 'flip') : fr.pix, 'rot' + q);
-      this.body(ctx, { pix: rp, emis: null }, px, py - Math.round(fr.pix.oy * 0.25) * k + 2 * k, k, 0, false, {});
+      this.body(ctx, { pix: rp, emis: null }, px, py - Math.round(fr.pix.oy * 0.25) * k + Math.round(2 * mk), k, 0, false, {});
     } else this.body(ctx, fr, px, py, k, rot, flip, { cast });
     if (!e.dead) this._dead90 = false;
     // floating eye iris tracks its target
@@ -1014,13 +1017,13 @@ export class Actor {
       const L = this.spr.lookR;
       const ix = px + Math.round(ax * L * k), iy = py + Math.round((this.spr.eyeAt[1] + az * L) * k);
       this.body(ctx, this.spr.iris, ix, iy, k, 0, false, { noAura: true });
-      this._glows = [[ix, iy, this.spec.creature.c3, 7 * k, st.action ? 0.8 : 0.4]];
+      this._glows = [[ix, iy, this.spec.creature.c3, 7 * mk, st.action ? 0.8 : 0.4]];
     }
     // glowing maw while breathing fire / beams
     if ((st.breathing || (kind === 'cast' && u > su - 0.1 && u < su + 0.3)) && this.spr.mouth) {
       const mx = px + (flip ? -this.spr.mouth[0] : this.spr.mouth[0]) * k, my = py + this.spr.mouth[1] * k;
       this._glows = this._glows || [];
-      this._glows.push([mx, my, this.spec.creature.c3, 10 * k, 0.8]);
+      this._glows.push([mx, my, this.spec.creature.c3, 10 * mk, 0.8]);
     }
     const mouth = this.spr.mouth || [0, -Math.round(this.heightPx * 0.6 / k)];
     this._tipPx = [(flip ? -mouth[0] : mouth[0]) * k + ox, mouth[1] * k + oy];
