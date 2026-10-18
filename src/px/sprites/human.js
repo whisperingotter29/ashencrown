@@ -18,9 +18,17 @@
 // m.feet), because big bodies are drawn at their real size. Geometry that grows with the body uses
 // m.hf (1 for people, up to ~2.4 for giant bosses); outlines, eyes and glints stay 1 px.
 // Glowing pixels (eyes, runes, embers, void marks) go to a separate emissive layer.
-import { Pix, C, light, dark, mixc, alpha, hash2, ART } from '../pix.js';
+import { Pix, C, light, dark, mixc, alpha, hash2, ART, INK, CREAM } from '../pix.js';
+import { tone, glow, pale, rampStep, capChroma } from '../lookTone.js';
 
 const cache = new Map();
+// palette constants (src/px/palette.js ramps)
+const VOID = C('#140913'), VOID_RIM = C('#401a36');                 // hood shadow, its plum rim
+const BONE = C('#e2d4b8'), MOUTH = C('#3e1c2c'), TUSK = C('#f3e1b5');
+const GOLD = [C('#fff4dc'), C('#e8c35a'), C('#c99a3a'), C('#6a3e1c')];  // buckle glint / lit / mid / shade
+const RED = { l: C('#d9765a'), m: C('#b04a3e'), d: C('#8a3434') };
+// textures come in small clusters (3x2 bricks, offset every other row), never per-pixel speckle
+const clump = (x, y, s) => hash2(Math.floor((x + ((y >> 1) & 1) * 2) / 3), y >> 1, s);
 
 export function humanSprites(look) {
   const key = JSON.stringify(look);
@@ -53,23 +61,34 @@ export function humanSprites(look) {
 
 const SHORT = ['short', 'messy', 'swept', 'spiky', 'short'];
 const LONG = ['long', 'ponytail', 'braid', 'long', 'bun'];
-const IRIS = ['#241826', '#22304e', '#2e4424', '#4a2e1a', '#241826'];
+// eyes: deep ink-plum, ink-navy, ink-green, ink-brown
+const IRIS = ['#1d0814', '#120c30', '#152018', '#2a1a1c', '#1d0814'];
+// every look colour goes through the master palette: bodies and cloth snap to the ramps, glows stay
+// bright accents, boots are lifted into the pale dusty band
+const T = (c) => (c ? tone(c) : null), G = (c) => (c ? glow(c) : null);
+function normHelm(h) {
+  if (!h) return null;
+  return { ...h, color: T(h.color), trim: T(h.trim), plume: T(h.plume), glow: G(h.glow), eyes: G(h.eyes), gem: G(h.gem) };
+}
 function norm(o) {
   const vs = (o.vseed ?? 0) | 0;
   let style = o.hairStyle;
   if (!style) style = o.longHair ? LONG[vs % LONG.length] : o.tusks ? 'mohawk' : o.beard ? 'crop' : SHORT[vs % SHORT.length];
+  const bg = o.bootsGear;
   return {
-    skin: o.skin || '#d8b090', hair: o.hair || null, hairStyle: style, vs,
-    beard: !!o.beard, ears: o.ears || null, beastEars: !!o.beastEars, tusks: !!o.tusks, horns: !!o.horns, fins: !!o.fins, finColor: o.finColor || '#3a8a9a',
-    wings: !!o.wings, wingColor: o.wingColor || '#e0c0ff', tail: !!o.tail, eyes: o.eyesGlow || null, voidMarks: o.voidMarks || null, glowSkin: o.glowSkin || null,
+    skin: T(o.skin || '#d9967e'), hair: T(o.hair), hairStyle: style, vs,
+    beard: !!o.beard, ears: o.ears || null, beastEars: !!o.beastEars, tusks: !!o.tusks, horns: !!o.horns, fins: !!o.fins, finColor: T(o.finColor || '#2f7070'),
+    wings: !!o.wings, wingColor: T(o.wingColor || '#c8a4dc'), tail: !!o.tail, eyes: G(o.eyesGlow), voidMarks: G(o.voidMarks), glowSkin: G(o.glowSkin),
     stone: !!o.stone, skeleton: !!o.skeleton, bark: !!o.bark, golem: !!o.golem, scales: !!o.scales,
     scale: o.scale || 1, build: o.build || 1,
-    shirt: o.shirt || '#6a5a4a', pants: o.pants || '#4a3a30', boots: o.bootsColor || '#3a2a20',
+    shirt: T(o.shirt || '#674952'), pants: T(o.pants || '#3f2622'), boots: o.golem || o.bark ? T(o.bootsColor || '#827d82') : pale(o.bootsColor || '#828882'),
     // a class's default hood is worn when no helm is equipped; hooded figures get a cloak that
     // wraps across the chest
-    helm: o.helm || o.hoodDefault || null, chest: o.chest || null, gloves: o.gloves || null, legs: o.legs || null, bootsGear: o.bootsGear || null,
-    cape: o.cape || o.cloak || null, capeTrim: o.capeTrim || null, cloak: !!o.cloak && (!o.helm || o.helm.kind === 'hood'), apron: o.apron || null, crown: o.crown || null, scarf: o.scarf || null, quiver: !!o.quiver,
-    canopy: o.canopy || null, knots: o.knots || null, crystals: o.crystals || null, core: o.core || null,
+    helm: normHelm(o.helm || o.hoodDefault), chest: o.chest ? { ...o.chest, color: T(o.chest.color), trim: T(o.chest.trim) } : null,
+    gloves: o.gloves ? { color: T(o.gloves.color) } : null, legs: o.legs ? { color: T(o.legs.color) } : null,
+    bootsGear: bg ? { color: bg.metal ? T(bg.color) : pale(bg.color), metal: !!bg.metal } : null,
+    cape: T(o.cape || o.cloak), capeTrim: T(o.capeTrim), cloak: !!o.cloak && (!o.helm || o.helm.kind === 'hood'), apron: T(o.apron), crown: T(o.crown), scarf: T(o.scarf), quiver: !!o.quiver,
+    canopy: T(o.canopy), knots: G(o.knots), crystals: G(o.crystals), core: G(o.core),
     iris: IRIS[vs % IRIS.length],
   };
 }
@@ -107,22 +126,28 @@ export const FW = DEF.fw, FH = DEF.fh, CX = DEF.cx, FEET = DEF.feet;
 
 // colours the actor needs to draw the runtime arms
 function armPalette(L, m) {
-  const sleeve = L.skeleton ? C('#ddd4be') : L.chest ? C(L.chest.color) : C(L.shirt);
+  const sleeve = L.skeleton ? BONE : L.chest ? C(L.chest.color) : C(L.shirt);
   const plate = L.chest?.weight === 'plate' || L.chest?.weight === 'mail';
   const skin = skinOf(L);
-  const hand = L.skeleton ? C('#e8e0cc') : L.gloves ? C(L.gloves.color) : skin;
+  const hand = L.skeleton ? BONE : L.gloves ? C(L.gloves.color) : skin;
   return {
     sleeve, sleeveL: light(sleeve, plate ? 1.3 : 1.16), sleeveD: dark(sleeve, 0.66), cuff: L.chest?.trim ? C(L.chest.trim) : dark(sleeve, 0.8),
     hand, handL: light(hand, 1.14), handD: dark(hand, 0.7), w: m.armW, plate,
   };
 }
-function skinOf(L) { return L.skeleton ? C('#e8e0cc') : C(L.skin); }
+function skinOf(L) { return L.skeleton ? BONE : C(L.skin); }
 
 // ------------------------------------------------------------------ material ramps
 // dd (deep shadow) / d / md (half shadow) / m / l (lit) / ll (highlight)
-const ramp = (c, kd = 0.68, kl = 1.18) => { c = C(c); const d = dark(c, kd); return { dd: dark(c, kd * 0.66), d, md: mixc(c, d, 0.5), m: c, l: light(c, kl), ll: light(c, kl * 1.14) }; };
-const skinRamp = (c) => { c = C(c); const d = mixc(dark(c, 0.74), '#a03028', 0.12); return { d, md: mixc(c, d, 0.5), m: c, l: light(c, 1.1), dd: mixc(dark(c, 0.56), '#601820', 0.15) }; };
+// n steps down / up the colour's own master ramp; off-ramp colours fall back to the hue-shifted
+// dark() / light(), the shadow's chroma held near the base's
+const down = (c, n, k) => { const s = rampStep(c, -n); return s ? C(s) : capChroma(dark(c, k), c); };
+const up = (c, n, k) => { const s = rampStep(c, n); return s ? C(s) : light(c, k); };
+const ramp = (c, kd = 0.68, kl = 1.18) => { c = C(c); const d = down(c, 1, kd); return { dd: down(c, 2, kd * 0.66), d, md: mixc(c, d, 0.5), m: c, l: up(c, 1, kl), ll: up(c, 2, kl * 1.14) }; };
+const skinRamp = (c) => { c = C(c); const d = down(c, 1, 0.76); return { d, md: mixc(c, d, 0.5), m: c, l: up(c, 1, 1.1), dd: down(c, 2, 0.58) }; };
 const dim = (R) => { const o = {}; for (const k in R) o[k] = dark(R[k], 0.8); return o; };
+// cloth trim along hood edges and cloak hems: cream with a breath of the cloth's own hue
+const capeTrimOf = (c) => mixc(light(c, 1.5), CREAM, 0.72);
 // one step darker on a ramp (texture passes)
 const stepD = (R, c) => (c === R.ll ? R.l : c === R.l ? R.m : c === R.m ? R.md : c === R.md ? R.d : R.dd);
 
@@ -166,7 +191,7 @@ function fig(L, m, view, pose) {
   if (!up) backHair(p, F, hx, hy);
   if (L.quiver && !up) quiver(p, F, true);
   // ---- legs, skirt, torso
-  if (pose.legs !== 'ride' && (L.stone || L.bark)) legsTextured(p, F);
+  if (pose.legs !== 'ride' && (L.golem || L.bark)) legsTextured(p, F);
   else if (pose.legs !== 'ride') legs(p, F);
   else rideLegs(p, F);
   if (robe && pose.legs !== 'ride' && pose.legs !== 'tuck') robeSkirt(p, F);
@@ -192,22 +217,34 @@ function hasPixels(p) { for (let i = 3; i < p.d.length; i += 4) if (p.d[i]) retu
 function legsTextured(p, F) {
   const q = new Pix(p.w, p.h);
   legs(q, F);
-  const { L, S } = F, course = Math.max(6, S(9));
+  const { L, S } = F;
   for (let y = 0; y < q.h; y++) for (let x = 0; x < q.w; x++) {
     const c = q.get(x, y);
     if (!c[3]) continue;
-    let k = 1;
-    if (L.stone) {
-      const h = hash2(x, y, 4);
-      if (h < 0.12) k = 0.82; else if (h > 0.95) k = 1.08;
-      // broken mortar lines between stacked blocks
-      if (y % course === course - 1 && hash2(x >> 2, y, 6) < 0.6) k = 0.7;
-    }
-    if (L.bark) { if ((x * 3 + y) % 5 === 0) k = 0.8; else if (hash2(x, y >> 1, 12) < 0.06) k = 0.68; }
-    q.set(x, y, k === 1 ? c : k < 1 ? dark(c, k) : light(c, k));
+    q.set(x, y, texK(c, L.bark ? barkK(x, y, S) : stoneK(x, y, S)));
   }
   p.blit(q, 0, 0);
 }
+
+// Big-body materials, in clusters that grow with the body: stone is masonry (blocks in offset
+// courses, a dark mortar line under and right of each block, a lit top edge, each block a shade
+// apart); bark is long vertical ridges (a dark groove, a lit ridge beside it, broken now and then)
+function stoneK(x, y, S) {
+  const bw = Math.max(6, S(9)), bh = Math.max(4, S(6));
+  const row = Math.floor(y / bh), xx = x + (row & 1) * (bw >> 1);
+  const col = Math.floor(xx / bw), lx = xx - col * bw, ly = y - row * bh;
+  if (ly === bh - 1) return 0.74;
+  if (lx === bw - 1) return 0.84;
+  if (ly === 0) return 1.08;
+  const v = hash2(col, row, 31);
+  return v < 0.3 ? 0.92 : v > 0.82 ? 1.05 : 1;
+}
+function barkK(x, y, S) {
+  const g = Math.max(3, S(4)), cx = Math.floor(x / g), lx = x - cx * g;
+  if (hash2(cx, Math.floor(y / Math.max(5, S(8))), 41) < 0.18) return 1;
+  return lx === 0 ? 0.74 : lx === 1 ? 1.07 : 1;
+}
+const texK = (c, k) => (k === 1 ? c : k < 1 ? capChroma(dark(c, k), c) : light(c, k));
 
 function legs(p, F) {
   const { L, m, side, up, tw, tl, tr, ty1, ft, FE, S } = F;
@@ -218,7 +255,7 @@ function legs(p, F) {
   const mailLegs = armoured && L.chest?.weight === 'mail';
   const hipY = ty1 + 1, BH = m.bootH;
   if (L.skeleton) {
-    const bone = C('#ddd4be'), boneD = dark(bone, 0.72), boneL = light(bone, 1.08);
+    const bone = BONE, boneD = dark(bone, 0.72), boneL = light(bone, 1.08);
     const draw = (x, f, far) => {
       const yb = FE - f.lift + (side ? 0 : (up ? -f.pos : f.pos) * ft.fy);
       const fx = side ? x + f.pos * ft.stride : x;
@@ -348,7 +385,7 @@ function torso(p, e, F) {
   const { L, side, up, tw, tl, tr, ty0, ty1, cw, mL, mR, S } = F;
   const H = ty1 - ty0 + 1;
   if (L.skeleton) {
-    const bone = C('#e8e0cc'), d = dark(bone, 0.72), l = light(bone, 1.1);
+    const bone = BONE, d = dark(bone, 0.72), l = light(bone, 1.1);
     for (let y = ty0; y <= ty1; y++) { p.set(mL, y, d); p.set(mR, y, dark(d, 0.85)); }
     for (let r = 0; ; r++) {
       const y = ty0 + 2 + r * 2;
@@ -360,8 +397,8 @@ function torso(p, e, F) {
     return;
   }
   const base = L.chest ? L.chest.color : L.shirt;
-  const R = cw === 'plate' ? ramp(mixc(base, '#e8ecf0', 0.06), 0.56, 1.12) : cw === 'mail' ? ramp(mixc(base, '#c8ccd0', 0.12), 0.6, 1.16) : ramp(base, 0.66, 1.14);
-  const T = ramp(C(L.chest?.trim || '#c8a050'), 0.7, 1.2);
+  const R = cw === 'plate' ? ramp(base, 0.56, 1.14) : cw === 'mail' ? ramp(base, 0.6, 1.16) : ramp(base, 0.66, 1.14);
+  const T = ramp(C(L.chest?.trim || '#c99a3a'), 0.7, 1.2);
   // body block with sloped shoulders: lit down the left, half shade then shade to the right,
   // the waist darker
   for (let y = ty0; y <= ty1; y++) for (let x = tl; x <= tr; x++) {
@@ -373,10 +410,10 @@ function torso(p, e, F) {
     else if (v > 0.7 && c === R.m && u > 0.4) c = R.md;
     // material texture
     if (cw === 'mail') { if ((x + y) % 2 === 0) c = stepD(R, c); }
-    else if (cw === 'leather') { if (hash2(x, y, 11) < 0.1) c = stepD(R, c); }
-    else if (!side && (x - tl) % 4 === 3 && y > ty0 + 2 && y < ty1 - 2) c = stepD(R, c);   // cloth folds
-    if (L.bark && (x * 3 + y) % 5 === 0) c = dark(c, 0.8);
-    if (L.stone && hash2(x, y, 4) < 0.12) c = dark(c, 0.82);
+    else if (cw === 'leather') { if (clump(x, y, 11) < 0.12) c = stepD(R, c); }
+    else if (!side && !L.golem && !L.bark && (x - tl) % 4 === 3 && y > ty0 + 2 && y < ty1 - 2) c = stepD(R, c);   // cloth folds
+    if (L.bark) c = texK(c, barkK(x, y, S));
+    else if (L.golem) c = texK(c, stoneK(x, y, S));
     if (L.scales) { const k = (x + ((y >> 1) & 1) * 2) % 4, r = y & 1; if (r === 1 && k === 0) c = dark(c, 0.82); else if (r === 0 && (k === 1 || k === 2)) c = light(c, 1.08); }
     p.set(x, y, c);
   }
@@ -388,7 +425,7 @@ function torso(p, e, F) {
       for (let x = mR + 1; x < tr; x++) p.set(x, ty0 + Math.round(H * 0.45), R.dd);
       belt(p, F, ty1 - 2, T, true);
     } else if (cw === 'leather') {
-      const sc = mixc(R.dd, '#2a1810', 0.4);
+      const sc = mixc(R.dd, '#2a1a1c', 0.4);
       p.line(tl, ty0 + 1, tr, ty1 - 3, sc, 2); p.line(tr, ty0 + 1, tl, ty1 - 3, sc, 2);
       belt(p, F, ty1 - 1, T);
     } else if (cw === 'cloth') {
@@ -433,17 +470,17 @@ function torso(p, e, F) {
     if (!side) {
       p.set(mL, ty0, neck); p.set(mR, ty0, neck); p.set(mL, ty0 + 1, neckD); p.set(mR, ty0 + 1, dark(neck, 0.66));
       for (let y = ty0 + 4; y < ty1 - 2; y += 2) { p.set(tl + 1, y, R.l); p.set(tr - 1, y, R.md); }
-      const sc = mixc(R.dd, '#2a1810', 0.4), sl = mixc(R.d, '#5a3a24', 0.4);
+      const sc = mixc(R.dd, '#2a1a1c', 0.4), sl = mixc(R.d, '#5a3628', 0.4);
       p.line(tl + 1, ty0 + 1, tr - 1, ty1 - 3, sc, 2);
       p.line(tl + 1, ty0, tr - 1, ty1 - 4, sl);
       const bx = Math.round((tl + tr) / 2), by = Math.round((ty0 + ty1 - 3) / 2);
       p.set(bx, by, T.ll); p.set(bx + 1, by, T.l); p.set(bx, by + 1, T.m); p.set(bx + 1, by + 1, T.d);
-    } else p.line(tr, ty0 + 1, tl, ty1 - 3, mixc(R.dd, '#2a1810', 0.4), 2);
+    } else p.line(tr, ty0 + 1, tl, ty1 - 3, mixc(R.dd, '#2a1a1c', 0.4), 2);
     belt(p, F, ty1 - 1, T);
     if (!side) {
       // pouch on the hip
-      const P = ramp('#6a4a2a'), x0 = tr - S(3), y0 = ty1 - 1;
-      p.rect(x0, y0, S(3), S(3), P.m); p.rect(x0, y0, S(3), 1, P.l); p.set(x0 + S(3) - 1, y0 + 1, P.d); p.rect(x0, y0 + S(3) - 1, S(3), 1, P.d); p.set(x0 + 1, y0 + 1, '#d8b060');
+      const P = ramp('#77492f'), x0 = tr - S(3), y0 = ty1 - 1;
+      p.rect(x0, y0, S(3), S(3), P.m); p.rect(x0, y0, S(3), 1, P.l); p.set(x0 + S(3) - 1, y0 + 1, P.d); p.rect(x0, y0 + S(3) - 1, S(3), 1, P.d); p.set(x0 + 1, y0 + 1, GOLD[1]);
     }
   } else if (cw === 'cloth') {
     // robe: open collar showing the neck, trimmed lapels meeting at the sternum, trim down the
@@ -469,25 +506,25 @@ function torso(p, e, F) {
   }
   if (cw === 'plate' || cw === 'mail') skirt(p, F, R, T);
   // runes / embers / void marks / constructs' core on bare chests
-  if (L.glowSkin && !L.chest) for (const [dx, dy] of [[1, 1], [1, 2], [0, 3], [0, 4], [-1, 3], [1, 5], [2, 6], [-1, 6], [-2, 7]]) { const x = mL + dx, y = ty0 + dy; if (y < ty1 - 1) { e.set(x, y, L.glowSkin); p.set(x, y, mixc(L.glowSkin, '#ffffff', 0.25)); } }
+  if (L.glowSkin && !L.chest) for (const [dx, dy] of [[1, 1], [1, 2], [0, 3], [0, 4], [-1, 3], [1, 5], [2, 6], [-1, 6], [-2, 7]]) { const x = mL + dx, y = ty0 + dy; if (y < ty1 - 1) { e.set(x, y, L.glowSkin); p.set(x, y, mixc(L.glowSkin, CREAM, 0.25)); } }
   if (L.voidMarks && !L.chest) for (let x = tl + 1; x <= tr - 1; x++) { if ((x & 1) === 0) e.set(x, ty0 + 3, L.voidMarks); if ((x & 3) === 1) e.set(x, ty0 + 5, L.voidMarks); }
   if (L.stone && !L.chest) { p.line(mL, ty0, mR + 1, ty1 - 3, dark(R.m, 0.6)); p.line(mR + 1, ty0 + 4, tr - 1, ty0 + 6, dark(R.m, 0.6)); }
   if (L.core) {
     const cy = ty0 + S(4), cc = C(L.core), r = S(2);
     for (let dy = -r; dy <= r; dy++) for (let dx = -r; dx <= r; dx++) if (Math.abs(dx) + Math.abs(dy) <= r) { const c = Math.abs(dx) + Math.abs(dy) < r ? light(cc, 1.25) : cc; p.set(mL + dx, cy + dy, c); e.set(mL + dx, cy + dy, c); }
-    e.set(mL, cy, '#ffffff'); p.set(mL, cy, '#ffffff');
+    e.set(mL, cy, '#fff4fb'); p.set(mL, cy, '#fff4fb');
   }
   if (L.knots) for (const [dx, dy] of [[-3, 2], [3, 5], [0, 7]]) { p.set(mL + dx, ty0 + dy, L.knots); e.set(mL + dx, ty0 + dy, L.knots); p.set(mL + dx + 1, ty0 + dy, dark(L.knots, 0.7)); }
 }
-const BROWN = { m: C('#4a2e1c'), l: C('#6a4630'), d: C('#2e1c12'), dd: C('#20140c') };
+const BROWN = { m: C('#5a3628'), l: C('#77492f'), d: C('#3f2622'), dd: C('#2a1a1c') };
 
 // a two-row belt with a chunky gold buckle that hangs a pixel below the strap
 function belt(p, F, y, T, plate) {
   const { tl, tr, tw, side, up } = F;
-  const strap = plate ? T : T === BROWN ? BROWN : { m: C('#3e2618'), l: C('#5a3a24'), d: C('#24160e'), dd: C('#180e08') };
+  const strap = plate ? T : BROWN;
   for (let x = tl; x <= tr; x++) { p.set(x, y, x === tl ? strap.l : x === tr ? strap.d : strap.m); p.set(x, y + 1, x === tr ? strap.dd : strap.d); }
   if (up) return;
-  const G = [C('#fff0a8'), C('#f0d070'), C('#c09838'), C('#7a5a20')];
+  const G = GOLD;
   if (side) { const bx = tr - 2; p.set(bx, y, G[0]); p.set(bx + 1, y, G[2]); p.set(bx, y + 1, G[1]); p.set(bx + 1, y + 1, G[3]); p.set(bx, y + 2, G[2]); return; }
   const bw = tw % 2 ? 3 : 4, bx = tl + ((tw - bw) >> 1);
   for (let j = 0; j < 3; j++) for (let i = 0; i < bw; i++) {
@@ -500,7 +537,7 @@ function belt(p, F, y, T, plate) {
 // a cloth skirt under the belt for mail and plate, with a stitched rune band
 function skirt(p, F, R, T) {
   const { L, side, up, tl, tr, ty1, cw, mL, mR, S } = F;
-  const Sk = ramp(L.chest.trim ? mixc(L.chest.trim, '#3a2a4a', 0.55) : '#4a3a5a', 0.66, 1.18), Rn = C(L.chest.trim || '#40c0c0');
+  const Sk = ramp(L.chest.trim ? tone(mixc(L.chest.trim, '#2a1838', 0.55)) : '#4a3266', 0.66, 1.18), Rn = C(L.chest.trim || '#4a9488');
   const rows = S(5);
   for (let j = 1; j <= rows; j++) {
     const y = ty1 + j, fl = j >= 3 ? 1 : 0;
@@ -561,8 +598,8 @@ function robeSkirt(p, F) {
 
 function pauldrons(p, F) {
   const { L, side, up, tl, tr, ty0, cw, S } = F;
-  const M = cw === 'plate' ? mixc(L.chest.color, '#e8ecf0', 0.1) : cw === 'mail' ? mixc(L.chest.color, '#c8ccd0', 0.08) : dark(L.chest.color, 0.92);
-  const R = ramp(M, 0.6, 1.18), T = ramp(L.chest.trim || '#c8a050', 0.7, 1.2);
+  const M = cw === 'plate' || cw === 'mail' ? C(L.chest.color) : dark(L.chest.color, 0.92);
+  const R = ramp(M, 0.6, 1.18), T = ramp(L.chest.trim || '#c99a3a', 0.7, 1.2);
   const plate = cw === 'plate', mail = cw === 'mail';
   const hw = S(plate ? 4 : 3), top = -S(plate ? 2 : 1), bot = S(plate ? 3 : 2);
   // a rounded dome: lit from the top left, the trim band near the rim, a dark lip under it
@@ -590,16 +627,18 @@ function pauldrons(p, F) {
 // rocky shoulder boulders (golems) and crystal spikes (glass / ice)
 function boulders(p, e, F) {
   const { L, side, tl, tr, ty0, S } = F;
-  const M = C(L.skin), r = S(5);
+  const M = C(L.skin), R = ramp(M, 0.7, 1.2), r = S(5);
   const lump = (cx) => {
+    // a faceted rock: a lit top-left facet, the face, a shaded lower-right facet, a crack
     for (let y = -r; y <= r - 1; y++) for (let x = -r; x <= r; x++) {
       if (x * x * 0.8 + y * y > r * r + 1) continue;
-      let c = M;
-      if (y < -r * 0.3 || x < -r * 0.3) c = light(M, 1.2); else if (y > r * 0.2 || x > r * 0.4) c = dark(M, 0.7);
-      if (hash2(cx + x, y, 21) < 0.15) c = dark(M, 0.58);
+      let c = R.m;
+      if (y < -r * 0.35 || (x < -r * 0.35 && y < r * 0.3)) c = y < -r * 0.7 ? R.ll : R.l;
+      else if (y > r * 0.3 || x > r * 0.45) c = y > r * 0.7 ? R.dd : R.d;
+      if (x === Math.round(-y * 0.4) + S(1) && y > -r * 0.2 && y < r * 0.6) c = R.dd;
       p.set(cx + x, ty0 + y, c);
     }
-    p.set(cx - S(3), ty0 - S(3), light(M, 1.4)); p.set(cx - S(2), ty0 - S(3), light(M, 1.3));
+    p.set(cx - S(3), ty0 - S(3), light(R.ll, 1.1));
     if (L.crystals) for (let k = 0; k < 3; k++) {
       const x = cx - S(2) + k * S(2), h = S(k === 1 ? 6 : 4);
       for (let j = 0; j < h; j++) { const y = ty0 - r + 1 - j; p.set(x, y, j > h - 2 ? light(L.crystals, 1.4) : L.crystals); p.set(x + 1, y, dark(L.crystals, 0.75)); }
@@ -614,8 +653,8 @@ function boulders(p, e, F) {
 function cape(p, F) {
   const { L, side, up, tl, tr, ty0, pose, FE, S } = F;
   const R = ramp(L.cape, 0.62, 1.16);
-  const TR = C(L.capeTrim || mixc(light(L.cape, 1.7), '#f0e0b0', 0.5)), TRd = mixc(TR, R.d, 0.45);
-  const lining = dark(mixc(L.cape, '#201018', 0.35), 0.8);
+  const TR = C(L.capeTrim || capeTrimOf(L.cape)), TRd = mixc(TR, R.d, 0.45);
+  const lining = dark(mixc(L.cape, '#2a1838', 0.35), 0.8);
   const ph = (pose.cape | 0) % 4, sway = pose.sway | 0;
   const wave = [0, 1, 0, -1][ph];
   const bottom = FE - S(L.cloak ? 3 : 4) - (sway > 1 ? S(3) : sway * S(1));
@@ -633,9 +672,9 @@ function cape(p, F) {
         const lit = fold * 0.45 - fp * 0.7 + 0.32;
         let c = lit > 0.42 ? R.l : lit > 0.08 ? R.m : lit > -0.22 ? R.md : R.d;
         if (x === x1) c = R.dd;
-        if (x === x0) c = L.cloak ? TR : R.l;
+        if (x === x0) c = TR;
         if (y === ty0) c = R.l;
-        if (y >= bottom - (L.cloak ? 1 : 0)) c = L.cloak ? (y === bottom ? TRd : TR) : (x + y) & 1 ? R.d : R.dd;
+        if (y >= bottom - 1) c = y === bottom ? TRd : TR;                // trimmed hem
         p.set(x, y, c);
       }
     }
@@ -650,8 +689,8 @@ function cape(p, F) {
       const flare = Math.round(t * (S(2) + sway * S(2.5)) + (t > 0.4 ? wave * t * S(1.5) : 0));
       const x0 = back - 1 - flare, x1 = back + 2;
       for (let x = x0; x <= x1; x++) {
-        let c = x === x0 ? (L.cloak ? TR : R.d) : x === x0 + 1 ? R.l : x === x0 + 2 ? R.m : x === x0 + 3 ? R.md : lining;
-        if (y === bottom) c = L.cloak && x <= x0 + 2 ? TRd : R.dd;
+        let c = x === x0 ? TR : x === x0 + 1 ? R.l : x === x0 + 2 ? R.m : x === x0 + 3 ? R.md : lining;
+        if (y === bottom) c = x <= x0 + 2 ? TRd : R.dd;
         p.set(x, y, c);
       }
     }
@@ -664,10 +703,10 @@ function cape(p, F) {
     const xa = tl - 1 - g, xb = tr + 1 + g + (t > 0.5 && wave < 0 ? 1 : 0);
     for (let x = xa; x <= xb; x++) {
       let c;
-      if (x < tl) c = x === xa ? (L.cloak ? TR : R.l) : x === xa + 1 ? R.m : x === xa + 2 ? R.md : R.d;
+      if (x < tl) c = x === xa ? TR : x === xa + 1 ? R.l : x === xa + 2 ? R.m : R.md;
       else if (x > tr) c = x === xb ? R.dd : x === xb - 1 ? R.d : lining;
       else c = lining;
-      if (y === bottom) c = L.cloak && x < tl ? TRd : R.dd;
+      if (y === bottom) c = x < tl ? TRd : x > tr ? R.dd : lining;
       p.set(x, y, c);
     }
   }
@@ -678,7 +717,7 @@ function cape(p, F) {
 function drape(p, F) {
   const { L, side, tl, tr, ty0, ty1, tw, pose, FE, m, S } = F;
   const R = ramp(L.cape, 0.62, 1.16);
-  const TR = C(L.capeTrim || mixc(light(L.cape, 1.7), '#f0e0b0', 0.5));
+  const TR = C(L.capeTrim || capeTrimOf(L.cape));
   const sw = pose.legs === 'run' || pose.legs === 'sprint' ? [0, 1, 1, 0, -1, -1][(pose.ph | 0) % 6] * S(1) : 0;
   const bottom = FE - m.bootH - S(1);
   if (side) {
@@ -712,7 +751,7 @@ function drape(p, F) {
     }
   }
   // a toggle where the cloak pins at the collarbone
-  p.set(ex0 + 1, top + S(3), '#e8d090'); p.set(ex0 + 2, top + S(3), '#a07830');
+  p.set(ex0 + 1, top + S(3), GOLD[1]); p.set(ex0 + 2, top + S(3), GOLD[3]);
 }
 
 function backHair(p, F, hx, hy) {
@@ -739,7 +778,7 @@ function backHair(p, F, hx, hy) {
     const pts = [[x0, y0 + S(3)], [x0 - S(2), y0 + S(5)], [x0 - S(3) - sway, y0 + S(8)], [x0 - S(3) - sway * S(2) - (wave > 0 ? 1 : 0), y0 + S(11) - sway], [x0 - S(3) - sway * S(3) - (wave > 0 ? 1 : 0), y0 + S(14) - sway * S(2)]];
     for (let i = 0; i < pts.length - 1; i++) p.line(pts[i][0], pts[i][1], pts[i + 1][0], pts[i + 1][1], st === 'braid' && i % 2 ? H.d : i === 0 ? H.l : H.m, 3);
     for (let i = 1; i < pts.length - 1; i++) p.set(pts[i][0] + 1, pts[i][1], H.d);
-    p.rect(pts[0][0] - 1, pts[0][1] - 1, 2, 2, '#c8a050');
+    p.rect(pts[0][0] - 1, pts[0][1] - 1, 2, 2, GOLD[2]);
     const tip = pts[pts.length - 1];
     p.set(tip[0], tip[1] + 2, H.d); p.set(tip[0] - 1, tip[1] + 2, H.dd);
   } else if (st === 'long' && side) {
@@ -749,7 +788,7 @@ function backHair(p, F, hx, hy) {
 
 function tail(p, F) {
   const { L, side, up, tr, ty1, pose, m, S } = F;
-  const H = hairRamp(L.hair || '#8a6040');
+  const H = hairRamp(L.hair || '#94603c');
   const ph = (pose.cape | 0) % 4, wave = [0, 1, 0, -1][ph];
   const cx = m.cx;
   const pts = side ? [[F.bx - S(3), ty1], [F.bx - S(8), ty1 + S(2)], [F.bx - S(11), ty1 - 1 + wave], [F.bx - S(13), ty1 - S(6) + wave]]
@@ -765,10 +804,10 @@ function tail(p, F) {
 
 function quiver(p, F, behind) {
   const { side, up, tr, ty0, S } = F;
-  const wood = ramp('#6a4428', 0.62, 1.2);
+  const wood = ramp('#77492f', 0.62, 1.2);
   const fx = side ? F.bx - (F.tw >> 1) - 2 : up ? tr - S(4) : tr - 2;
   const top = ty0 - S(3);
-  const fletch = (x, y) => { p.set(x, y, '#e8e0d0'); p.set(x + 1, y - 1, '#c83a2a'); p.set(x + 1, y, '#e8e0d0'); p.set(x - 1, y - 1, '#a02a1a'); };
+  const fletch = (x, y) => { p.set(x, y, CREAM); p.set(x + 1, y - 1, RED.m); p.set(x + 1, y, CREAM); p.set(x - 1, y - 1, RED.d); };
   if (behind && !side && !up) {
     // only the fletchings peek over the shoulder
     fletch(fx + 1, top); fletch(fx + 3, top - 1);
@@ -778,7 +817,7 @@ function quiver(p, F, behind) {
   for (let k = 0; k < n; k++) {
     const x = fx + Math.round(k * (up ? -0.35 : 0.25)), y = top + k;
     p.set(x, y, k === 0 ? wood.ll : wood.l); p.set(x + 1, y, k === 0 ? wood.l : k === n - 1 ? wood.d : wood.m); p.set(x + 2, y, k === 0 ? wood.m : wood.d);
-    if (k === 2 || k === n - 3) { p.set(x, y, '#c8a050'); p.set(x + 1, y, '#a07830'); p.set(x + 2, y, '#7a5a20'); }
+    if (k === 2 || k === n - 3) { p.set(x, y, GOLD[1]); p.set(x + 1, y, GOLD[2]); p.set(x + 2, y, GOLD[3]); }
   }
   fletch(fx, top - 1); fletch(fx + 2, top - 2);
 }
@@ -828,7 +867,7 @@ function wings(p, e, F) {
 }
 
 // ------------------------------------------------------------------ head
-function hairRamp(h) { const c = C(h); return { dd: dark(c, 0.48), d: dark(c, 0.68), m: c, l: light(c, 1.22), s: light(c, 1.5) }; }
+function hairRamp(h) { const c = C(h); return { dd: down(c, 2, 0.48), d: down(c, 1, 0.68), m: c, l: up(c, 1, 1.22), s: up(c, 2, 1.5) }; }
 
 function head(p, e, F, dx, dy) {
   const { L, m, side, up, pose, S } = F;
@@ -867,26 +906,27 @@ function head(p, e, F, dx, dy) {
       if (uu > 0.8 || j >= h - 2) c = SK.md;
       if (x === x1 - iR || j === h - 1) c = SK.d;
       if (j === h - 1 && x >= x1 - iR - 1) c = SK.dd;
-      if (L.skeleton) c = x === x1 - iR || j === h - 1 ? C('#b8b09c') : x === x0 + iL ? C('#f4eedc') : uu > 0.75 ? C('#d4ccb8') : C('#e8e0cc');
-      if (L.stone && hash2(x, y, 9) < 0.1) c = dark(c, 0.85);
-      if (L.bark && (x + y * 2) % 4 === 0) c = dark(c, 0.8);
+      if (L.skeleton) c = x === x1 - iR || j === h - 1 ? dark(BONE, 0.74) : x === x0 + iL ? light(BONE, 1.08) : uu > 0.75 ? dark(BONE, 0.88) : BONE;
+      if (L.golem) c = texK(c, stoneK(x, y, S));
+      else if (L.bark) c = texK(c, barkK(x, y, S));
+      else if (L.stone && clump(x, y, 9) < 0.1) c = dark(c, 0.85);
       if (L.scales && (x + y) % 3 === 0 && j > h / 2) c = light(c, 1.08);
       p.set(x, y, c);
     }
   }
   // ---- face
-  const glowEyes = L.eyes || (L.skeleton ? '#80c0ff' : null);
+  const glowEyes = L.eyes || (L.skeleton ? '#6aa0d0' : null);
   if (!up) {
     if (L.skeleton) {
       const sock = side ? [x1 - 3] : [x0 + 2, x1 - 4];
-      for (const sx of sock) { p.rect(sx, eyeY - 1, 3, 3, '#1e161a'); p.set(sx, eyeY - 1, '#3a3034'); e.set(sx + 1, eyeY, glowEyes); p.set(sx + 1, eyeY, glowEyes); }
-      p.set(side ? x1 - 1 : cL, eyeY + 2, '#3a3034'); if (!side) p.set(cR, eyeY + 2, '#3a3034');
-      for (let x = (side ? x1 - 5 : x0 + 2); x <= (side ? x1 : x1 - 2); x += 2) { p.set(x, y1 - 1, '#6a6050'); p.set(x, y1 - 2, '#8a8070'); }
+      for (const sx of sock) { p.rect(sx, eyeY - 1, 3, 3, VOID); p.set(sx, eyeY - 1, VOID_RIM); e.set(sx + 1, eyeY, glowEyes); p.set(sx + 1, eyeY, glowEyes); }
+      p.set(side ? x1 - 1 : cL, eyeY + 2, MOUTH); if (!side) p.set(cR, eyeY + 2, MOUTH);
+      for (let x = (side ? x1 - 5 : x0 + 2); x <= (side ? x1 : x1 - 2); x += 2) { p.set(x, y1 - 1, dark(BONE, 0.55)); p.set(x, y1 - 2, dark(BONE, 0.7)); }
     } else if (side) {
-      const ex = x1 - 3;
+      const ex = x1 - 2;
       eyeAt(p, e, ex, eyeY, L, glowEyes, face, true, 1);
-      p.set(x1 + 1, eyeY + 1, SK.m); p.set(x1 + 1, eyeY + 2, SK.d); p.set(x1, eyeY + 2, SK.md);   // nose
-      if (!L.beard) { p.set(x1, eyeY + 4, face === 3 ? '#3a1418' : SK.dd); p.set(x1 - 1, eyeY + 4, face === 3 ? '#3a1418' : SK.d); if (face === 3) p.set(x1, eyeY + 5, '#3a1418'); }
+      p.set(x1 + 1, eyeY + 1, SK.m); p.set(x1 + 1, eyeY + 2, SK.md);                             // nose
+      if (!L.beard && face === 3) { p.set(x1, eyeY + 4, MOUTH); p.set(x1 - 1, eyeY + 4, MOUTH); }
       // ear
       const ax = x0 + Math.round(w * 0.38);
       p.set(ax, eyeY, SK.m); p.set(ax, eyeY + 1, SK.d); p.set(ax + 1, eyeY + 1, SK.md); p.set(ax, eyeY + 2, SK.dd); p.set(ax - 1, eyeY + 1, SK.l);
@@ -896,41 +936,38 @@ function head(p, e, F, dx, dy) {
       eyeAt(p, e, exL, eyeY, L, glowEyes, face, false, -1);
       eyeAt(p, e, exR, eyeY, L, glowEyes, face, false, 1);
       if (!L.beard && !L.tusks) {
-        p.set(cR, eyeY + 2, SK.d); p.set(cL, eyeY + 2, SK.md);                    // nose
-        if (face === 3) { p.rect(cL, eyeY + 4, 2, 2, '#3a1418'); p.set(cL, eyeY + 4, '#5a2028'); }
-        else { p.set(cL, eyeY + 4, SK.dd); p.set(cR, eyeY + 4, mixc(SK.dd, SK.m, 0.45)); p.set(cL - 1, eyeY + 4, mixc(SK.dd, SK.m, 0.6)); }
+        p.set(cR, eyeY + 2, SK.md);                                                // nose: one shade pixel
+        if (face === 3) { p.rect(cL, eyeY + 4, 2, 2, MOUTH); p.set(cL, eyeY + 4, dark(MOUTH, 0.7)); }
       }
-      // cheek blush on lighter skins
-      if (!L.stone && !L.bark && skinOf(L)[0] > 150) { p.set(x0 + 2, eyeY + 2, mixc(SK.m, '#e06858', 0.35)); p.set(x1 - 2, eyeY + 2, mixc(SK.md, '#e06858', 0.3)); }
       // small ears at the sides of the head
       if (!L.ears && !L.beastEars && !L.fins) { p.set(x0 - 1, eyeY + 1, SK.m); p.set(x0 - 1, eyeY + 2, SK.d); p.set(x1 + 1, eyeY + 1, SK.d); p.set(x1 + 1, eyeY + 2, SK.dd); }
     }
     if (L.tusks) {
       const tx = side ? [x1 - 1] : [x0 + 3, x1 - 3];
-      for (const xx of tx) { p.set(xx, y1 - 1, '#f4ecd4'); p.set(xx, y1 - 2, '#fffaf0'); p.set(xx, y1, '#d8ccb0'); if (!side) p.set(xx + (xx < cL ? -1 : 1), y1, '#b8ac90'); }
+      for (const xx of tx) { p.set(xx, y1 - 1, TUSK); p.set(xx, y1 - 2, light(TUSK, 1.08)); p.set(xx, y1, dark(TUSK, 0.86)); if (!side) p.set(xx + (xx < cL ? -1 : 1), y1, dark(TUSK, 0.74)); }
     }
     if (L.glowSkin) { const gx = x1 - 4; for (const [ddx, ddy] of [[0, 2], [1, 3], [1, 4], [0, 5], [-1, 7], [-2, 8]]) e.set(gx + ddx, y0 + ddy, L.glowSkin); }
     if (L.voidMarks) { const vx = side ? x1 - 2 : x0 + 2; for (let y = y0 + 2; y <= y1 - 1; y++) if (y < eyeY - 1 || y > eyeY + 1) e.set(vx, y, L.voidMarks); if (!side) for (let y = eyeY + 3; y <= y1 - 1; y += 2) e.set(x1 - 2, y, L.voidMarks); }
     if (L.stone) { p.line(x0 + 4, y0 + 1, x0 + 6, y1 - 3, dark(SK.m, 0.6)); p.set(x0 + 7, y0 + 5, dark(SK.m, 0.6)); }
   }
   // ---- beard (over the collar)
-  if (L.beard && !L.skeleton && !(helm && helm.kind === 'great')) beard(p, F, x0, y0, x1, y1, eyeY, hairR || hairRamp('#6a3a1a'));
+  if (L.beard && !L.skeleton && !(helm && helm.kind === 'great')) beard(p, F, x0, y0, x1, y1, eyeY, hairR || hairRamp('#5a3628'));
   // ---- hair
   if (hairR && !L.skeleton && !(helm && (helm.kind === 'great' || helm.kind === 'hood' || helm.kind === 'coif'))) hair(p, F, x0, y0, x1, y1, eyeY, hairR, helm);
   // ---- beast ears on top
   if (L.beastEars && !(helm && helm.kind === 'great')) {
-    const ec = hairR || hairRamp('#8a6040'), n = S(5);
+    const ec = hairR || hairRamp('#94603c'), n = S(5);
     for (const ex of side ? [x0 + S(4)] : [x0 + 1, x1 - n]) {
       for (let k = 0; k < n; k++) for (let i = 0; i < n - k; i++) {
         const xx = ex + i + (k >> 1), yy = y0 + 1 - k;
         p.set(xx, yy, i === 0 ? ec.l : i === n - k - 1 ? ec.d : ec.m);
       }
-      if (!up) { p.set(ex + 2, y0 - 1, mixc(ec.m, '#e8a0a0', 0.6)); p.set(ex + 2, y0, mixc(ec.m, '#e8a0a0', 0.5)); p.set(ex + 3, y0, mixc(ec.d, '#e8a0a0', 0.4)); }
+      if (!up) { p.set(ex + 2, y0 - 1, mixc(ec.m, '#cc949e', 0.6)); p.set(ex + 2, y0, mixc(ec.m, '#cc949e', 0.5)); p.set(ex + 3, y0, mixc(ec.d, '#cc949e', 0.4)); }
     }
   }
   // ---- horns: curling up and back from the temples
   if (L.horns) {
-    const hc = C('#2a2420'), hm = C('#4a3e34'), hl = C('#8a7a68');
+    const hc = C('#2f2c38'), hm = C('#4e4b53'), hl = C('#a29c9c');
     for (const dir of side ? [-1] : [-1, 1]) {
       const hxx = side ? x0 + S(4) : dir < 0 ? x0 + 2 : x1 - 2;
       const pts = [[0, 1], [1, 0], [2, -1], [3, -2], [3, -3], [3, -4], [2, -5], [1, -6]].map(([a, b]) => [hxx + dir * Math.round(a * m.hf), y0 + Math.round(b * m.hf)]);
@@ -947,38 +984,46 @@ function head(p, e, F, dx, dy) {
   }
   // ---- treant crown of leaves
   if (L.canopy) {
-    const lc = C(L.canopy), rx = w / 2 + S(6), ry = S(7);
+    // chunky leaf clusters (cells in offset rows, each a lit clump), three tones plus a
+    // plum-leaning shadow, a stepped blob edge in cluster units
+    const lc = C(L.canopy), LR = ramp(lc, 0.7, 1.2), rx = w / 2 + S(6), ry = S(7);
+    const shd = mixc(LR.dd, '#2a1838', 0.35);
     const ccx = (x0 + x1 + 1) / 2, ccy = y0 - S(3);
-    for (let y = Math.floor(ccy - ry - 1); y <= y0 + S(3); y++) for (let x = Math.floor(ccx - rx - 1); x <= Math.ceil(ccx + rx + 1); x++) {
+    const cw = Math.max(4, S(5)), chh = Math.max(3, S(4));
+    for (let y = Math.floor(ccy - ry - 2); y <= y0 + S(3); y++) for (let x = Math.floor(ccx - rx - 2); x <= Math.ceil(ccx + rx + 2); x++) {
+      const row = Math.floor(y / chh), xx = x + (row & 1) * (cw >> 1), col = Math.floor(xx / cw);
+      const ly = y - row * chh, lx = xx - col * cw;
+      const h = hash2(col, row, 33);
       const nx = (x + 0.5 - ccx) / rx, ny = (y + 0.5 - ccy) / ry;
-      if (nx * nx + ny * ny > 1 - hash2(x, y, 33) * 0.25) continue;
-      const l = -0.5 * nx - 0.85 * ny + (hash2(x >> 1, y >> 1, 5) - 0.5) * 0.7;
-      p.set(x, y, l > 0.6 ? light(lc, 1.4) : l > 0.25 ? light(lc, 1.2) : l > -0.25 ? lc : l > -0.6 ? dark(lc, 0.75) : dark(lc, 0.58));
+      if (nx * nx + ny * ny > 1.04 - h * 0.24) continue;
+      const kx = ((col + 0.5) * cw - (row & 1) * (cw >> 1) - ccx) / rx, ky = ((row + 0.5) * chh - ccy) / ry;
+      let l = -0.55 * kx - 0.85 * ky + (h - 0.5) * 0.5;
+      if (ly === 0 && lx > 0) l += 0.3; else if (ly === chh - 1 || lx === cw - 1) l -= 0.3;
+      p.set(x, y, l > 0.55 ? LR.l : l > 0.05 ? LR.m : l > -0.45 ? LR.d : shd);
     }
     if (L.knots) for (const [kx, ky] of [[x0 - S(2), y0 - S(4)], [x1 + S(3), y0 - S(2)], [cL, y0 - S(8)]]) { e.set(kx, ky, L.knots); p.set(kx, ky, L.knots); }
   }
   if (helm) helmet(p, e, F, helm, x0, y0, x1, y1, eyeY);
-  if (L.crown && !(helm && helm.kind === 'crown')) crown(p, e, F, x0, y0, x1, '#ffd060');
+  if (L.crown && !(helm && helm.kind === 'crown')) crown(p, e, F, x0, y0, x1, L.crown);
 }
 
-// 2x2 eyes: iris with a dark lower half, a white on the outer side, a brow above
+// simple eyes: a 1 x 2 ink pupil (glowing eyes: a bright core over the glow colour); a blink is a
+// 1-px lid line, a hurt squint a short slant; an angry brow only when shouting
 function eyeAt(p, e, x, y, L, glow, face, side, dir = 1) {
   const SK = skinRamp(skinOf(L));
   if (glow) {
     const g = C(glow);
-    if (face === 1) { p.set(x, y + 1, dark(g, 0.6)); p.set(x + dir, y + 1, dark(g, 0.45)); return; }
-    p.set(x, y, light(g, 1.35)); p.set(x, y + 1, g); p.set(x + dir, y, g); p.set(x + dir, y + 1, dark(g, 0.75));
-    e.set(x, y, light(g, 1.35)); e.set(x, y + 1, g); e.set(x + dir, y, g);
+    if (face === 1 || face === 2) { p.set(x, y + 1, dark(g, 0.55)); return; }
+    p.set(x, y, light(g, 1.3)); p.set(x, y + 1, g);
+    e.set(x, y, light(g, 1.3)); e.set(x, y + 1, g);
     return;
   }
-  if (face === 1) { p.set(x, y + 1, SK.dd); p.set(x + dir, y + 1, SK.d); return; }                   // blink
-  if (face === 2) { p.set(x + dir, y, SK.dd); p.set(x, y + 1, SK.dd); p.set(x + dir, y + 1, SK.dd); return; }  // squeezed shut
-  const iris = C(L.iris || '#241826');
-  p.set(x, y, iris); p.set(x, y + 1, dark(iris, 0.55));
-  p.set(x + dir, y, '#ece6dc'); p.set(x + dir, y + 1, SK.md);
-  // brow above, a little outward (angry when shouting)
-  const bc = face === 3 ? C('#2a1418') : SK.dd;
-  p.set(x, y - 1 - (face === 3 && !side ? 0 : 0), bc); p.set(x + dir, y - 1 - (face === 3 ? 1 : 0), bc);
+  if (face === 1) { p.set(x, y + 1, SK.dd); return; }                                               // blink
+  if (face === 2) { p.set(x, y + 1, SK.dd); p.set(x + dir, y, SK.dd); return; }                    // squeezed shut
+  const iris = C(L.iris || '#1d0814');
+  p.set(x, y, iris); p.set(x, y + 1, iris);
+  if (face === 3) p.set(x + dir, y - 1, SK.dd);                                                     // a frown
+  void side;
 }
 
 function beard(p, F, x0, y0, x1, y1, eyeY, H) {
@@ -999,9 +1044,9 @@ function beard(p, F, x0, y0, x1, y1, eyeY, H) {
     }
   }
   const mx = Math.floor((x0 + x1) / 2);
-  if (!side) { p.set(mx, eyeY + 4, '#3a1418'); p.set(mx + 1, eyeY + 4, '#3a1418'); p.set(mx - 2, eyeY + 3, H.d); p.set(mx + 3, eyeY + 3, H.d); }
+  if (!side) { p.set(mx, eyeY + 4, MOUTH); p.set(mx + 1, eyeY + 4, MOUTH); p.set(mx - 2, eyeY + 3, H.d); p.set(mx + 3, eyeY + 3, H.d); }
   // braided tip with a gold bead
-  if (big && !side) { p.set(mx, bottom + 1, H.d); p.set(mx + 1, bottom + 1, H.m); p.set(mx, bottom + 2, '#e8c060'); p.set(mx + 1, bottom + 2, '#a07830'); p.set(mx, bottom + 3, H.d); }
+  if (big && !side) { p.set(mx, bottom + 1, H.d); p.set(mx + 1, bottom + 1, H.m); p.set(mx, bottom + 2, GOLD[1]); p.set(mx + 1, bottom + 2, GOLD[3]); p.set(mx, bottom + 3, H.d); }
 }
 
 function hair(p, F, x0, y0, x1, y1, eyeY, H, helm) {
@@ -1037,7 +1082,7 @@ function hair(p, F, x0, y0, x1, y1, eyeY, H, helm) {
     p.set(x0 + 1, y0, H.s); p.set(x0 + 2, y0, H.s); p.set(x0 + 3, y0 - 1, H.l); p.set(x0 + 1, y0 + 1, H.l); p.set(x0 + 4, y0 - 1, H.s);
     const cx = Math.floor((x0 + x1) / 2);
     if (style === 'ponytail' || style === 'braid') {
-      p.rect(cx, y0 + S(6), 2, 1, '#c8a050'); p.set(cx + 1, y0 + S(6), '#a07830');
+      p.rect(cx, y0 + S(6), 2, 1, GOLD[2]); p.set(cx + 1, y0 + S(6), GOLD[3]);
       for (let k = 0; k < S(9); k++) { const yy = y0 + S(6) + 1 + k; p.set(cx, yy, style === 'braid' && k % 2 ? H.d : H.l); p.set(cx + 1, yy, style === 'braid' && k % 2 ? H.m : H.d); if (k > 1 && k < S(8)) p.set(cx - 1, yy, H.m); }
       p.set(cx, y0 + S(6) + S(9) + 1, H.d);
     }
@@ -1091,15 +1136,15 @@ function hair(p, F, x0, y0, x1, y1, eyeY, H, helm) {
   const sideLen = style === 'long' ? y1 + S(4) : style === 'crop' || style === 'mohawk' ? y0 + rows : eyeY + (style === 'braid' || style === 'ponytail' ? 2 : 1);
   for (let y = y0 + rows; y <= sideLen; y++) { p.set(x0 - 1, y, H.m); p.set(x0, y, H.l); p.set(x1, y, H.d); p.set(x1 + 1, y, H.dd); if (style === 'long' && y > eyeY) { p.set(x0 - 2, y, H.d); p.set(x1 + 2, y, H.dd); } }
   if (style === 'long') { p.set(x0 - 1, sideLen + 1, H.d); p.set(x1 + 1, sideLen + 1, H.dd); }
-  if (style === 'braid') { for (let k = 0; k < S(7); k++) { p.set(x1 + 1, eyeY + 1 + k, k % 2 ? H.d : H.l); p.set(x1 + 2, eyeY + 1 + k, k % 2 ? H.m : H.d); } p.rect(x1 + 1, eyeY + 1 + S(7), 2, 1, '#c8a050'); }
+  if (style === 'braid') { for (let k = 0; k < S(7); k++) { p.set(x1 + 1, eyeY + 1 + k, k % 2 ? H.d : H.l); p.set(x1 + 2, eyeY + 1 + k, k % 2 ? H.m : H.d); } p.rect(x1 + 1, eyeY + 1 + S(7), 2, 1, GOLD[2]); }
   if (style === 'ponytail') { p.set(x1 + 2, eyeY - 1, H.m); p.set(x1 + 2, eyeY, H.m); p.set(x1 + 2, eyeY + 1, H.d); p.set(x1 + 3, eyeY, H.d); }
   if (style === 'bun') { const cx = Math.floor((x0 + x1) / 2); p.disc(cx + 1, y0 - S(2), S(3), H.m); p.set(cx, y0 - S(4), H.s); p.set(cx - 1, y0 - S(3), H.l); p.set(cx + 2, y0 - 1, H.d); }
 }
 
 function helmet(p, e, F, helm, x0, y0, x1, y1, eyeY) {
   const { side, up, S, m } = F;
-  const M = C(helm.color || '#9aa4ae'), T = ramp(C(helm.trim || '#c8a050'), 0.7, 1.2);
-  const R = ramp(mixc(M, '#e8ecf0', 0.1), 0.58, 1.18);
+  const M = C(helm.color || '#828882'), T = ramp(C(helm.trim || '#c99a3a'), 0.7, 1.2);
+  const R = ramp(M, 0.58, 1.18);
   const w = x1 - x0 + 1, cL = x0 + (w >> 1) - 1, cR = x0 + (w >> 1);
   switch (helm.kind) {
     case 'great': {
@@ -1123,10 +1168,10 @@ function helmet(p, e, F, helm, x0, y0, x1, y1, eyeY) {
         // visor: a slit across the eyes and a breathing slot below, a trim brow band
         const sx0 = side ? x1 - S(5) : x0, sx1 = side ? x1 + 1 : x1;
         for (let x = sx0; x <= sx1; x++) {
-          p.set(x, eyeY, '#0e0a10'); p.set(x, eyeY - 1, R.d); p.set(x, eyeY + 1, x < cL ? R.l : R.m);
+          p.set(x, eyeY, INK); p.set(x, eyeY - 1, R.d); p.set(x, eyeY + 1, x < cL ? R.l : R.m);
           if (helm.glow) { e.set(x, eyeY, helm.glow); p.set(x, eyeY, helm.glow); }
         }
-        if (!side) { for (let y = eyeY + 1; y <= eyeY + S(3); y++) { p.set(cL, y, '#0e0a10'); p.set(cR, y, '#1a1418'); } for (let y = eyeY + 3; y < y1; y += 2) p.set(x1 - 2, y, R.dd); }
+        if (!side) { for (let y = eyeY + 1; y <= eyeY + S(3); y++) { p.set(cL, y, INK); p.set(cR, y, VOID); } for (let y = eyeY + 3; y < y1; y += 2) p.set(x1 - 2, y, R.dd); }
         else for (let y = eyeY + 2; y < y1; y += 2) { p.set(x1, y, R.dd); p.set(x1 - 2, y, R.dd); }
         for (let x = x0 - (side ? 1 : 0); x <= x1 + (side ? 1 : 0); x++) p.set(x, y0, (x & 1) ? T.m : T.l);
         for (let x = x0; x <= x1; x++) if (!side) p.set(x, y0 + 1, x < cL ? T.d : T.dd);
@@ -1180,7 +1225,7 @@ function helmet(p, e, F, helm, x0, y0, x1, y1, eyeY) {
       // a deep pointed hood: the tip flops to the side, the cowl is wider than the head and
       // spills onto the shoulders, and the face is lost in shadow apart from the eyes
       const H = ramp(M, 0.58, 1.2);
-      const lin = mixc(light(M, 1.6), '#f0e0b0', 0.5), linD = mixc(lin, H.d, 0.55);
+      const lin = capeTrimOf(M), linD = mixc(lin, H.d, 0.5);
       const cx2 = x0 + w / 2;                                // centre line between the two middle columns
       const half = w / 2 + S(2);
       const top = y0 - S(4), nTop = S(6), bot = y1 + S(3);
@@ -1224,21 +1269,21 @@ function helmet(p, e, F, helm, x0, y0, x1, y1, eyeY) {
             const ya = Math.round(cx2 - hw), yb = Math.round(cx2 + hw) - 1;
             if (y < fy0 || y > fy1) { if (y === fy1 + 1) for (let x = ya; x <= yb; x++) p.set(x, y, H.d); continue; }
             p.set(ya - 1, y, lin); p.set(yb + 1, y, linD);
-            for (let x = ya; x <= yb; x++) p.set(x, y, y === fy0 ? lin : y === fy0 + 1 ? dark(H.dd, 0.7) : '#0b070d');
+            for (let x = ya; x <= yb; x++) p.set(x, y, y === fy0 ? lin : y === fy0 + 1 || x === ya || x === yb ? VOID_RIM : VOID);
           }
           for (let x = Math.round(cx2 - ohw(fy0)) - 1; x <= Math.round(cx2) - 1; x++) p.set(x, fy0 - 1, lin);
         } else {
           for (let y = fy0; y <= fy1; y++) {
             const d = Math.max(1, Math.round(ohw(y) * 0.75));
             const xb = x1 + 2, xa = xb - d;
-            for (let x = xa; x <= xb; x++) p.set(x, y, x === xa ? lin : '#0b070d');
+            for (let x = xa; x <= xb; x++) p.set(x, y, x === xa ? lin : x === xa + 1 || y === fy0 ? VOID_RIM : VOID);
           }
         }
         const gl = F.L.eyes || helm.eyes || null;
         const ex = side ? [x1] : [Math.round(cx2) - 2, Math.round(cx2) + 1];
         for (const xx of ex) {
           if (gl) { const g = C(gl); p.set(xx, eyeY, light(g, 1.3)); e.set(xx, eyeY, light(g, 1.3)); p.set(xx, eyeY + 1, g); e.set(xx, eyeY + 1, g); p.set(xx, eyeY - 1, dark(g, 0.5)); }
-          else { p.set(xx, eyeY, '#cfc2b0'); p.set(xx, eyeY + 1, '#6a6058'); }
+          else { p.set(xx, eyeY, CREAM); p.set(xx, eyeY + 1, '#827d82'); }
         }
       }
       break;
@@ -1254,13 +1299,13 @@ function helmet(p, e, F, helm, x0, y0, x1, y1, eyeY) {
       if (!side && !up) for (let y = y0 - 1; y <= y0 + S(2); y++) p.set(cR, y, H.md);
       p.set(x0 + 1, y0 - 1, H.ll); p.set(x0 + 2, y0 - 1, H.ll);
       // feather
-      if (!up) { const fx = side ? x0 : x1; const dd = side ? -1 : 1; for (let k = 0; k < S(5); k++) { p.set(fx + dd * Math.round(k * 0.6), y0 - 1 - k, k % 2 ? '#e85a3a' : '#c83a2a'); p.set(fx + dd * Math.round(k * 0.6) + dd, y0 - k, '#a02a1a'); } }
+      if (!up) { const fx = side ? x0 : x1; const dd = side ? -1 : 1; for (let k = 0; k < S(5); k++) { p.set(fx + dd * Math.round(k * 0.6), y0 - 1 - k, k % 2 ? RED.l : RED.m); p.set(fx + dd * Math.round(k * 0.6) + dd, y0 - k, RED.d); } }
       break;
     }
-    case 'crown': crown(p, e, F, x0, y0, x1, helm.color || '#ffc040', helm.gem); break;
+    case 'crown': crown(p, e, F, x0, y0, x1, helm.color || '#e8c35a', helm.gem); break;
   }
 }
-function crown(p, e, F, x0, y0, x1, col, gem = '#ff4030') {
+function crown(p, e, F, x0, y0, x1, col, gem = '#ec7a2a') {
   const { S } = F;
   const c = C(col), cl = light(c, 1.25), cd = dark(c, 0.72);
   for (let x = x0; x <= x1; x++) { p.set(x, y0, x === x1 ? dark(cd, 0.8) : cd); p.set(x, y0 - 1, (x - x0) % 2 ? cl : c); }

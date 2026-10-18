@@ -8,17 +8,19 @@
 // of world at any density; outlines, eye glints, claws, teeth and texture flecks stay 1 px. Parts
 // are drawn into layers and composited with a 1-px inner contour where a near part overlaps a far
 // one, the way hand-drawn sprites separate legs, heads and wings from the body.
-import { Pix, C, light, dark, mixc, hash2, bayer, ART, ap, OUTLINE } from '../pix.js';
+import { Pix, C, light, dark, mixc, hash2, bayer, ART, ap, OUTLINE, CREAM } from '../pix.js';
+import { tone as palTone, glow as palGlow, rampStep, capChroma } from '../lookTone.js';
 
 const cache = new Map();
-const EYE_DARK = C('#140c10');
-const BONE = C('#eee4cc');
-const BONE_D = C('#b4a488');
-const MAW = C('#3a0c12');
-const MAW_D = C('#22060a');
-const TONGUE = C('#b8444e');
-const WHITE = C('#ffffff');
-const VOID = C('#0c060c');
+// palette constants (src/px/palette.js): ink-plum eyes, cream bone, maroon maws, cream glints
+const EYE_DARK = C('#1d0814');
+const BONE = C(CREAM);
+const BONE_D = C('#cfa978');
+const MAW = C('#4a1420');
+const MAW_D = C('#2a0e18');
+const TONGUE = C('#a94a68');
+const WHITE = C('#fff4dc');
+const VOID = C('#140913');
 
 // ------------------------------------------------------------------ helpers
 function mk(w, h, ox, oy) { const p = new Pix(Math.max(1, Math.ceil(w)), Math.max(1, Math.ceil(h))); p.ox = Math.round(ox); p.oy = Math.round(oy); return p; }
@@ -26,12 +28,15 @@ const blank = (p) => mk(p.w, p.h, p.ox, p.oy);
 const lerp = (a, b, t) => a + (b - a) * t;
 const lerpP = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t)];
 
-// 5-tone ramp: deep shadow, shadow, mid, base, highlight (shadows cool, highlights warm)
+// 5-tone ramp: deep shadow, shadow, mid, base, highlight. Taken from the base's own master ramp
+// where it sits on one (src/px/palette.js); otherwise hue-shifted dark() / light(), shadows cool
+// toward plum with their chroma held near the base's, highlights warm toward cream
 const RAMPS = new Map();
+const down = (b, n, k) => { const s = rampStep(b, -n); return s ? C(s) : capChroma(dark(b, k), b); };
 function ramp5(base) {
   const b = C(base), k = b.join(',');
   let r = RAMPS.get(k);
-  if (!r) { r = [dark(b, 0.45), dark(b, 0.63), dark(b, 0.81), b, light(b, 1.15)]; RAMPS.set(k, r); }
+  if (!r) { const u = rampStep(b, 1); r = [down(b, 3, 0.45), down(b, 2, 0.63), down(b, 1, 0.81), b, u ? C(u) : light(b, 1.15)]; RAMPS.set(k, r); }
   return r;
 }
 const dimR = (R, k) => R.map((c) => dark(c, k));
@@ -40,7 +45,9 @@ const dimR = (R, k) => R.map((c) => dark(c, k));
 const LX = -0.48, LY = -0.62, LZ = 0.62;
 const tone = (l) => (l > 0.8 ? 4 : l > 0.32 ? 3 : l > -0.08 ? 2 : l > -0.5 ? 1 : 0);
 // fur: 1-px wide strands, 4 px long, with a random phase per column (jagged band edges)
-const furN = (x, y, sd) => hash2(x, Math.floor((y + Math.floor(hash2(x, 3, sd) * 4)) / 4), sd) - 0.5;
+const furN = (x, y, sd) => { const c = x >> 1; return hash2(c, Math.floor((y + Math.floor(hash2(c, 3, sd) * 5)) / 5), sd) - 0.5; };
+// texture clusters: 3x2 bricks offset every other row (never per-pixel speckle)
+const clump = (x, y, sd) => hash2(Math.floor((x + ((y >> 1) & 1) * 2) / 3), y >> 1, sd) - 0.5;
 // scales: staggered 4x3 cells, each a lit top and a dark rounded lower edge
 const scaleN = (x, y) => {
   const r = Math.floor(y / 3), lx = ((x + (r & 1) * 2) % 4 + 4) % 4, ly = ((y % 3) + 3) % 3;
@@ -65,8 +72,8 @@ function balls(p, list, R, o = {}) {
       }
       if (best > 1) continue;
       let l = bx * LX + by * LY + Math.sqrt(1 - best) * LZ + (o.lift || 0);
-      if (o.fur) l += furN(x, y, o.fur) * 0.24;
-      else if (o.tex) l += (hash2(x, y, o.tex) - 0.5) * 0.2;
+      if (o.fur) l += furN(x, y, o.fur) * 0.2;
+      else if (o.tex) l += clump(x, y, o.tex) * 0.22;
       if (o.scales) l += scaleN(x, y);
       let t = tone(l);
       if (t === 4 && o.matte) t = 3;
@@ -176,8 +183,8 @@ function finish(p, e) {
 function eye(p, e, x, y, o, n = 2, brow = null) {
   x = Math.round(x); y = Math.round(y);
   if (o.tame) {
-    if (n <= 1) { p.set(x, y, EYE_DARK); p.set(x, y - 1, '#f0f0f0'); return; }
-    p.rect(x, y, n, n, EYE_DARK); p.set(x, y, '#e8ecf0');
+    if (n <= 1) { p.set(x, y, EYE_DARK); p.set(x, y - 1, WHITE); return; }
+    p.rect(x, y, n, n, EYE_DARK); p.set(x, y, WHITE);
     if (brow) for (let k = -1; k < n; k++) p.set(x + k, y - 1, brow);
     return;
   }
@@ -194,6 +201,8 @@ export function creatureSprites(spec) {
   const key = JSON.stringify(spec);
   let s = cache.get(key);
   if (s) return s;
+  // body colours onto the master ramps, glows onto bright accents (src/px/lookTone.js)
+  spec = { ...spec, c1: palTone(spec.c1), c2: palTone(spec.c2), c3: palGlow(spec.c3), saddle: spec.saddle ? palTone(spec.saddle) : spec.saddle, antlerColor: spec.antlerColor ? palTone(spec.antlerColor) : spec.antlerColor, hand: spec.hand ? palTone(spec.hand) : spec.hand };
   switch (spec.body) {
     case 'quadruped': case 'dragon': s = quadSet(spec); break;
     case 'arachnid': s = arachSet(spec); break;
@@ -422,7 +431,7 @@ function quadFrame(o, D, pose) {
     }
     case 'bear': ball(TL, tbx - 1, tby, 1.5 * u, 1.3 * u, R, { fur: 2 }); break;
     case 'rat': {
-      const rc = ramp5('#c89090');
+      const rc = ramp5('#cc949e');
       for (let i = 0; i < T; i++) {
         const x = tbx - i, y = tby + Math.round(Math.sin(i / T * 3 + wag * 0.5) * 2 * u + i * 0.15);
         TL.set(x, y, i % 3 === 2 ? rc[2] : rc[3]);
@@ -436,7 +445,7 @@ function quadFrame(o, D, pose) {
       TL.set(Math.round(tbx - 2 * u), Math.round(tby - 0.4 * u) + 1, A[1]);
       break;
     }
-    case 'stag': ball(TL, tbx - 1, tby - 1, 1.3 * u, 1.2 * u, ramp5('#f0ece0'), { matte: true }); break;
+    case 'stag': ball(TL, tbx - 1, tby - 1, 1.3 * u, 1.2 * u, ramp5(CREAM), { matte: true }); break;
     case 'cat': {
       const C2 = blank(p);
       C2.taper(tbx, tby, tbx - T * 0.6, tby - T * 0.4 + wag, Math.max(2, u * 1.1), Math.max(2, u * 0.9), R[3]);
@@ -545,7 +554,7 @@ function quadFrame(o, D, pose) {
   } else if (hooved) {
     HL.poly([[ex - 1.2 * u, ey + 1], [ex + 0.8 * u, ey + 1], [ex - 1.4 * u, ey - 2.6 * u]], R[3]);
     if (u >= 1.6) HL.line(ex - 0.6 * u, ey, ex - 1.2 * u, ey - 1.8 * u, R[1]);
-  } else if (kind === 'rat') { ball(HL, ex - 0.5 * u, ey - 0.6 * u, 2 * u, 2 * u, R); HL.ellipse(ex - 0.3 * u, ey - 0.4 * u, 1.1 * u, 1.1 * u, '#d89898'); }
+  } else if (kind === 'rat') { ball(HL, ex - 0.5 * u, ey - 0.6 * u, 2 * u, 2 * u, R); HL.ellipse(ex - 0.3 * u, ey - 0.4 * u, 1.1 * u, 1.1 * u, '#cc949e'); }
   else if (kind === 'bear') { ball(HL, ex, ey, 1.5 * u, 1.4 * u, R, { fur: 4 }); HL.ellipse(ex + 0.2 * u, ey + 0.2 * u, 0.6 * u, 0.6 * u, R[1]); }
   else if (kind === 'cat') { ball(HL, ex, ey - 0.5 * u, 1.3 * u, 1.3 * u, R); HL.ellipse(ex + 0.2 * u, ey - 0.3 * u, 0.55 * u, 0.55 * u, R[1]); }
   // skull (hooved heads get a heavy cheek so the head reads as a wedge, not a tube)
@@ -584,7 +593,7 @@ function quadFrame(o, D, pose) {
     for (let x = mx0 + 2; x < tipX; x += 2) { const y = lowY(S, x); if (y >= 0) HL.set(x, y + 1, BONE); }
     const fx = tipX - 2, fy = lowY(S, fx);
     if (fy >= 0 && kind !== 'rat' && !hooved) { HL.set(fx, fy + 1, BONE); HL.set(fx, fy + 2, BONE_D); }
-    if (kind === 'rat') { HL.rect(tipX - 2, lowY(S, tipX - 2) + 1, 2, 2, '#f0e0a0'); }
+    if (kind === 'rat') { HL.rect(tipX - 2, lowY(S, tipX - 2) + 1, 2, 2, BONE); }
     for (let x = mx0 + 3; x < tipX - 2; x += 3) { const y = topY(J, x); if (y >= 0) HL.set(x, y - 1, BONE_D); }
     if (dragon) e.disc(tipX - 2, sy + open * 0.5, Math.max(1, open * 0.55), o.c3);
   } else {
@@ -597,15 +606,15 @@ function quadFrame(o, D, pose) {
   // nose
   const ny = sy - Math.round(sh1 / 2) - (open ? 1 : 0);
   if (kind === 'boar') {
-    const pc = ramp5(mixc(o.c1, '#d89080', 0.45));
+    const pc = ramp5(mixc(o.c1, '#cc949e', 0.45));
     HL.ellipse(tipX, sy - (open ? 1 : 0), Math.max(1, u * 0.5), Math.max(1.2, sh1 * 0.62), pc[2]);
     HL.set(tipX, ny + 1, pc[4]); HL.set(tipX, sy, pc[0]); if (u >= 1.6) HL.set(tipX, sy - 2, pc[0]);
   } else if (hooved || dragon) {
     HL.set(tipX - 1, ny + 1, R[0]); if (u >= 2) HL.set(tipX - 2, ny + 1, R[1]);
   } else {
-    const nw = u >= 1.5 ? 2 : 1, nc = kind === 'rat' ? C('#d07080') : dark(o.c1, 0.28);
+    const nw = u >= 1.5 ? 2 : 1, nc = kind === 'rat' ? C('#a96a7c') : dark(o.c1, 0.28);
     HL.rect(tipX - nw + 1, ny, nw, nw, nc);
-    if (nw > 1) HL.set(tipX - 1, ny, mixc(nc, '#ffffff', 0.45));
+    if (nw > 1) HL.set(tipX - 1, ny, mixc(nc, CREAM, 0.45));
   }
   if (kind === 'boar') {
     // curved tusk from the lower jaw
@@ -614,7 +623,7 @@ function quadFrame(o, D, pose) {
     HL.line(t0x + 1, t0y, t1x + 1, t1y + 1, BONE_D);
     HL.set(Math.round(t1x), Math.round(t1y) - 1, WHITE);
   }
-  if (kind === 'cat' && u >= 1.4) for (let k = 0; k < 2; k++) HL.line(tipX - 1, sy + k, tipX + Math.round(u * 1.2), sy - 1 + k * 2, mixc(o.c3, '#ffffff', 0.5));   // whiskers
+  if (kind === 'cat' && u >= 1.4) for (let k = 0; k < 2; k++) HL.line(tipX - 1, sy + k, tipX + Math.round(u * 1.2), sy - 1 + k * 2, mixc(o.c3, CREAM, 0.5));   // whiskers
   // eye
   eye(HL, e, hcx + HH * 0.12, hcy - HH * 0.12, o, eyeN(u), u >= 1.3 ? R[1] : null);
   // front ears / horns / antlers
@@ -622,7 +631,7 @@ function quadFrame(o, D, pose) {
   if (hooved) HL.set(ex - 1, ey - Math.round(2 * u), light(o.c1, 1.3));
   if (kind === 'horse') for (let k = 0; k < Math.max(3, Math.round(2 * u)); k++) HL.set(Math.round(hcx - HH * 0.1) + k, Math.round(hcy - HH * 0.48) + (k > 1 ? 1 : 0) + (k > 3 ? 1 : 0), k % 2 ? A[2] : A[3]);
   if (o.antlers || kind === 'stag') {
-    const ac = C(o.antlerColor || '#d8c8a8');
+    const ac = C(o.antlerColor || '#e2c494');
     const bw = u >= 2 ? 2 : 1;
     for (const [dx, col, hi] of [[ap(2), dark(ac, 0.72), dark(ac, 0.85)], [0, ac, light(ac, 1.15)]]) {
       const ax = ex + dx, ay = ey;
@@ -639,7 +648,7 @@ function quadFrame(o, D, pose) {
     HN.taper(ex + 1, ey + 1, ex - 3 * u, ey - 2.5 * u, Math.max(2, u * 1.1), 1, hc[3]);
     cyl(HN, hc);
     HN.taper(ex + 2, ey + 2, ex - 2 * u + 1, ey - 1.4 * u, Math.max(2, u * 0.8), 1, hc[1]);
-    HN.set(Math.round(ex - 3 * u), Math.round(ey - 2.5 * u) - 1, '#f8f0e0');
+    HN.set(Math.round(ex - 3 * u), Math.round(ey - 2.5 * u) - 1, WHITE);
     put(HL, HN, false);
   }
   put(p, HL, true);
@@ -650,7 +659,7 @@ function quadFrame(o, D, pose) {
   leg(hxh, 2, false, true);
   // ---- saddle (mounts): blanket with trim, leather seat with cantle and pommel, girth and stirrup
   if (o.saddle) {
-    const SC = ramp5(o.saddle), TR = ramp5('#c8a050');
+    const SC = ramp5(o.saddle), TR = ramp5('#c99a3a');
     const x0 = Math.round(bx - rx * 0.42), x1 = Math.round(bx + rx * 0.3);
     const top = by - Math.round(ry);
     const bl = Math.round(ry * 1.1);
@@ -666,12 +675,12 @@ function quadFrame(o, D, pose) {
     p.rect(x0, top - 1 - ch, cw, ch, SC[2]); p.set(x0, top - 1 - ch, SC[4]);
     p.rect(x1 - cw + 1, top - ch, cw, ch, SC[2]); p.set(x1 - cw + 1, top - ch, SC[4]);
     const gx = Math.round(bx);
-    p.line(gx, top + st + 1, gx, Math.round(by + ry * 0.75), '#3a2a1a', u >= 2 ? 2 : 1);
+    p.line(gx, top + st + 1, gx, Math.round(by + ry * 0.75), '#3f2622', u >= 2 ? 2 : 1);
     const sx = gx - Math.max(2, Math.round(u));
-    p.line(sx, top + st + 1, sx, Math.round(by + ry * 0.6), '#2a1e14');
+    p.line(sx, top + st + 1, sx, Math.round(by + ry * 0.6), '#2a1a1c');
     const sw = Math.max(3, Math.round(u * 1.4));
-    p.rect(sx - (sw >> 1), Math.round(by + ry * 0.6) + 1, sw, 2, '#a8a8b0'); p.set(sx - (sw >> 1), Math.round(by + ry * 0.6) + 1, '#e0e0e8');
-    if (sw >= 3) p.set(sx - (sw >> 1) + 1, Math.round(by + ry * 0.6) + 2, '#3a3a44');
+    p.rect(sx - (sw >> 1), Math.round(by + ry * 0.6) + 1, sw, 2, '#b6bdbd'); p.set(sx - (sw >> 1), Math.round(by + ry * 0.6) + 1, '#e2e6e0');
+    if (sw >= 3) p.set(sx - (sw >> 1) + 1, Math.round(by + ry * 0.6) + 2, '#3a4048');
     if (pose.ref) D.seat = [Math.round(bx - D.ox), top - D.oy];
   }
   if (pose.atk === 2 || !D.mouth) D.mouth = [tipX - D.ox, sy - D.oy];
@@ -938,7 +947,7 @@ function serpentHead(o, D, pose) {
     put(p, B, false);
     const open = pose.atk === 2 ? r0 * 0.75 : pose.atk === 1 ? r0 * 0.4 : r0 * 0.2;
     const mcx = cx + r0 * 0.95, mrx = Math.max(1, r0 * 0.38), mry = Math.max(1, open);
-    ball(p, mcx, cy, mrx, mry, [MAW_D, MAW_D, MAW, MAW, mixc(MAW, '#ffffff', 0.15)]);
+    ball(p, mcx, cy, mrx, mry, [MAW_D, MAW_D, MAW, MAW, mixc(MAW, CREAM, 0.15)]);
     // rings of teeth around the maw
     const nT = Math.max(5, Math.round(mry * 1.3));
     for (let k = 0; k < nT; k++) {
@@ -1094,10 +1103,10 @@ function blobFrame(o, D, pose) {
   if (o.caps) for (const [dx, r] of [[-0.45, 0.32], [0.1, 0.42], [0.5, 0.28]]) {
     const x = cx + dx * rx, y = cy - ry * 0.75 - r * rx * 0.2;
     const crx = r * rx, cry = r * rx * 0.6;
-    p.rect(Math.round(x - crx * 0.2), Math.round(y), Math.max(2, Math.round(crx * 0.4)), Math.max(1, Math.round(cry * 0.6)), ramp5('#e8dcd0')[2]);
+    p.rect(Math.round(x - crx * 0.2), Math.round(y), Math.max(2, Math.round(crx * 0.4)), Math.max(1, Math.round(cry * 0.6)), ramp5('#efdab4')[2]);
     ball(p, x, y, crx, cry, A, { clipY: y + 1 });
     for (let xx = Math.round(x - crx + 1); xx <= x + crx - 1; xx++) if (p.a(xx, Math.round(y) + 1)) p.set(xx, Math.round(y) + 1, (xx & 1) ? A[0] : A[1]);
-    const sp = '#f8f0f0';
+    const sp = WHITE;
     p.set(Math.round(x - crx * 0.3), Math.round(y - cry * 0.45), sp); p.set(Math.round(x + crx * 0.3), Math.round(y - cry * 0.15), sp);
     if (crx >= 4) { p.set(Math.round(x - crx * 0.3) + 1, Math.round(y - cry * 0.45), sp); p.set(Math.round(x + crx * 0.05), Math.round(y - cry * 0.7), sp); p.set(Math.round(x - crx * 0.65), Math.round(y - cry * 0.05), sp); }
   }
@@ -1114,8 +1123,8 @@ function blobFrame(o, D, pose) {
   }
   if (pose.mouth) {
     const mrx = Math.max(1, rx * 0.3), mry = Math.max(1, ry * 0.25), my = cy + ry * 0.4;
-    p.ellipse(cx, my, mrx, mry, '#2a0a10');
-    p.ellipse(cx, my + mry * 0.4, mrx * 0.6, mry * 0.45, '#5a1a22');
+    p.ellipse(cx, my, mrx, mry, MAW_D);
+    p.ellipse(cx, my + mry * 0.4, mrx * 0.6, mry * 0.45, TONGUE);
     for (let x = Math.round(cx - mrx * 0.7); x <= cx + mrx * 0.7; x += 2) p.set(x, Math.round(my - mry * 0.75), BONE);
   } else {
     const my = Math.round(cy + ry * 0.35);
@@ -1169,7 +1178,7 @@ function wraithFrame(o, D, view, pose) {
   put(p, RB, false);
   // arms: wide sleeves, dark cuffs, bony fingers
   const armUp = pose.atk === 1, armOut = pose.atk === 2;
-  const hand = ramp5(o.hand || '#d8d0c0');
+  const hand = ramp5(o.hand || '#c4bdb6');
   for (const sg of [-1, 1]) {
     const ax = cx + sg * 4 * u, ay = shY + u;
     const hx = armUp ? cx + sg * 6 * u : armOut ? cx + sg * 3.5 * u : cx + sg * 6.5 * u;
@@ -1210,7 +1219,7 @@ function wraithFrame(o, D, view, pose) {
     const c3 = C(o.c3);
     for (const sg of [-1, 1]) {
       const x = Math.round(cx + sg * 1.3 * u) - (sg < 0 ? ew - 1 : 0);
-      if (pose.hurt) { HD.rect(x, gy, ew, 1, '#2a2030'); continue; }
+      if (pose.hurt) { HD.rect(x, gy, ew, 1, '#2f2c38'); continue; }
       HD.rect(x, gy, ew, eh, c3); e.rect(x, gy, ew, eh, c3);
       HD.set(x + (sg < 0 ? ew - 1 : 0), gy, light(c3, 1.4)); e.set(x + (sg < 0 ? ew - 1 : 0), gy, light(c3, 1.4));
     }
@@ -1245,7 +1254,7 @@ function flyerFrame(o, D, pose) {
   const kind = o.kind;
   const body = ramp5(o.c1), wingR = ramp5(kind === 'gull' ? o.c2 : mixc(o.c1, o.c2, 0.25));
   const headC = kind === 'vulture' ? ramp5(o.c2) : body;
-  const beak = ramp5(kind === 'gull' ? o.c3 : '#e0c080');
+  const beak = ramp5(kind === 'gull' ? palTone(o.c3) : '#e2c494');
   const tilt = pose.atk === 2 ? 2 * u : 0;
   const cx = D.ox, cy = Math.round(D.oy - 7 * u);
   const shX = cx + u, shY = cy - 2 * u;
@@ -1276,8 +1285,8 @@ function flyerFrame(o, D, pose) {
     // gull wingtips are black with a white mirror spot
     if (kind === 'gull') {
       const tip = pts[2], tr = Math.max(2, 1.8 * u);
-      for (let y = Math.floor(tip[1] - tr); y <= tip[1] + tr; y++) for (let x = Math.floor(tip[0] - tr); x <= tip[0] + tr; x++) if (L.a(x, y) && Math.hypot(x - tip[0], y - tip[1]) < tr) L.set(x, y, far ? '#1a1a22' : '#2a2a34');
-      L.set(Math.round(tip[0] + (pts[0][0] - tip[0]) * 0.12), Math.round(tip[1] + (pts[0][1] - tip[1]) * 0.12), far ? '#a0a0a8' : '#f0f0f0');
+      for (let y = Math.floor(tip[1] - tr); y <= tip[1] + tr; y++) for (let x = Math.floor(tip[0] - tr); x <= tip[0] + tr; x++) if (L.a(x, y) && Math.hypot(x - tip[0], y - tip[1]) < tr) L.set(x, y, far ? '#1f1d26' : '#2f2c38');
+      L.set(Math.round(tip[0] + (pts[0][0] - tip[0]) * 0.12), Math.round(tip[1] + (pts[0][1] - tip[1]) * 0.12), far ? '#a29c9c' : WHITE);
     }
     // lit leading edge
     L.line(pts[0][0], pts[0][1], pts[1][0], pts[1][1], W[4], u >= 2.2 ? 2 : 1);
@@ -1299,11 +1308,11 @@ function flyerFrame(o, D, pose) {
   if (u >= 1.4) for (let k = 0; k < 4; k++) { const x = Math.round(cx - 2.6 * u + k * 1.6 * u), y = topY(B, x); if (y >= 0) { B.set(x, y + 2, body[2]); B.set(x + 1, y + 3, body[2]); } }
   put(p, B, true);
   // talons
-  const tc = ramp5('#c8a060');
+  const tc = ramp5('#cfa978');
   const tx = pose.atk === 2 ? cx + 3 * u : cx;
   const fy = cy + 5 * u;
   p.line(cx, cy + 2.5 * u, tx + u, fy, tc[3], u >= 2 ? 2 : 1); p.line(cx - u, cy + 2.5 * u, tx, fy, tc[2]);
-  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1]]) p.set(Math.round(tx + u) + dx * Math.max(1, Math.round(u * 0.6)), Math.round(fy) + dy, '#2a2018');
+  for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1]]) p.set(Math.round(tx + u) + dx * Math.max(1, Math.round(u * 0.6)), Math.round(fy) + dy, '#2a1a1c');
   // head
   const hx = Math.round(cx + 5.2 * u), hy = Math.round(cy - 2.4 * u + tilt);
   const HL = blank(p);
@@ -1321,7 +1330,7 @@ function flyerFrame(o, D, pose) {
   HL.poly([[hx + 1.5 * u, hy - 0.6 * u], [hx + 4.5 * u, hy + hook * u], [hx + 1.5 * u, hy + 0.9 * u]], beak[3]);
   HL.line(hx + 1.5 * u, hy - 0.6 * u, hx + 4.2 * u, hy + hook * u - 1, beak[4]);
   HL.set(Math.round(hx + 4.5 * u) - 1, Math.round(hy + hook * u), beak[0]);
-  if (kind === 'gull' && u >= 1.2) HL.set(Math.round(hx + 3.2 * u), Math.round(hy + 0.6 * u), '#c03020');
+  if (kind === 'gull' && u >= 1.2) HL.set(Math.round(hx + 3.2 * u), Math.round(hy + 0.6 * u), '#b04a3e');
   eye(HL, e, hx + 0.6 * u, hy - 0.5 * u, o, u >= 2 ? 2 : 1, kind === 'vulture' ? headC[1] : null);
   put(p, HL, true);
   wing(false);
@@ -1343,7 +1352,7 @@ function eyeSet(o) {
   iris.disc(n / 2, n / 2, ir - 1, c3);
   // radial flecks
   if (ir >= 3) for (let k = 0; k < 8; k++) { const a = k * Math.PI / 4 + 0.3; iris.set(Math.floor(n / 2 + Math.cos(a) * ir * 0.68), Math.floor(n / 2 + Math.sin(a) * ir * 0.68), IR[4]); }
-  iris.disc(n / 2, n / 2, Math.max(0.7, ir * 0.42), '#0a0408');
+  iris.disc(n / 2, n / 2, Math.max(0.7, ir * 0.42), VOID);
   iris.set(Math.floor(n / 2 - ir * 0.5), Math.floor(n / 2 - ir * 0.5), WHITE);
   if (ir >= 4) iris.set(Math.floor(n / 2 - ir * 0.5) + 1, Math.floor(n / 2 - ir * 0.5), mixc(WHITE, c3, 0.4));
   const out = {
@@ -1391,7 +1400,7 @@ function eyeFrame(o, D, pose) {
   ball(B, cx, cy, er, er, W);
   for (let k = 0; k < 4; k++) {
     const a = k * 1.57 + 0.4;
-    const v = mixc(o.c2, '#c03040', 0.5);
+    const v = mixc(o.c2, '#a94a68', 0.5);
     const mx = cx + Math.cos(a) * er * 0.72, my = cy + Math.sin(a) * er * 0.68;
     B.line(cx + Math.cos(a) * er * 0.5, cy + Math.sin(a) * er * 0.5, mx, my, v);
     B.line(mx, my, cx + Math.cos(a + 0.3) * er * 0.95, cy + Math.sin(a + 0.3) * er * 0.9, v);

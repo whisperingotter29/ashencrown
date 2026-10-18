@@ -1,6 +1,6 @@
 // Headless sprite sheets: renders every generated sprite into PNG contact sheets for review.
 // Run: node tools/sprite-sheet.mjs <outDir>
-import { writeFileSync, mkdirSync } from 'node:fs';
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 import { Pix } from '../src/px/pix.js';
 import { humanSprites } from '../src/px/sprites/human.js';
@@ -63,8 +63,8 @@ RACES.forEach((r, i) => tryit('race ' + r.id, () => {
   const cls = CLASSES[i % CLASSES.length];
   const w = weights[i % 4];
   const eq = { helm: i % 3 ? { weight: w, material: 'steel', rarity: 'rare' } : null, chest: { weight: w, material: 'steel', rarity: i % 2 ? 'epic' : 'common' }, legs: { weight: w, material: 'steel', rarity: 'rare' }, boots: { weight: w, material: 'iron', rarity: 'rare' }, gloves: { weight: w, material: 'steel', rarity: 'rare' } };
-  const bare = humanSprites(raceLook(r.look, { skin: i, hair: i }, { shirt: cls.color, pants: '#3a3028' }));
-  const dressed = humanSprites({ ...raceLook(r.look, { skin: i + 1, hair: i + 2 }, { shirt: cls.color, pants: '#3a3028' }), ...armorLook(eq) });
+  const bare = humanSprites(raceLook(r.look, { skin: i, hair: i }, { shirt: cls.color, pants: '#3f2622' }));
+  const dressed = humanSprites({ ...raceLook(r.look, { skin: i + 1, hair: i + 2 }, { shirt: cls.color, pants: '#3f2622' }), ...armorLook(eq) });
   const row = [];
   // body frames only: arms, weapons and shields are drawn at runtime by the actor rig
   for (const v of ['down', 'side', 'up']) row.push(bare.frame(v, {}).pix);
@@ -75,6 +75,24 @@ RACES.forEach((r, i) => tryit('race ' + r.id, () => {
   rows.push(row);
 }));
 writeFileSync(out + '/races.png', png(sheet(rows), 3));
+
+// ---- class outfits (the player look: race + class hood / cloak / cape + the rusted starting kit).
+// The outfit table lives in player.js, which needs a browser, so it is read from the source.
+const psrc = readFileSync(new URL('../src/entities/player.js', import.meta.url), 'utf8');
+const OUTFIT = Function('return ' + psrc.match(/const OUTFIT = (\{[\s\S]*?\n\});/)[1])();
+const CAPE = Function('return ' + psrc.match(/const CAPE = (\{[^\n]*\});/)[1])();
+const outfit = (id) => { const o = OUTFIT[id]; if (!o) return CAPE[id] ? { cape: CAPE[id][0], capeTrim: CAPE[id][1] } : {}; return { hoodDefault: { kind: 'hood', color: o[0], eyes: o[1] }, cloak: o[0], pants: o[2], bootsColor: o[3] }; };
+const crows = [];
+for (const rid of ['human', 'elf', 'dwarf', 'orc']) tryit('outfits ' + rid, () => {
+  const r = RACES.find((x) => x.id === rid), row = [];
+  for (const cls of CLASSES) {
+    const w = cls.kit.armor, kit = (slot) => ({ weight: w, material: 'rusted', rarity: 'common', slot });
+    const hs = humanSprites({ ...raceLook(r.look, { skin: 0, hair: 1 }, { shirt: cls.color, pants: '#3f2622' }), ...outfit(cls.id), ...armorLook({ chest: kit('chest'), legs: kit('legs'), boots: kit('boots') }), scale: r.look.scale });
+    row.push(hs.frame('down', {}).pix, hs.frame('side', { legs: 'run', ph: 1, bob: 1, lean: 1, sway: 1 }).pix);
+  }
+  crows.push(row);
+});
+writeFileSync(out + '/classes.png', png(sheet(crows), 3));
 
 // ---- weapons
 const wrows = [];
