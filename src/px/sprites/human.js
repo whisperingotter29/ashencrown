@@ -166,7 +166,8 @@ function fig(L, m, view, pose) {
   if (!up) backHair(p, F, hx, hy);
   if (L.quiver && !up) quiver(p, F, true);
   // ---- legs, skirt, torso
-  if (pose.legs !== 'ride') legs(p, F);
+  if (pose.legs !== 'ride' && (L.stone || L.bark)) legsTextured(p, F);
+  else if (pose.legs !== 'ride') legs(p, F);
   else rideLegs(p, F);
   if (robe && pose.legs !== 'ride' && pose.legs !== 'tuck') robeSkirt(p, F);
   torso(p, e, F);
@@ -186,6 +187,28 @@ function fig(L, m, view, pose) {
 function hasPixels(p) { for (let i = 3; i < p.d.length; i += 4) if (p.d[i]) return true; return false; }
 
 // ------------------------------------------------------------------ legs
+// stone and bark bodies: legs drawn on their own layer, then given the same grain as the torso
+// (giant golems and treants have legs dozens of pixels wide, which read as flat slabs otherwise)
+function legsTextured(p, F) {
+  const q = new Pix(p.w, p.h);
+  legs(q, F);
+  const { L, S } = F, course = Math.max(6, S(9));
+  for (let y = 0; y < q.h; y++) for (let x = 0; x < q.w; x++) {
+    const c = q.get(x, y);
+    if (!c[3]) continue;
+    let k = 1;
+    if (L.stone) {
+      const h = hash2(x, y, 4);
+      if (h < 0.12) k = 0.82; else if (h > 0.95) k = 1.08;
+      // broken mortar lines between stacked blocks
+      if (y % course === course - 1 && hash2(x >> 2, y, 6) < 0.6) k = 0.7;
+    }
+    if (L.bark) { if ((x * 3 + y) % 5 === 0) k = 0.8; else if (hash2(x, y >> 1, 12) < 0.06) k = 0.68; }
+    q.set(x, y, k === 1 ? c : k < 1 ? dark(c, k) : light(c, k));
+  }
+  p.blit(q, 0, 0);
+}
+
 function legs(p, F) {
   const { L, m, side, up, tw, tl, tr, ty1, ft, FE, S } = F;
   const legR = ramp(L.legs?.color || L.pants, 0.66, 1.14);
@@ -255,6 +278,11 @@ function legs(p, F) {
   // front / back view: two legs, the stepping foot lower (toward the camera) or lifted
   const gap = tw >= 9 ? 2 : 1, lw = Math.max(3, (tw - gap) >> 1), wide = ft.wide || 0;
   const tone = (i, ob) => {
+    if (lw >= 8) {                                                              // giant legs: a lit edge band and a shaded side
+      const t = i / (lw - 1);
+      if (ob < 0) return t < 0.12 ? 'l' : t > 0.88 ? 'd' : t > 0.66 ? 'md' : 'm';
+      return t < 0.1 ? 'm' : t > 0.8 ? 'd' : t > 0.5 ? 'md' : 'm';
+    }
     if (ob < 0) return i === 0 ? 'l' : i === lw - 1 ? 'md' : 'm';
     return i === 0 ? 'm' : i === lw - 1 ? 'd' : i >= lw / 2 ? 'md' : 'm';
   };
