@@ -463,7 +463,7 @@ export class Actor {
   // a rounded fist: knuckles lit on top, shaded underneath
   hand(ctx, x, y, k, P, w) {
     if (this._xray) return;
-    const s = Math.max(3, w + 1);
+    const s = Math.max(3, w);
     const hx = x - (s >> 1) * k, hy = y - (s >> 1) * k;
     ctx.fillStyle = P.ho; ctx.fillRect(hx - k, hy, (s + 2) * k, s * k); ctx.fillRect(hx, hy - k, s * k, (s + 2) * k);
     ctx.fillStyle = P.h; ctx.fillRect(hx, hy, s * k, s * k);
