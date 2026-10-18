@@ -616,7 +616,8 @@ export function projectileDrawable(p, size = 0.3) {
       return o;
     }
   }
-  const spr = pointed ? ammoSprite(kind, p.element !== 'physical' || kind === 'shard' || kind === 'thorn' ? p.color : null) : orbSprite(p.color, Math.max(3, Math.round(size * PPU * 0.9)));
+  const orbR = Math.max(3, Math.round(size * PPU * 0.9));
+  const spr = pointed ? ammoSprite(kind, p.element !== 'physical' || kind === 'shard' || kind === 'thorn' ? p.color : null) : orbSprite(p.color, orbR);
   const glowR = pointed ? (p.element !== 'physical' ? 6 * ART : 0) : size * PPU * 2.6;
   const o = {
     sortZ: p.pos.z, p,
@@ -646,7 +647,7 @@ export function projectileDrawable(p, size = 0.3) {
   scene.objects.add(o);
   // crisp trail: recent positions joined by a tapering pixel ribbon (magic) or a thin streak
   // (arrows); once the projectile dies the tail keeps collapsing into the impact point
-  const trail = [], TL = pointed ? 4 : 7, headW = pointed ? 0.5 : Math.max(1.5 * ART, size * PPU * 0.75);
+  const trail = [], TL = pointed ? 4 : 7, headW = pointed ? 0.5 : Math.max(1.5 * ART, Math.min(orbR - 1, size * PPU * 0.75));
   const c = col(p.color), tc = pointed ? (p.element !== 'physical' ? light(c, 1.2) : [235, 230, 220]) : light(c, 1.25), dc = dark(c, 0.75);
   addFx({
     update() {
@@ -657,6 +658,8 @@ export function projectileDrawable(p, size = 0.3) {
     glowPx(Ly) {
       const n = trail.length;
       if (n < 2) return;
+      // the ribbon starts behind a live orb so the shaded orb sprite stays visible
+      const [hx, hy, hz] = trail[0], HX = PX(hx), HY = PY(hz, hy - ground(hx, hz)), clear = pointed || o.gone ? 0 : orbR + 0.5;
       for (let i = 0; i < n - 1; i++) {
         const [ax, ay, az] = trail[i], [bx, by, bz] = trail[i + 1];
         const x0 = PX(ax), y0 = PY(az, ay - ground(ax, az)), x1 = PX(bx), y1 = PY(bz, by - ground(bx, bz));
@@ -665,11 +668,12 @@ export function projectileDrawable(p, size = 0.3) {
           const t = (i + k / steps) / (TL - 1);                     // 0 at the head, 1 at the tail
           const xx = x0 + (x1 - x0) * k / steps, yy = y0 + (y1 - y0) * k / steps;
           if (t > 0.45 && bayer(Math.round(xx), Math.round(yy)) > (1 - t) / 0.55) continue;
+          if (clear && Math.hypot(xx - HX, yy - HY) < clear) continue;
           const w = headW * (1 - t * 0.85);
           if (w <= 0.6) { Ly.px(xx, yy, t < 0.4 ? tc : pointed ? tc : c, 1); continue; }
           for (let dy = -Math.ceil(w); dy <= Math.ceil(w); dy++) for (let dx = -Math.ceil(w); dx <= Math.ceil(w); dx++) {
             const d = Math.hypot(dx, dy);
-            if (d > w) continue;
+            if (d > w || (clear && Math.hypot(xx + dx - HX, yy + dy - HY) < clear)) continue;
             Ly.px(xx + dx, yy + dy, d < w * 0.45 && t < 0.5 ? tc : t > 0.7 ? dc : c, 1);
           }
         }
