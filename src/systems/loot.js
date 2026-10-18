@@ -3,7 +3,7 @@ import { G } from '../game.js';
 import { glowPx } from '../render/renderer.js';
 import { addObject, removeObject } from '../px/scene.js';
 import { view } from '../px/view.js';
-import { PPU, bayer, C } from '../px/pix.js';
+import { PPU, ART, bayer, C } from '../px/pix.js';
 import { pickupSprite } from '../px/sprites/items.js';
 import { RNG, rand, chance } from '../core/rng.js';
 import { rollLoot, RARITY, makeTome, makeLegendary, makeSetPiece, materialDropsFor, MATERIALS_LIST, CONSUMABLES, S } from '../data/items.js';
@@ -35,35 +35,54 @@ export function spawnPickup(kind, x, z, data) {
 }
 
 // Pixel pickup: the item's sprite bobbing over a little shadow, with a dithered rarity beam
+const LIFT = Math.round(2 * ART), BOB = 1.2 * ART;
 function pickupDrawable(pk) {
   const spr = pickupSprite(pk.kind, pk.data);
   const ri = pk.kind === 'item' ? RARITY[pk.data.rarity].index : -1;
-  const rc = C(pk.color);
+  const rc = C(pk.color), side1 = 'rgb(' + [0, 1, 2].map((i) => Math.min(255, Math.round(rc[i] * 1.2 + 40))).join(',') + ')';
+  const sw = Math.max(3, Math.round(spr.pix.w * 0.38));
+  // opaque top-edge pixels of the sprite, for the travelling glint
+  const glints = [];
+  for (let y = 0; y < spr.pix.h; y++) for (let x = 2; x < spr.pix.w - 2; x++) if (spr.pix.a(x, y) > 200 && spr.pix.a(x, y - 1) < 100) glints.push([x, y]);
   const place = () => {
-    const bob = pk.t > 0.6 ? Math.round(Math.sin(pk.t * 3) * 1.2) : 0;
-    return [Math.round(pk.x * PPU - view.x0), Math.round(pk.z * PPU - view.y0), Math.round(Math.max(0, pk.h) * PPU) + 2 - bob];
+    const bob = pk.t > 0.6 ? Math.round(Math.sin(pk.t * 3) * BOB) : 0;
+    return [Math.round(pk.x * PPU - view.x0), Math.round(pk.z * PPU - view.y0), Math.round(Math.max(0, pk.h) * PPU) + LIFT - bob];
   };
   return {
     sortZ: pk.z, pk,
-    shadow(ctx) { const [x, y] = place(); ctx.fillStyle = 'rgba(10,6,12,0.32)'; ctx.fillRect(x - 3, y, 7, 2); ctx.fillRect(x - 2, y - 1, 5, 1); },
+    shadow(ctx) {
+      // pixel ellipse that tightens as the pickup bobs up
+      const [x, y, h] = place(), k = Math.max(0, Math.min(2, Math.round((h - LIFT) / (2 * ART))));
+      const w = sw - k;
+      ctx.fillStyle = 'rgba(10,6,12,0.32)';
+      ctx.fillRect(x - w, y, w * 2 + 1, 2); ctx.fillRect(x - w + 2, y - 1, w * 2 - 3, 1); ctx.fillRect(x - w + 2, y + 2, w * 2 - 3, 1);
+    },
     draw(ctx) {
       const [x, y, h] = place();
       ctx.drawImage(spr.pix.canvas(), x - spr.pix.ox, y - h - spr.pix.oy);
-      // sparkle glint
-      if (Math.floor(pk.t * 2 + pk.x) % 5 === 0) { ctx.fillStyle = '#ffffff'; ctx.fillRect(x + 2, y - h - spr.pix.oy + 2, 1, 1); }
     },
     emissive(ctx) {
       const [x, y, h] = place();
       if (spr.emis) ctx.drawImage(spr.emis.canvas(), x - spr.emis.ox, y - h - spr.emis.oy);
+      // four-point twinkle hopping across the sprite's top edge every couple of seconds
+      const cyc = pk.t * 0.7 + Math.abs(pk.x * 0.37 + pk.z * 0.21), tw = cyc % 1;
+      if (glints.length && tw < 0.16) {
+        const [gx, gy] = glints[(Math.floor(cyc) * 7) % glints.length];
+        const X = x - spr.pix.ox + gx, Y = y - h - spr.pix.oy + gy, arm = tw < 0.05 || tw > 0.11 ? 1 : 2;
+        ctx.fillStyle = '#ffffff'; ctx.fillRect(X, Y, 1, 1);
+        ctx.globalAlpha = 0.8; ctx.fillRect(X - arm, Y, arm, 1); ctx.fillRect(X + 1, Y, arm, 1); ctx.fillRect(X, Y - arm, 1, arm); ctx.fillRect(X, Y + 1, 1, arm);
+        ctx.globalAlpha = 1;
+      }
       if (ri >= 1 && !pk.gl) {
-        // light column: crisp dithered pixels thinning upward
-        const H = 14 + ri * 9;
-        for (let k = 2; k < H; k++) {
+        // light column: crisp dithered pixels thinning upward, white core, rarity-coloured sides
+        const H = Math.round((14 + ri * 9) * ART);
+        for (let k = LIFT; k < H; k++) {
           const a = (1 - k / H) * (0.55 + ri * 0.08);
-          for (let dx = -1; dx <= 1; dx++) {
-            if (bayer(x + dx, y - k + Math.floor(pk.t * 12)) > a * (dx ? 0.5 : 1)) continue;
-            ctx.fillStyle = dx ? pk.color : '#ffffff';
-            ctx.globalAlpha = dx ? 0.8 : 0.55;
+          for (let dx = -2; dx <= 2; dx++) {
+            const sd = Math.abs(dx);
+            if (bayer(x + dx, y - k + Math.floor(pk.t * 12)) > a * (sd === 2 ? 0.3 : sd ? 0.6 : 1)) continue;
+            ctx.fillStyle = sd === 2 ? pk.color : sd ? side1 : '#ffffff';
+            ctx.globalAlpha = sd === 2 ? 0.7 : sd ? 0.8 : 0.55;
             ctx.fillRect(x + dx, y - h - k, 1, 1);
           }
         }
@@ -72,9 +91,8 @@ function pickupDrawable(pk) {
     },
     glow(ctx) {
       const [x, y, h] = place();
-      if (ri >= 1) glowPx(ctx, x, y - h - 2, pk.color, 6 + ri * 3, 0.3 + ri * 0.06);
-      else if (pk.kind === 'gold') glowPx(ctx, x, y - h - 2, '#ffd060', 5, 0.18);
-      void rc;
+      if (ri >= 1) glowPx(ctx, x, y - h - LIFT, pk.color, (6 + ri * 3) * ART, 0.3 + ri * 0.06);
+      else if (pk.kind === 'gold') glowPx(ctx, x, y - h - LIFT, '#ffd060', 5 * ART, 0.18);
     },
   };
 }

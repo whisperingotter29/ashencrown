@@ -5,7 +5,7 @@ import { R, setZoomStep } from '../render/renderer.js';
 import { input } from '../core/input.js';
 import { damp } from '../core/math.js';
 import { view } from '../px/view.js';
-import { PPU } from '../px/pix.js';
+import { PPU, ART } from '../px/pix.js';
 import { lensToSource, sourceToLens } from '../render/post.js';
 
 export const cam = {
@@ -28,14 +28,16 @@ export function snapCamera(pos) {
 
 export function addShake(amount) { cam.trauma = Math.min(1, cam.trauma + amount); }
 
-// Directional camera kick: an impulse (screen direction dx/dy, size in low-res pixels) that a
-// stiff spring pulls back to rest. Hits punch the view toward the target, getting hit knocks it
-// away, recoil nudges it backwards. Integer-pixel output keeps the image crisp.
+// Directional camera kick: an impulse (screen direction dx/dy, size in design pixels, i.e. tenths
+// of a world unit, converted to art pixels with ART) that a stiff spring pulls back to rest. Hits
+// punch the view toward the target, getting hit knocks it away, recoil nudges it backwards.
+// Integer-pixel output keeps the image crisp. Shake and kick cover the same patch of world (and
+// so the same screen distance) at any pixel density.
 const kickS = { x: 0, y: 0, vx: 0, vy: 0 };
 export function kick(dx, dy, px) {
   const L = Math.hypot(dx, dy);
   if (!L || !px) return;
-  const v = px * 23;
+  const v = px * ART * 23;
   kickS.vx += (dx / L) * v; kickS.vy += (dy / L) * v;
 }
 function stepKick(dt) {
@@ -45,7 +47,7 @@ function stepKick(dt) {
     kickS.vy += (-520 * kickS.y - 30 * kickS.vy) * h;
     kickS.x += kickS.vx * h; kickS.y += kickS.vy * h;
   }
-  const lim = 8;
+  const lim = 8 * ART;
   kickS.x = Math.max(-lim, Math.min(lim, kickS.x)); kickS.y = Math.max(-lim, Math.min(lim, kickS.y));
 }
 
@@ -63,7 +65,7 @@ export function updateCamera(dt, allowInput = true) {
   const amt = cam.shakeScale ?? 1;
   let sx = 0, sy = 0;
   if (cam.trauma > 0) {
-    const s = cam.trauma * cam.trauma * 7;
+    const s = cam.trauma * cam.trauma * 7 * ART;
     const t = performance.now() * 0.001;
     sx = (Math.sin(t * 61.3) * 0.7 + Math.sin(t * 23.9 + 0.7) * 0.3) * s;
     sy = (Math.sin(t * 47.1 + 1.3) * 0.7 + Math.sin(t * 31.7 + 2.1) * 0.3) * s;
