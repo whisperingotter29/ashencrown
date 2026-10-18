@@ -14,8 +14,8 @@ import { clearCombat } from '../systems/combat.js';
 import { addShake } from './cameraRig.js';
 import { scene, addObject, removeObject } from '../px/scene.js';
 import { view } from '../px/view.js';
-import { PPU, C, bayer } from '../px/pix.js';
-import { dungeonTiles, dpropSprite, chestSprite } from '../px/sprites/dprops.js';
+import { PPU, ART, ap, C, bayer } from '../px/pix.js';
+import { dungeonTiles, dpropSprite, chestSprite, torchSprite, bulbSprite } from '../px/sprites/dprops.js';
 import { propSprite } from '../px/sprites/props.js';
 import { bannerSprite, brazierSprite } from '../px/sprites/buildings.js';
 const OX = 20000, OZ = 20000;
@@ -147,7 +147,7 @@ function carveMaze(g, W, N, rng) {
 const PROP_MAP = { glass_crystal: 'glass_shard', ice_crystal: 'ice_crystal', mushroom: 'mushroom_giant', void_crystal: 'void_crystal', rock: 'deep_rock', coral: 'coral', kelp: 'sea_grass', root: 'fallen_log', giant_bone: 'rib_bones', statue: 'statue_frag', pillar: 'column' };
 function dpropFor(type, rng) {
   if (type === 'banner') { const c = rng.pick(['#8a2a1a', '#3a4a6a', '#5a3a7a']); return { frames: [bannerSprite(c, 3.6, 0), bannerSprite(c, 3.6, 1)] }; }
-  if (type === 'brazier') return { spr: brazierSprite(1), fire: 9 };
+  if (type === 'brazier') { const b = brazierSprite(1); return { spr: b, fire: -b.fireAt[1] }; }
   const own = dpropSprite(type, rng.int(0, 3));
   if (own) return { spr: own, fire: own.fireAt ? -own.fireAt[1] : 0 };
   const id = PROP_MAP[type] || 'rock';
@@ -207,7 +207,7 @@ export function exitDungeon() {
 
 // ------------------------------------------------------------------- build
 const T_PX = (d) => Math.round(d.tile * PPU);
-const WALL_PX = 26;
+const WALL_PX = ap(26);       // visible height of a wall face (2.6 world units)
 function addObj(d, o) { d.objs.push(o); addObject(o); return o; }
 
 // floor: pre-rendered chunk canvases of tiles (drawn as the ground layer)
@@ -343,43 +343,51 @@ function spriteObj(x, z, spr, frames) {
   return {
     sortZ: z, hidden: false,
     cur() { if (!frames) return spr; const n = frames.length; return frames[((Math.floor(now() * 2.5 + x) % n) + n) % n]; },
-    shadow(ctx) { const w = Math.max(3, Math.round(first.pix.w * 0.3)); ctx.fillStyle = 'rgba(8,4,10,0.35)'; ctx.fillRect(Math.round(x * PPU - view.x0) - w, Math.round(z * PPU - view.y0) - 1, w * 2 + 1, 3); },
+    shadow(ctx) {
+      const w = Math.max(ap(3), Math.round(first.pix.w * 0.3)), k = Math.max(1, Math.round(w * 0.2)), px = Math.round(x * PPU - view.x0), py = Math.round(z * PPU - view.y0);
+      ctx.fillStyle = 'rgba(8,4,10,0.35)'; ctx.fillRect(px - w + k, py - 2, w * 2 + 1 - k * 2, 1); ctx.fillRect(px - w, py - 1, w * 2 + 1, 3); ctx.fillRect(px - w + k, py + 2, w * 2 + 1 - k * 2, 1);
+    },
     draw(ctx) { const s = this.cur(); ctx.drawImage(s.pix.canvas(), Math.round(x * PPU - view.x0) - s.pix.ox, Math.round(z * PPU - view.y0) - s.pix.oy); },
     emissive(ctx) { const s = this.cur(); if (s.emis) ctx.drawImage(s.emis.canvas(), Math.round(x * PPU - view.x0) - s.emis.ox, Math.round(z * PPU - view.y0) - s.emis.oy); },
   };
 }
-// a crisp flickering flame (emissive pixels) with a soft glow
+// a crisp flickering flame (emissive pixels) with a soft glow; sizes in design pixels x ART
 function flameObj(x, z, h, big, color) {
-  const c = C(color);
+  const c = C(color), edge = `rgb(${c[0]},${Math.round(c[1] * 0.6)},${Math.round(c[2] * 0.4)})`;
+  const s = big * ART;
   return {
     sortZ: z + 0.02, draw() {},
     emissive(ctx) {
       const px = Math.round(x * PPU - view.x0), py = Math.round(z * PPU - view.y0 - h * PPU);
       const t = now() * 9 + x;
-      const hgt = Math.round((4 + Math.sin(t) * 1.2 + Math.sin(t * 2.7) * 0.8) * big);
+      const hgt = Math.round((4 + Math.sin(t) * 1.2 + Math.sin(t * 2.7) * 0.8) * s);
       for (let k = 0; k < hgt; k++) {
-        const w = Math.max(0, Math.round((1 - k / hgt) * 2.4 * big));
-        const sway = Math.round(Math.sin(t * 0.7 + k * 0.6) * (k / hgt) * 1.3);
-        for (let i = -w; i <= w; i++) { ctx.fillStyle = Math.abs(i) < w * 0.45 && k < hgt * 0.6 ? '#fff0b0' : Math.abs(i) === w ? `rgb(${c[0]},${Math.round(c[1] * 0.6)},${Math.round(c[2] * 0.4)})` : color; ctx.fillRect(px + i + sway, py - k, 1, 1); }
+        const w = Math.max(0, Math.round((1 - k / hgt) * 2.4 * s));
+        const sway = Math.round(Math.sin(t * 0.7 + k * 0.6) * (k / hgt) * 1.3 * ART);
+        for (let i = -w; i <= w; i++) { ctx.fillStyle = Math.abs(i) < w * 0.45 && k < hgt * 0.6 ? '#fff0b0' : Math.abs(i) === w ? edge : color; ctx.fillRect(px + i + sway, py - k, 1, 1); }
       }
     },
-    glow(ctx) { glowPx(ctx, x * PPU - view.x0, z * PPU - view.y0 - h * PPU - 3 * big, color, 10 * big, 0.45); },
+    glow(ctx) { glowPx(ctx, x * PPU - view.x0, z * PPU - view.y0 - h * PPU - 3 * s, color, 10 * s, 0.45); },
+  };
+}
+// a sprite pinned to a world point (its pivot), with optional emissive
+function pinned(spr, x, z) {
+  return {
+    draw(ctx) { ctx.drawImage(spr.pix.canvas(), Math.round(x * PPU - view.x0) - spr.pix.ox, Math.round(z * PPU - view.y0) - spr.pix.oy); },
+    emissive(ctx) { if (spr.emis) ctx.drawImage(spr.emis.canvas(), Math.round(x * PPU - view.x0) - spr.emis.ox, Math.round(z * PPU - view.y0) - spr.emis.oy); },
   };
 }
 function torchObj(x, z, color) {
   const o = flameObj(x, z, 1.9, 0.9, color);
-  const base = o.emissive;
+  const flame = o.emissive, sc = pinned(torchSprite(), x, z);
   o.sortZ = z + 0.03;
-  o.draw = (ctx) => { const px = Math.round(x * PPU - view.x0), py = Math.round(z * PPU - view.y0); ctx.fillStyle = '#2a2420'; ctx.fillRect(px - 1, py - 16, 3, 6); ctx.fillStyle = '#4a3a30'; ctx.fillRect(px - 2, py - 19, 5, 3); };
-  o.emissive = base;
+  o.draw = sc.draw;
+  o.emissive = (ctx) => { sc.emissive(ctx); flame(ctx); };
   return o;
 }
 function glowBulb(x, z, color) {
-  return {
-    sortZ: z, draw(ctx) { const px = Math.round(x * PPU - view.x0), py = Math.round(z * PPU - view.y0); ctx.fillStyle = '#2a3a24'; ctx.fillRect(px - 1, py - 6, 2, 6); },
-    emissive(ctx) { const px = Math.round(x * PPU - view.x0), py = Math.round(z * PPU - view.y0); ctx.fillStyle = color; ctx.fillRect(px - 2, py - 10, 4, 4); ctx.fillStyle = '#ffffff'; ctx.fillRect(px - 1, py - 9, 1, 1); },
-    glow(ctx) { glowPx(ctx, x * PPU - view.x0, z * PPU - view.y0 - 8, color, 9, 0.5); },
-  };
+  const sp = pinned(bulbSprite(color), x, z);
+  return { sortZ: z, draw: sp.draw, emissive: sp.emissive, glow(ctx) { glowPx(ctx, x * PPU - view.x0, z * PPU - view.y0 - ap(8), color, ap(9), 0.5); } };
 }
 
 function refreshMazeWalls(d, instant) {
@@ -396,17 +404,22 @@ function exitPortal(d, x, z, color) {
   addObj(d, {
     sortZ: z, draw() {},
     emissive(ctx) {
-      const px = Math.round(x * PPU - view.x0), py = Math.round(z * PPU - view.y0) - 16, t = now();
-      for (let k = 0; k < 28; k++) {
-        const a = (k / 28) * Math.PI * 2 + t * 2.2, r = 13 + Math.sin(t * 3 + k) * 1.2;
-        ctx.fillStyle = k % 3 ? `rgb(${c[0]},${c[1]},${c[2]})` : '#ffffff';
-        ctx.fillRect(Math.round(px + Math.cos(a) * r), Math.round(py + Math.sin(a) * r * 1.15), 2, 2);
+      const lift = ap(16), R = ap(13), rx = ap(11), ry = ap(13);
+      const px = Math.round(x * PPU - view.x0), py = Math.round(z * PPU - view.y0) - lift, t = now();
+      const body = `rgb(${c[0]},${c[1]},${c[2]})`, dim = `rgb(${Math.round(c[0] * 0.6)},${Math.round(c[1] * 0.6)},${Math.round(c[2] * 0.7)})`;
+      // orbiting sparks, each with a short trailing pixel
+      for (let k = 0; k < 44; k++) {
+        const a = (k / 44) * Math.PI * 2 + t * 2.2, r = R + Math.sin(t * 3 + k) * ap(1.2);
+        const sx = Math.round(px + Math.cos(a) * r), sy = Math.round(py + Math.sin(a) * r * 1.15);
+        ctx.fillStyle = dim; ctx.fillRect(Math.round(px + Math.cos(a - 0.12) * r), Math.round(py + Math.sin(a - 0.12) * r * 1.15), 1, 1);
+        ctx.fillStyle = k % 3 ? body : '#ffffff'; ctx.fillRect(sx, sy, 2, 2);
       }
+      // dithered breathing core
       const a = 0.35 + Math.sin(t * 3) * 0.15;
-      ctx.fillStyle = `rgb(${c[0]},${c[1]},${c[2]})`;
-      for (let yy = -13; yy <= 13; yy++) for (let xx = -11; xx <= 11; xx++) { if (xx * xx / 121 + yy * yy / 169 > 1) continue; if (bayer(px + xx + Math.floor(t * 8), py + yy) > a) continue; ctx.fillRect(px + xx, py + yy, 1, 1); }
+      ctx.fillStyle = body;
+      for (let yy = -ry; yy <= ry; yy++) for (let xx = -rx; xx <= rx; xx++) { const d = (xx * xx) / (rx * rx) + (yy * yy) / (ry * ry); if (d > 1) continue; if (bayer(px + xx + Math.floor(t * 8), py + yy) > a + (1 - d) * 0.25) continue; ctx.fillRect(px + xx, py + yy, 1, 1); }
     },
-    glow(ctx) { glowPx(ctx, x * PPU - view.x0, z * PPU - view.y0 - 16, color, 26, 0.55); },
+    glow(ctx) { glowPx(ctx, x * PPU - view.x0, z * PPU - view.y0 - ap(16), color, ap(26), 0.55); },
   });
   d.lights.push({ x, y: 2, z, color, strong: true });
 }
@@ -491,10 +504,10 @@ export function placeChest(d, x, z, o) {
   const chest = { x, z, opened: false, ...o };
   addObj(d, {
     sortZ: z, hidden: false,
-    shadow(ctx) { ctx.fillStyle = 'rgba(8,4,10,0.35)'; ctx.fillRect(Math.round(x * PPU - view.x0) - 7, Math.round(z * PPU - view.y0) - 1, 15, 3); },
+    shadow(ctx) { const px = Math.round(x * PPU - view.x0), py = Math.round(z * PPU - view.y0), w = ap(7); ctx.fillStyle = 'rgba(8,4,10,0.35)'; ctx.fillRect(px - w, py - 1, w * 2 + 1, 3); ctx.fillRect(px - w + 2, py + 2, w * 2 - 3, 1); },
     draw(ctx) { const s = chestSprite(chest.opened, !!o.boss); ctx.drawImage(s.pix.canvas(), Math.round(x * PPU - view.x0) - s.pix.ox, Math.round(z * PPU - view.y0) - s.pix.oy); },
     emissive(ctx) { const s = chestSprite(chest.opened, !!o.boss); if (s.emis) ctx.drawImage(s.emis.canvas(), Math.round(x * PPU - view.x0) - s.emis.ox, Math.round(z * PPU - view.y0) - s.emis.oy); },
-    glow(ctx) { if (o.boss || !chest.opened) glowPx(ctx, x * PPU - view.x0, z * PPU - view.y0 - 8, o.boss ? '#ffd060' : '#ffc080', o.boss ? 14 : 8, chest.opened ? 0.2 : 0.3 + Math.sin(now() * 3) * 0.1); },
+    glow(ctx) { if (o.boss || !chest.opened) glowPx(ctx, x * PPU - view.x0, z * PPU - view.y0 - ap(8), o.boss ? '#ffd060' : '#ffc080', o.boss ? ap(14) : ap(8), chest.opened ? 0.2 : 0.3 + Math.sin(now() * 3) * 0.1); },
   });
   d.chests.push(chest);
   G.interactables.push({ site: 'dungeon', kind: 'chest', x, z, r: 2.2, label: o.boss ? 'Open the boss hoard' : 'Open chest', data: chest });
