@@ -119,11 +119,10 @@ const POLES = new Set(['spear', 'halberd', 'staff']);
 const TWO_H = new Set(['greatsword', 'halberd', 'spear', 'staff', 'crossbow']);
 const HEAVY = new Set(['overhead', 'slam', 'sweep', 'spearthrust', 'nova']);
 
-// integer upscale for very large bodies, so big bosses stay pixel-crisp
-export function upscaleFor(s, humanoid) {
-  if (humanoid) return s < 1.75 ? 1 : Math.min(5, Math.max(2, Math.round(s / 1.1)));
-  return s <= 2.6 ? 1 : Math.min(4, Math.ceil(s / 2.6));
-}
+// Every body is drawn at its true size in the one pixel density (big bosses used to be drawn
+// small and blown up 2-5x, which made their pixels chunkier than everything around them).
+// Kept as a function so callers stay simple; k is always 1 now.
+export function upscaleFor() { return 1; }
 
 // ------------------------------------------------------------------ runtime limb colours
 // arm palettes per flash mode, as css strings (the arms are drawn with fillRect every frame)
@@ -185,7 +184,7 @@ export class Actor {
     if (spec.type === 'human') {
       const s = spec.scale || 1;
       this.k = upscaleFor(s, true);
-      const ms = Math.max(0.8, Math.min(1.55, s / this.k));
+      const ms = Math.max(0.8, Math.min(3, s));
       this.look = { ...spec.look, scale: ms };
       this.spr = humanSprites(this.look);
       this.kind = spec.kind || 'humanoid';

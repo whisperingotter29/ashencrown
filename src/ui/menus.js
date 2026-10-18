@@ -877,8 +877,7 @@ export function openSettings() {
     row('Window', choice('fullscreen', [[true, 'Fullscreen'], [false, 'Windowed']], () => desktop.setFullscreen(S.fullscreen)), 'window');
   }
   row('Pixel size', choice('pixel', [['auto', 'Auto'], [2, '2x'], [3, '3x'], [4, '4x'], [5, '5x']], () => { R.settings.pixel = S.pixel; applySettings(); }), 'pixel');
-  row('Camera', choice('camera', [['cinematic', 'Cinematic (tilt + depth of field)'], ['flat', 'Flat 2D']], () => bus.emit('settingsChanged', 'camera')), 'camera');
-  row('Depth of field', choice('dof', [[true, 'On'], [false, 'Off']], () => bus.emit('settingsChanged', 'dof')), 'dof');
+  row('Camera', choice('camera', [['cinematic', 'Cinematic (bloom + colour grade)'], ['flat', 'Plain']], () => bus.emit('settingsChanged', 'camera')), 'camera');
   row('Magic glow', choice('glow', [[true, 'On'], [false, 'Off']], () => { R.settings.glow = S.glow; }), 'glow');
   row('Spell effects', choice('magicFx', [[true, 'Enhanced'], [false, 'Classic']]), 'fx');
   row('Damage numbers', choice('damageNumbers', [[true, 'On'], [false, 'Off']]), 'dmg');

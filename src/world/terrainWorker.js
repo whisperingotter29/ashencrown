@@ -6,7 +6,7 @@ import { hash3, mulberry32 } from '../core/rng.js';
 import { N1, N2, N3 } from '../core/noise.js';
 import { TOWNS, DEEP_TOWNS, DUNGEONS, WAYSTONES, LANDMARKS, SHRINES, RELICS } from '../data/world.js';
 
-const PPU = 10;
+import { PPU } from '../px/pix.js';
 const propIndex = Object.fromEntries(PROP_IDS.map((k, i) => [k, i]));
 
 // Places where scatter must stay clear (towns, entrances, landmarks)

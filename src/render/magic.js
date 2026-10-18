@@ -1,6 +1,6 @@
-// GPU magic layer. Spells, impacts, auras and lightning are drawn here with WebGL2 shaders at
-// screen resolution, then added on top of the pixel world (the pixel art itself stays crisp and
-// low-res; magic gets its own smooth, detailed, layered look).
+// GPU magic layer. Spells, impacts, auras and lightning are drawn here with WebGL2 shaders on the
+// world's pixel grid (one magic pixel per art pixel, values snapped to dithered steps), then
+// blown up with the world and added on top, so spell effects share the game's pixel density.
 //
 // Every visual is an instanced quad with a "kind" picked in the fragment shader: soft glows,
 // velocity-stretched sparks, noisy flames, ground rings, faceted shards, shaded orbs, lightning
@@ -283,6 +283,10 @@ vec3 kTrail() {
   float core = exp(-pow(dist / max(w * .33, .5), 2.) * 2.);
   return (C2 * g + mix(C1, vec3(1.), .5) * core) * al;
 }
+// pixel-art finish: values snap to a few dithered steps, like the light map and the glows
+const float BAY[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.);
+float bay() { ivec2 q = ivec2(gl_FragCoord.xy) & 3; return (BAY[q.y * 4 + q.x] + .5) / 16.; }
+vec3 steps(vec3 c) { float b = bay(); return floor(c * 10. + b) / 10.; }
 void main() {
   uv = vUv; d = length(uv); seed = v1.w; u = v2.w; T = v3.w; C1 = v2.rgb; C2 = v3.rgb; P = v4;
   int kind = int(v1.y + .5);
@@ -292,10 +296,11 @@ void main() {
     if (kind == 17) { float n = fbm(uv * 2.6 + seed * 7.); a = smoothstep(1., .3, d + (n - .5) * .55); }
     else a = exp(-d * d * (P.y > 0. ? P.y : 2.5)) * (1. - smoothstep(.75, 1., d));
     a = clamp(a * v1.z, 0., 1.);
+    a = floor(a * 6. + bay()) / 6.;
     outC = vec4(C1 * a, a);
     return;
   }
-  if (uMode == 2) { outC = shardSolid() * v1.z; return; }
+  if (uMode == 2) { vec4 sc = shardSolid() * v1.z; float sa = step(.5, sc.a); outC = sa > 0. ? vec4(sc.rgb / max(sc.a, .001), 1.) : vec4(0.); return; }
   vec3 c;
   switch (kind) {
     case 0: c = kGlow(); break;
@@ -315,7 +320,7 @@ void main() {
     case 14: c = kArc(); break;
     default: c = kTrail(); break;
   }
-  c = clamp(c * v1.z, 0., 1.);
+  c = steps(clamp(c * v1.z, 0., 1.));
   outC = vec4(c, max(c.r, max(c.g, c.b)));
 }`;
 
@@ -517,16 +522,17 @@ export function updateMagic(dt) {
 export function clearMagic() { M.fx = M.fx.filter((f) => f.persistent); M.parts.length = 0; }
 
 // ------------------------------------------------------------------ frame
-// Called by the renderer after the glow pass. ox, oy: device-pixel offset of the low-res buffer.
+// Called by the renderer after the glow pass. ox, oy: device-pixel position of the low-res buffer.
 export function drawMagic(ctx, ox, oy) {
   M.on = M.ok && G.settings.magicFx !== false;
   if (!M.on) { if (M.fx.length || M.parts.length) clearMagic(); return; }
   if (!M.fx.length && !M.parts.length) return;
-  const dw = ctx.canvas.width, dh = ctx.canvas.height;
-  F = Math.min(1, 1920 / dw);
-  const W = Math.max(1, Math.round(dw * F)), H = Math.max(1, Math.round(dh * F));
+  // drawn at art-pixel resolution (one magic pixel = one world pixel) and blown up with the
+  // world, so spells share the pixel density of everything else
+  const sc = view.scale;
+  const W = view.W, H = view.H;
   if (W !== M.W || H !== M.H) { M.W = M.cv.width = W; M.H = M.cv.height = H; }
-  S = view.scale; OX = ox; OY = oy; UPX = PPU * S * F;
+  F = 1; S = 1; OX = 0; OY = 0; UPX = PPU;
   M.add.n = 0; M.max.n = 0; M.dark.n = 0; M.solid.n = 0;
   drawParts();
   for (const f of M.fx) if (f.draw) f.draw(f);
@@ -547,7 +553,7 @@ export function drawMagic(ctx, ox, oy) {
   ctx.save();
   ctx.setTransform(1, 0, 0, 1, 0, 0);
   ctx.globalAlpha = 1;
-  ctx.imageSmoothingEnabled = true;
+  ctx.imageSmoothingEnabled = false;
   // 1) darkening pass: shadows, scorch marks and tinted ground, multiplied in so the light
   //    pass keeps its colour on bright daylight ground
   if (M.dark.n) {
@@ -557,7 +563,7 @@ export function drawMagic(ctx, ox, oy) {
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     run(M.dark, gl.FUNC_ADD);
     ctx.globalCompositeOperation = 'multiply';
-    ctx.drawImage(M.cv, 0, 0, W, H, 0, 0, dw, dh);
+    ctx.drawImage(M.cv, 0, 0, W, H, ox, oy, W * sc, H * sc);
   }
   // 2) solid pass: crystals and other things with real colour, normal blending
   if (M.solid.n) {
@@ -567,7 +573,7 @@ export function drawMagic(ctx, ox, oy) {
     gl.blendFunc(gl.ONE, gl.ONE_MINUS_SRC_ALPHA);
     run(M.solid, gl.FUNC_ADD);
     ctx.globalCompositeOperation = 'source-over';
-    ctx.drawImage(M.cv, 0, 0, W, H, 0, 0, dw, dh);
+    ctx.drawImage(M.cv, 0, 0, W, H, ox, oy, W * sc, H * sc);
   }
   // 3) light pass: ribbons (MAX) then everything else (additive)
   if (M.add.n || M.max.n) {
@@ -578,7 +584,7 @@ export function drawMagic(ctx, ox, oy) {
     run(M.max, gl.MAX);
     run(M.add, gl.FUNC_ADD);
     ctx.globalCompositeOperation = 'lighter';
-    ctx.drawImage(M.cv, 0, 0, W, H, 0, 0, dw, dh);
+    ctx.drawImage(M.cv, 0, 0, W, H, ox, oy, W * sc, H * sc);
   }
   gl.bindVertexArray(null);
   ctx.restore();

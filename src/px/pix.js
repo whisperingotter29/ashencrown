@@ -2,7 +2,13 @@
 // (no anti-aliasing), outlined, and only turned into a canvas the first time it is drawn.
 // Works headless (no DOM needed until .canvas() is called).
 
-export const PPU = 10;          // world units -> low-res pixels
+// Pixel density. PPU is world units -> art pixels. The art was first designed at 10 pixels per
+// unit; it now runs at 16, matching the reference look (a hero is ~40 px from hood tip to boot).
+// ART converts a size in the old design pixels to today's pixels: generators that still think in
+// design pixels use ap(n) for geometry and keep 1-px details (outlines, eyes, glints) at 1 px.
+export const PPU = 16;
+export const ART = PPU / 10;
+export const ap = (v) => Math.round(v * ART);
 export const OUTLINE = [22, 16, 24, 255];
 
 // ------------------------------------------------------------------ colours

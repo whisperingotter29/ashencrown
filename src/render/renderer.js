@@ -4,7 +4,7 @@
 // with additive blending, followed by screen overlays (fog, vignette, damage, fades).
 import { scene } from '../px/scene.js';
 import { view } from '../px/view.js';
-import { PPU, C } from '../px/pix.js';
+import { PPU, ART, C } from '../px/pix.js';
 import { drawMagic } from './magic.js';
 import { initPost, presentPost } from './post.js';
 import { drawCastShadows } from '../px/shadow.js';
@@ -80,7 +80,7 @@ export function initRenderer(container) {
 export function pixelScale() {
   const dpr = Math.min(2, window.devicePixelRatio || 1);
   const devH = window.innerHeight * dpr;
-  let s = R.settings.pixel === 'auto' || !R.settings.pixel ? Math.max(2, Math.round(devH / 210)) : Math.round(+R.settings.pixel * dpr);
+  let s = R.settings.pixel === 'auto' || !R.settings.pixel ? Math.max(2, Math.round(devH / (210 * ART))) : Math.round(+R.settings.pixel * dpr);
   s = Math.max(1, s + Math.round(R.zoomStep * dpr));
   return s;
 }
@@ -240,23 +240,26 @@ export function renderFrame(time) {
   ctx.imageSmoothingEnabled = false;
   const ox = -Math.round(view.fracX * s), oy = -Math.round(view.fracY * s);
   ctx.drawImage(R.low, 0, 0, W, H, ox - s, oy - s, W * s, H * s);
-  // ---- full-res glows. They gather in their own buffer where overlapping glows take the brighter
-  // of the two instead of adding up (a row of wall torches used to sum to pure white), then the
-  // buffer is screened over the frame once (screen, not add: on a pale marble floor an added glow
-  // clipped to a flat white disc, screen brightens toward white but never past it).
+  // ---- glows. They are drawn on the same pixel grid as the world (one glow pixel = one art
+  // pixel), with overlapping glows taking the brighter of the two instead of adding up (a row of
+  // wall torches used to sum to pure white), stepped into dithered bands like the light map, then
+  // screened over the frame once.
   if (R.settings.glow !== false) {
     const main = R.ctx;
-    if (!glowCv || glowCv.width !== main.canvas.width || glowCv.height !== main.canvas.height) {
+    if (!glowCv || glowCv.width !== W || glowCv.height !== H) {
       glowCv = glowCv || document.createElement('canvas');
-      glowCv.width = main.canvas.width; glowCv.height = main.canvas.height;
-      glowCtx = glowCv.getContext('2d');
+      glowCv.width = W; glowCv.height = H;
+      glowCtx = glowCv.getContext('2d', { alpha: false, willReadFrequently: true });
     }
     const ctx = glowCtx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.globalCompositeOperation = 'source-over';
-    ctx.clearRect(0, 0, glowCv.width, glowCv.height);
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = '#000';
+    ctx.fillRect(0, 0, W, H);
     ctx.save();
-    ctx.translate(ox - s, oy - s);
+    // glow code works in device pixels relative to the buffer origin; scale that down to art pixels
+    ctx.setTransform(1 / s, 0, 0, 1 / s, 0, 0);
     ctx.globalCompositeOperation = 'lighten';
     for (const o of list) if (o.glow) { ctx.save(); if (!o.flat) lean(ctx, o, s); o.glow(ctx); ctx.restore(); }
     for (const f of scene.glows) f(ctx);
@@ -275,9 +278,11 @@ export function renderFrame(time) {
       ctx.globalAlpha = 1;
     }
     ctx.restore();
+    stepLight(ctx, W, H);
     main.globalCompositeOperation = 'screen';
     main.globalAlpha = 0.95;
-    main.drawImage(glowCv, 0, 0);
+    main.imageSmoothingEnabled = false;
+    main.drawImage(glowCv, 0, 0, W, H, ox - s, oy - s, W * s, H * s);
     main.globalAlpha = 1;
     main.globalCompositeOperation = 'source-over';
   }

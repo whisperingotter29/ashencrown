@@ -1,10 +1,9 @@
 // Camera lens / post-processing. The finished 2D frame (pixel world, glows, magic, overlays) is
-// re-presented through WebGL so the camera stops feeling flat:
-//   - a perspective tilt: the top of the screen recedes into the distance, the bottom comes close
-//   - tilt-shift depth of field: the far and near bands soften, the action stays sharp
-//   - bloom from the bright parts, a light colour grade
-//   - punchy camera moves on big moments: a small roll, a quick zoom punch, chromatic split
-// Aiming maps through the same lens (lensToSource / sourceToLens), so the cursor stays exact.
+// re-presented through WebGL for bloom from the bright parts, a light colour grade, sun shafts and
+// a chromatic split on big hits. The lens never moves or resamples pixels: every art pixel stays
+// the same size everywhere on screen (the old perspective tilt, depth-of-field blur, roll and zoom
+// punch made pixels smaller or softer toward the edges, so they are switched off; the geometry
+// code is kept, at zero, so aiming maps stay exact).
 import { G } from '../game.js';
 import { bus } from '../core/events.js';
 
@@ -39,7 +38,7 @@ void main() {
   if (aberr > .001) {
     vec2 d = (s - .5) * aberr * .012;
     col = vec3(tap(s + d, b).r, tap(s, b).g, tap(s - d, b).b);
-  } else col = tap(s, b);
+  } else col = texelFetch(src, ivec2(uv * res), 0).rgb;
   // bloom: bright, wide glow taken from small mip levels
   vec3 b1 = tap(s, 3.5), b2 = tap(s, 5.);
   float l1 = dot(b1, vec3(.299, .587, .114)), l2 = dot(b2, vec3(.299, .587, .114));
@@ -64,7 +63,7 @@ void main() {
 
 export const post = {
   ok: false, on: false, cv: null, gl: null, prog: null, tex: null, u: {},
-  tilt: 0.21, dof: 1, bloom: 0.5, grade: 1,
+  tilt: 0, dof: 0, bloom: 0.5, grade: 1,
   roll: 0, rollV: 0, punch: 0, aberr: 0,
   rays: 0, rayCol: [1, 0.92, 0.75], time: 0,
   cost: 0, slowFrames: 0, autoOff: false,   // frame-cost guard for slow machines
@@ -107,10 +106,8 @@ export function initPost(container) {
 }
 
 // camera moments
-export function postKick({ roll = 0, punch = 0, aberr = 0 } = {}) {
+export function postKick({ aberr = 0 } = {}) {
   if (G.settings.camera === 'flat') return;
-  post.rollV += roll;
-  post.punch = Math.max(post.punch, punch);
   post.aberr = Math.max(post.aberr, aberr);
 }
 
@@ -153,7 +150,7 @@ export function presentPost(src, dt) {
   gl.uniform1f(u.tilt, post.tilt);
   gl.uniform1f(u.zoom, curZoom);
   gl.uniform1f(u.roll, curRoll);
-  gl.uniform1f(u.dof, post.dof * (G.settings.dof === false ? 0 : 1));
+  gl.uniform1f(u.dof, 0);
   gl.uniform1f(u.bloom, post.bloom);
   gl.uniform1f(u.aberr, post.aberr);
   gl.uniform1f(u.grade, post.grade);
