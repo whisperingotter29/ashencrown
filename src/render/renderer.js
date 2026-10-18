@@ -152,6 +152,7 @@ function lean(ctx, o, unit = 1) {
   return true;
 }
 let flatCam = false;
+let glowCv = null, glowCtx = null;
 const G_flat = () => flatCam;
 
 export function renderFrame(time) {
@@ -239,11 +240,23 @@ export function renderFrame(time) {
   ctx.imageSmoothingEnabled = false;
   const ox = -Math.round(view.fracX * s), oy = -Math.round(view.fracY * s);
   ctx.drawImage(R.low, 0, 0, W, H, ox - s, oy - s, W * s, H * s);
-  // ---- full-res additive glows
+  // ---- full-res glows. They gather in their own buffer where overlapping glows take the brighter
+  // of the two instead of adding up (a row of wall torches used to sum to pure white), then the
+  // buffer is added to the frame once.
   if (R.settings.glow !== false) {
+    const main = R.ctx;
+    if (!glowCv || glowCv.width !== main.canvas.width || glowCv.height !== main.canvas.height) {
+      glowCv = glowCv || document.createElement('canvas');
+      glowCv.width = main.canvas.width; glowCv.height = main.canvas.height;
+      glowCtx = glowCv.getContext('2d');
+    }
+    const ctx = glowCtx;
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    ctx.globalCompositeOperation = 'source-over';
+    ctx.clearRect(0, 0, glowCv.width, glowCv.height);
     ctx.save();
     ctx.translate(ox - s, oy - s);
-    ctx.globalCompositeOperation = 'lighter';
+    ctx.globalCompositeOperation = 'lighten';
     for (const o of list) if (o.glow) { ctx.save(); if (!o.flat) lean(ctx, o, s); o.glow(ctx); ctx.restore(); }
     for (const f of scene.glows) f(ctx);
     for (const f of scene.persist.glows) f(ctx);
@@ -261,6 +274,11 @@ export function renderFrame(time) {
       ctx.globalAlpha = 1;
     }
     ctx.restore();
+    main.globalCompositeOperation = 'lighter';
+    main.globalAlpha = 0.9;
+    main.drawImage(glowCv, 0, 0);
+    main.globalAlpha = 1;
+    main.globalCompositeOperation = 'source-over';
   }
   // ---- GPU magic layer (spells, impacts, lightning), added over everything
   drawMagic(ctx, ox - s, oy - s);

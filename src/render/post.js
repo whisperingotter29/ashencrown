@@ -42,8 +42,9 @@ void main() {
   } else col = tap(s, b);
   // bloom: bright, wide glow taken from small mip levels
   vec3 b1 = tap(s, 3.5), b2 = tap(s, 5.);
-  vec3 br = max(b1 - .74, 0.) * 1.6 + max(b2 - .62, 0.) * 1.1;
-  col += br * bloom;
+  float l1 = dot(b1, vec3(.299, .587, .114)), l2 = dot(b2, vec3(.299, .587, .114));
+  vec3 br = b1 * max(l1 - .8, 0.) * 1.5 + b2 * max(l2 - .72, 0.) * 0.9;
+  col += min(br, vec3(.18)) * bloom;
   // sun shafts slanting in from the top left, slowly breathing
   if (rays > .001) {
     vec2 r = uv * vec2(res.x / res.y, 1.);
