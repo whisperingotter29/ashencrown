@@ -111,7 +111,8 @@ const drows = [];
 const types = ['barrel', 'crate', 'coffin', 'urn', 'candles', 'anvil', 'anchor', 'minecart', 'nest', 'shell', 'gold_pile', 'bones', 'campfire', 'tent'];
 drows.push(types.map((t) => T(t, () => pix(DP.dpropSprite(t, 0)))));
 drows.push(types.map((t) => T(t, () => pix(DP.dpropSprite(t, 2)))));
-drows.push([T('c0', () => pix(DP.chestSprite(false, false))), T('c1', () => pix(DP.chestSprite(true, false))), T('c2', () => pix(DP.chestSprite(false, true))), T('c3', () => pix(DP.chestSprite(true, true)))]);
+drows.push([T('c0', () => pix(DP.chestSprite(false, false))), T('c1', () => pix(DP.chestSprite(true, false))), T('c2', () => pix(DP.chestSprite(false, true))), T('c3', () => pix(DP.chestSprite(true, true))),
+  ...(DP.torchSprite ? [T('torch', () => lit(DP.torchSprite())), T('bulb', () => lit(DP.bulbSprite('#c0ff90')))] : [])]);
 writeFileSync(out + '/dprops.png', png(sheet(drows), SC + 1));
 
 // ---- dungeon tiles: a mini room per theme (floor patch with a wall row along the top and a pillar)

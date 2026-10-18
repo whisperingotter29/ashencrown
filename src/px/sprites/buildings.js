@@ -1214,7 +1214,7 @@ export function entranceSprite(theme, biome, glowC) {
       p.rect(cx - ap(43), rbm, ap(86), ap(2), '#8aaaa8'); p.rect(cx - ap(43), rbm + ap(2), ap(86), 1, '#3a5a58');
       // weed, barnacles, puddles
       for (let k = 0; k < 18; k++) { const x = cx - ap(40) + Math.floor(r() * ap(80)); let y = rbm + ap(2) + 1; const L = 2 + Math.floor(r() * ap(10)); for (let s = 0; s < L && y < yb; s++, y++) if (p.a(x, y)) p.set(x + (s % 4 === 3 ? 1 : 0), y, s % 2 ? '#2a6a4a' : '#3a7a5a'); }
-      for (let k = 0; k < 30; k++) { const x = cx - ap(40) + r() * ap(80), y = yb - ap(12) - r() * ap(44); if (p.a(x, y)) p.set(x, y, r() < 0.5 ? '#3a7a5a' : '#c8c0a8'); }
+      for (let k = 0; k < 30; k++) { const x = Math.round(cx - ap(40) + r() * ap(80)), y = Math.round(yb - ap(12) - r() * ap(44)); if (p.a(x, y)) p.set(x, y, r() < 0.5 ? '#3a7a5a' : '#c8c0a8'); }
       for (const sx of [-1, 1]) { p.ellipse(cx + sx * ap(30), yb - 2, ap(7), ap(1.6), '#3a6a78'); p.rect(Math.round(cx + sx * ap(30)) - 3, yb - 3, 4, 1, '#8ad0e0'); }
       doorW = ap(20); doorH = ap(30); doorY = yb - ap(11);
       rim = C('#8aaaa0'); rimW = ap(2);
