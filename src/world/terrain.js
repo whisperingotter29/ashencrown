@@ -5,7 +5,7 @@ import { PROPS, PROP_IDS } from '../data/scatter.js';
 import { addCollider, removeOwner } from '../systems/collision.js';
 import { scene } from '../px/scene.js';
 import { view } from '../px/view.js';
-import { PPU, canvasEpoch } from '../px/pix.js';
+import { PPU, ap, canvasEpoch } from '../px/pix.js';
 import { propSprite } from '../px/sprites/props.js';
 import { glowAt } from '../render/renderer.js';
 import { castSprite } from '../px/shadow.js';
@@ -81,7 +81,7 @@ function makeProp(type, x, y, z, rot, scale) {
   const def = PROPS[id];
   const variant = Math.floor(((rot / (Math.PI * 2)) % 1) * 4);
   const sp = propSprite(id, variant, scale);
-  const tall = sp.frames[0].h > 22;
+  const tall = sp.frames[0].h > ap(22);
   const o = {
     x, z, sortZ: z, id, def, sp, phase: x * 0.37 + z * 0.23,
     occlude: tall,
@@ -93,7 +93,7 @@ function makeProp(type, x, y, z, rot, scale) {
     },
   };
   // directional ground shadow (src/px/shadow.js) for anything taller than a pebble
-  if (sp.frames[0].oy > 7) o.castShadow = (sctx) => castSprite(sctx, o.frame(), Math.round(x * PPU - view.x0), Math.round(z * PPU - view.y0));
+  if (sp.frames[0].oy > ap(7)) o.castShadow = (sctx) => castSprite(sctx, o.frame(), Math.round(x * PPU - view.x0), Math.round(z * PPU - view.y0));
   if (sp.emis) o.emissive = (ctx) => { const f = sp.emis; ctx.drawImage(f.canvas(), Math.round(x * PPU - view.x0) - f.ox, Math.round(z * PPU - view.y0) - f.oy); };
   if (def.glow) o.glow = (ctx) => glowAt(ctx, x, z, (sp.frames[0].oy * 0.55) / PPU, def.glow, 1.4 + scale * 0.6, 0.45 + 0.15 * Math.sin(G.realTime * 2 + o.phase));
   return o;
@@ -119,19 +119,21 @@ function drawGround(ctx) {
     if (px > view.W || py > view.H || px + P < 0 || py + P < 0) continue;
     ctx.drawImage(ch.cv, px, py);
   }
-  // twinkling water glints
-  const t = G.realTime;
-  ctx.fillStyle = '#e8f8ff';
+  // twinkling water glints: a short 1-px streak that flares into a small cross at its peak
+  const t = G.realTime, drift = ap(2);
   for (const ch of terrain.chunks.values()) {
     const gl = ch.glints;
     if (!gl || !gl.length) continue;
     for (let i = 0; i < gl.length; i += 2) {
       const ph = (t * 0.9 + gl[i] * 0.13 + gl[i + 1] * 0.07) % 3;
       if (ph > 0.6) continue;
-      const px = Math.round(gl[i] * PPU - view.x0 + Math.sin(t + i) * 2), py = Math.round(gl[i + 1] * PPU - view.y0);
-      if (px < 0 || py < 0 || px > view.W || py > view.H) continue;
-      const len = ph < 0.3 ? 3 : 2;
+      const px = Math.round(gl[i] * PPU - view.x0 + Math.sin(t + i) * drift), py = Math.round(gl[i + 1] * PPU - view.y0);
+      if (px < -4 || py < -4 || px > view.W + 4 || py > view.H + 4) continue;
+      const peak = ph > 0.2 && ph < 0.4, len = peak ? 5 : 3;
+      ctx.fillStyle = '#b8e4f0';
       ctx.fillRect(px - (len >> 1), py, len, 1);
+      ctx.fillStyle = '#f4fcff';
+      if (peak) { ctx.fillRect(px, py - 1, 1, 3); ctx.fillRect(px - 1, py, 3, 1); } else ctx.fillRect(px, py, 1, 1);
     }
   }
 }
