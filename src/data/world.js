@@ -236,22 +236,24 @@ export const REALM_GATES = [
   { id: 'deep_gate', realm: 'deep', x: 0, z: -440, to: 'surface', tx: MAW.x, tz: MAW.z - 30, label: 'Climb to the surface' },
 ];
 
-// Dungeon themes define layout, palette, enemies and props.
+// Dungeon themes define layout, palette, enemies and props. Colours follow docs/ART_STYLE.md:
+// floor and wall sit low and muted (purple stone, teal stone, clay, plum, bone-cream...), torches
+// and braziers burn in the ember ramp, magical themes glow aether violet, rose or frost.
 export const DUNGEON_THEMES = {
-  bandit_hideout: { name: 'Hideout', floor: '#5a4a38', wall: '#4a3a2a', accent: '#c08040', light: '#ffa050', fog: '#1a120c', enemies: ['bandit', 'bandit_archer', 'bandit_brute'], props: ['crate', 'barrel', 'tent', 'campfire', 'banner'], layout: 'cave' },
-  cursed_crypt: { name: 'Crypt', floor: '#3c3a44', wall: '#2c2a34', accent: '#7a6a9a', light: '#80a0ff', fog: '#08080e', enemies: ['skeleton', 'skeleton_archer', 'ghoul', 'wraith'], props: ['coffin', 'urn', 'candles', 'bones', 'statue'], layout: 'rooms' },
-  buried_colossus: { name: 'Colossus', floor: '#a0603a', wall: '#7a3a24', accent: '#e0b060', light: '#ffb060', fog: '#2a120a', enemies: ['sand_wraith', 'colossus_shard', 'ash_scorpion', 'ember_cultist'], props: ['gold_pile', 'giant_bone', 'pillar', 'brazier'], layout: 'rooms' },
-  glass_cavern: { name: 'Glass Caverns', floor: '#2a1a20', wall: '#1a0e14', accent: '#ff4060', light: '#ff3050', fog: '#100408', enemies: ['glass_beetle', 'glass_elemental', 'ash_scorpion'], props: ['glass_crystal', 'glass_crystal', 'rock'], layout: 'cave' },
-  marble_vault: { name: 'Vault', floor: '#c8c0a8', wall: '#a8a088', accent: '#e8c060', light: '#ffe0a0', fog: '#1a1810', enemies: ['marble_sentinel', 'gilded_revenant', 'hollow_senator', 'looter'], props: ['statue', 'pillar', 'gold_pile', 'urn', 'brazier'], layout: 'rooms' },
-  sunken_temple: { name: 'Sunken Temple', floor: '#3a5a5a', wall: '#2a4448', accent: '#60c0b0', light: '#60e0ff', fog: '#061418', enemies: ['drowned_sailor', 'sea_hag', 'tidecrab', 'siren'], props: ['coral', 'pillar', 'kelp', 'statue', 'shell'], layout: 'rooms' },
-  frozen_citadel: { name: 'Citadel', floor: '#8a98a8', wall: '#6a7888', accent: '#a0e0ff', light: '#a0d0ff', fog: '#0a1220', enemies: ['frozen_knight', 'ice_wraith', 'frost_wolf', 'ice_golem'], props: ['ice_crystal', 'pillar', 'banner', 'statue', 'brazier'], layout: 'rooms' },
-  fungal_warren: { name: 'Warren', floor: '#3a2a3a', wall: '#2a2030', accent: '#c060ff', light: '#a0ff80', fog: '#0a0610', enemies: ['fungal_shambler', 'spore_sprite', 'giant_spider', 'moss_troll'], props: ['mushroom', 'mushroom', 'root', 'bones'], layout: 'cave' },
-  pirate_cove: { name: 'Cove', floor: '#6a5a40', wall: '#4a4038', accent: '#d0a050', light: '#ffb060', fog: '#0c1014', enemies: ['corsair', 'corsair_gunner', 'drowned_sailor', 'tidecrab'], props: ['barrel', 'crate', 'gold_pile', 'anchor', 'campfire'], layout: 'cave' },
-  dwarven_deephall: { name: 'Deephall', floor: '#5a5048', wall: '#3a3430', accent: '#e09040', light: '#ffa040', fog: '#0c0a08', enemies: ['deep_crawler', 'stone_golem', 'frozen_knight', 'cave_troll'], props: ['pillar', 'brazier', 'anvil', 'minecart', 'statue'], layout: 'rooms' },
-  void_rift: { name: 'Rift', floor: '#2a2038', wall: '#1a1428', accent: '#a060ff', light: '#b080ff', fog: '#08040e', enemies: ['void_wretch', 'shadow_stalker', 'void_eye'], props: ['void_crystal', 'void_crystal', 'rock', 'bones'], layout: 'cave' },
-  dragon_lair: { name: 'Lair', floor: '#4a2a22', wall: '#3a1a14', accent: '#ff6030', light: '#ff7030', fog: '#140604', enemies: ['ember_cultist', 'drakeling', 'magma_golem'], props: ['gold_pile', 'giant_bone', 'brazier', 'rock'], layout: 'cave' },
-  beast_den: { name: 'Den', floor: '#4a4030', wall: '#3a3224', accent: '#a08050', light: '#ffc080', fog: '#0c0a06', enemies: [], props: ['bones', 'rock', 'root', 'nest'], layout: 'cave' },
-  living_labyrinth: { name: 'Living Labyrinth', floor: '#3a4a30', wall: '#2a3a24', accent: '#90ff60', light: '#c0ff90', fog: '#060a04', enemies: ['thornwolf', 'briar_witch', 'treant', 'maze_warden'], props: ['root', 'statue', 'mushroom'], layout: 'maze' },
+  bandit_hideout: { name: 'Hideout', floor: '#6a5040', wall: '#5e4a4c', accent: '#ec7a2a', light: '#f8a050', fog: '#1a0e12', enemies: ['bandit', 'bandit_archer', 'bandit_brute'], props: ['crate', 'barrel', 'tent', 'campfire', 'banner'], layout: 'cave' },
+  cursed_crypt: { name: 'Crypt', floor: '#4e4658', wall: '#544a64', accent: '#8a58a3', light: '#9c8ae8', fog: '#0c0814', enemies: ['skeleton', 'skeleton_archer', 'ghoul', 'wraith'], props: ['coffin', 'urn', 'candles', 'bones', 'statue'], layout: 'rooms' },
+  buried_colossus: { name: 'Colossus', floor: '#9c615b', wall: '#84524a', accent: '#e8c35a', light: '#f8b060', fog: '#2a1210', enemies: ['sand_wraith', 'colossus_shard', 'ash_scorpion', 'ember_cultist'], props: ['gold_pile', 'giant_bone', 'pillar', 'brazier'], layout: 'rooms' },
+  glass_cavern: { name: 'Glass Caverns', floor: '#4a2a3a', wall: '#44263a', accent: '#e48fb0', light: '#f06a8a', fog: '#12060c', enemies: ['glass_beetle', 'glass_elemental', 'ash_scorpion'], props: ['glass_crystal', 'glass_crystal', 'rock'], layout: 'cave' },
+  marble_vault: { name: 'Vault', floor: '#9a8c7c', wall: '#8e8078', accent: '#e8c35a', light: '#f8c878', fog: '#1a1410', enemies: ['marble_sentinel', 'gilded_revenant', 'hollow_senator', 'looter'], props: ['statue', 'pillar', 'gold_pile', 'urn', 'brazier'], layout: 'rooms' },
+  sunken_temple: { name: 'Sunken Temple', floor: '#3a5a5a', wall: '#3a5458', accent: '#4a9488', light: '#7cd0d0', fog: '#061418', enemies: ['drowned_sailor', 'sea_hag', 'tidecrab', 'siren'], props: ['coral', 'pillar', 'kelp', 'statue', 'shell'], layout: 'rooms' },
+  frozen_citadel: { name: 'Citadel', floor: '#6a7494', wall: '#5e6888', accent: '#a8d0ec', light: '#a8d0ec', fog: '#0e1428', enemies: ['frozen_knight', 'ice_wraith', 'frost_wolf', 'ice_golem'], props: ['ice_crystal', 'pillar', 'banner', 'statue', 'brazier'], layout: 'rooms' },
+  fungal_warren: { name: 'Warren', floor: '#54405a', wall: '#4a3852', accent: '#c860f0', light: '#d8a0f0', fog: '#0a0612', enemies: ['fungal_shambler', 'spore_sprite', 'giant_spider', 'moss_troll'], props: ['mushroom', 'mushroom', 'root', 'bones'], layout: 'cave' },
+  pirate_cove: { name: 'Cove', floor: '#6a5848', wall: '#54505c', accent: '#c99a3a', light: '#f8b060', fog: '#0c1014', enemies: ['corsair', 'corsair_gunner', 'drowned_sailor', 'tidecrab'], props: ['barrel', 'crate', 'gold_pile', 'anchor', 'campfire'], layout: 'cave' },
+  dwarven_deephall: { name: 'Deephall', floor: '#5e5458', wall: '#544a52', accent: '#ec7a2a', light: '#f8a040', fog: '#0c0a0c', enemies: ['deep_crawler', 'stone_golem', 'frozen_knight', 'cave_troll'], props: ['pillar', 'brazier', 'anvil', 'minecart', 'statue'], layout: 'rooms' },
+  void_rift: { name: 'Rift', floor: '#342a4a', wall: '#30264a', accent: '#a026ef', light: '#c068f0', fog: '#0a0414', enemies: ['void_wretch', 'shadow_stalker', 'void_eye'], props: ['void_crystal', 'void_crystal', 'rock', 'bones'], layout: 'cave' },
+  dragon_lair: { name: 'Lair', floor: '#5a3430', wall: '#522c2a', accent: '#ec7a2a', light: '#f87a30', fog: '#160606', enemies: ['ember_cultist', 'drakeling', 'magma_golem'], props: ['gold_pile', 'giant_bone', 'brazier', 'rock'], layout: 'cave' },
+  beast_den: { name: 'Den', floor: '#5e5040', wall: '#52443e', accent: '#a8805a', light: '#f8b878', fog: '#0c0a08', enemies: [], props: ['bones', 'rock', 'root', 'nest'], layout: 'cave' },
+  living_labyrinth: { name: 'Living Labyrinth', floor: '#3c4e47', wall: '#3d553d', accent: '#f4bccf', light: '#c8e890', fog: '#060a08', enemies: ['thornwolf', 'briar_witch', 'treant', 'maze_warden'], props: ['root', 'statue', 'mushroom'], layout: 'maze' },
 };
 
 // 54 dungeons. `shard` marks the six Crown Shard dungeons of the main story.
