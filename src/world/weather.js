@@ -207,6 +207,16 @@ export function forceWeather(biome, id, dur = 300) {
   state.perBiome[biome] = { id, ends: G.time + dur };
 }
 
+// co-op: the host's weather per biome (time left, not end time: clocks differ between games)
+export function weatherTable() {
+  const out = {};
+  for (const [b, w] of Object.entries(state.perBiome)) out[b] = [w.id, Math.max(1, Math.round(w.ends - G.time))];
+  return out;
+}
+export function setWeatherTable(t) {
+  for (const [b, [id, left]] of Object.entries(t)) if (WEATHER_DEFS[id]) state.perBiome[b] = { id, ends: G.time + left };
+}
+
 export function weatherFor(biome) {
   let w = state.perBiome[biome];
   if (!w || G.time > w.ends) { w = rollWeather(biome); state.perBiome[biome] = w; }

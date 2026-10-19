@@ -14,7 +14,7 @@ import { biomeWeights } from '../world/terrainGen.js';
 export const BEAT = 0.6; // Bard tempo: 100 BPM
 const P = () => G.player;
 const cls = () => G.player?.char.cls;
-function add(n) { const p = P(); p.resource = Math.max(0, Math.min(p.resourceMax, (p.resource || 0) + n)); }
+function add(n, p = P()) { p.resource = Math.max(0, Math.min(p.resourceMax, (p.resource || 0) + n)); }
 function gY(x, z) { return G.realm === 'dungeon' ? (G.dungeon?.floorY ?? 0) : groundHeight(x, z); }
 
 export function beatPhase() { return (G.time % BEAT) / BEAT; }
@@ -212,13 +212,14 @@ export function useSignature(p) {
   const def = CLASS_BY_ID[c];
   if ((p.cooldowns.signature || 0) > 0) return;
   const r = p.resource || 0;
+  const aim = { ax: p.aim.x, az: p.aim.z, r };
   const fail = (msg) => { bus.emit('toast', msg); };
   const ang = Math.atan2(p.aim.x - p.pos.x, p.aim.z - p.pos.z);
   const wd = p.derived.weaponDmg;
   switch (c) {
     case 'knight': {
       if (r < 50) return fail('Not enough Resolve (50).');
-      add(-50);
+      add(-50, p);
       p.facing = ang;
       const hit = new Set();
       p.invuln = Math.max(p.invuln, 0.4);
@@ -281,7 +282,7 @@ export function useSignature(p) {
     }
     case 'cleric': {
       if (r < 60) return fail('Not enough Devotion (60).');
-      add(-60);
+      add(-60, p);
       const dmg = spellDamage(p.char, p.derived, { dmg: 14 });
       spawnHazard({ x: p.pos.x, z: p.pos.z, radius: 6, owner: p, dmg, tick: 0.5, life: 8, element: 'holy', healTick: 0.02, color: '#ffe080', status: { brand: 1 } });
       pillar(p.pos.x, p.pos.y, p.pos.z, { radius: 6, height: 16, color: '#ffe080', dur: 0.8 });
@@ -291,7 +292,7 @@ export function useSignature(p) {
       if (r < 3) return fail('Not enough Souls (3).');
       const champs = p.minions.filter((m) => !m.dead && m.champion);
       if (champs.length >= 3) champs[0].lifeTime = 0.01;
-      add(-3);
+      add(-3, p);
       const x = p.pos.x + Math.sin(ang) * 2.5, z = p.pos.z + Math.cos(ang) * 2.5;
       bus.emit('spawnAlly', { id: 'skeleton_minion', x, z, lifeTime: 60, owner: p, champion: true });
       pillar(x, gY(x, z), z, { radius: 1.2, color: '#80ffa0', height: 6 });
@@ -309,7 +310,7 @@ export function useSignature(p) {
     }
     case 'alchemist': {
       if (r < 2) return fail('Need 2 flask charges.');
-      add(-2);
+      add(-2, p);
       let best = null, bd = 64;
       for (const e of G.entities) { if (e.dead || !hostile(p, e)) continue; const d2 = (e.pos.x - p.aim.x) ** 2 + (e.pos.z - p.aim.z) ** 2; if (d2 < bd) { bd = d2; best = e; } }
       let el = 'fire';
@@ -329,7 +330,7 @@ export function useSignature(p) {
     }
     case 'duelist': {
       if (r < 40) return fail('Not enough Style (40).');
-      add(-40);
+      add(-40, p);
       p.action = { type: 'custom', t: 0, dur: 0.9, move: 0, update: (dt, a) => {
         const i = Math.floor(a.t / 0.14);
         p.st.action = 'attack'; p.st.kind = i % 2 ? 'backslash' : 'slash'; p.st.actionT = (a.t % 0.14) / 0.14 * 0.6 + 0.3;
@@ -346,6 +347,7 @@ export function useSignature(p) {
     }
   }
   p.cooldowns.signature = 1.5;
+  G.net?.act(p, 'sig', aim);
   p.lastCombatT = G.time;
   bus.emit('signature', { cls: c });
 }

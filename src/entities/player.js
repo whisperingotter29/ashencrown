@@ -43,7 +43,7 @@ const OUTFIT = {
 };
 // fighters keep their face bare and wear a plain class cape until their armour brings a better one
 const CAPE = { knight: ['#243e7b', '#e8c35a'], berserker: ['#60282c', '#e2c494'], duelist: ['#4a1a48', '#f3e1b5'], bard: ['#4a3266', '#e8c35a'] };
-function classOutfit(id) {
+export function classOutfit(id) {
   const o = OUTFIT[id];
   if (!o) return CAPE[id] ? { cape: CAPE[id][0], capeTrim: CAPE[id][1] } : {};
   const [cloak, eyes, pants, boots] = o;
@@ -99,6 +99,11 @@ export class Player extends Entity {
     this.removed = false;
     this.attachModel(actor);
     this.height = 1.9 * lk.scale;
+    this.claimFocus();
+  }
+
+  // the local hero drives the magic layer's focus and the x-ray outline (remote heroes don't)
+  claimFocus() {
     magic.target = this;
     R.focus = this.pos;      // occlusion test point for the x-ray outline
     R.focusModel = this.model;
@@ -132,7 +137,7 @@ export class Player extends Entity {
     const cls = CLASS_BY_ID[c.cls];
     this.resourceMax = cls.resource.max;
     if (d.flags.lantern) this.lantern = true; else this.lantern = false;
-    bus.emit('statsChanged', this);
+    if (!this.isRemote) bus.emit('statsChanged', this);
   }
 
   // -------------------------------------------------------------- resources
@@ -341,7 +346,7 @@ export class Player extends Entity {
     if (this.lantern || G.realm !== 'surface' || G.dungeon) requestLight(this.pos.x, this.pos.y + 3, this.pos.z, G.realm === 'deep' ? '#c0d8ff' : '#ffc890', G.realm === 'surface' && !this.lantern ? 0 : G.realm === 'deep' ? 14 : 10, G.realm === 'deep' ? 21 : 16);
     this.stepPose(dt);
     // Mythic and rarer fates shed a few motes of their rarity colour
-    const fr = G.char && (rarityOfRace(G.char.race).index >= rarityOfClass(G.char.cls).index ? rarityOfRace(G.char.race) : rarityOfClass(G.char.cls));
+    const fr = rarityOfRace(this.char.race).index >= rarityOfClass(this.char.cls).index ? rarityOfRace(this.char.race) : rarityOfClass(this.char.cls);
     if (fr && fr.index >= 3 && !this.stealthed && Math.random() < dt * (fr.index * 2.2)) {
       const a = Math.random() * Math.PI * 2;
       particle({ x: this.pos.x + Math.cos(a) * 0.45, y: this.pos.y + 0.3 + Math.random() * 1.4, z: this.pos.z + Math.sin(a) * 0.3, vy: 0.9 + Math.random() * 0.6, life: 0.9, size: 0.13, color: fr.id === 'supreme' ? ['#fff0a0', '#a0f0ff', '#ffa0f0'][Math.floor(Math.random() * 3)] : fr.color, gl: true });
@@ -408,6 +413,7 @@ export class Player extends Entity {
     this.combo++;
     this.comboTimer = dur + 0.5;
     this.facing = lock ? Math.atan2(lock.pos.x - this.pos.x, lock.pos.z - this.pos.z) : aimAng;
+    G.net?.act(this, 'atk', { c: idx, k: kind, d: dur, s: dur * su, ca: this.action.cancelAt, fi: final, f: this.facing });
     bus.emit('swing', { kind, weapon: w.type });
   }
 
@@ -529,6 +535,7 @@ export class Player extends Entity {
     const spd = (w.projSpeed || 46) * (0.6 + 0.4 * draw);
     const ang = Math.atan2(this.aim.x - this.pos.x, this.aim.z - this.pos.z);
     this.facing = ang;
+    G.net?.act(this, 'arrow', { dr: draw, k: kind });
     const sy = this.pos.y + 1.35;
     const status = el === 'fire' ? { burn: 2 } : el === 'frost' ? { chill: 1 } : el === 'lightning' ? { shock: 1 } : el === 'rot' ? { poison: 2 } : el === 'void' ? { weaken: 1 } : null;
     const extra = d.powers.arrowRoot && Math.random() < d.powers.arrowRoot ? { root: 2 } : null;
@@ -546,6 +553,7 @@ export class Player extends Entity {
       const dur = (w.type === 'staff' ? 0.4 : 0.27) / ((w.speed || 1) * d.atkSpeedMult);
       this.action = { type: 'bolt', t: 0, dur, strikeAt: dur * 0.4, faceAim: true, el };
       this.st.action = 'attack'; this.st.kind = 'cast'; this.st.actionT = 0; this.st.strikeU = 0.4;
+      G.net?.act(this, 'bolt', { el, d: dur });
     }
   }
 
@@ -574,6 +582,7 @@ export class Player extends Entity {
     this.drawing = false;
     this.action = { type: 'dodge', t: 0, dur: 0.46, dir };
     this.st.action = null;
+    G.net?.act(this, 'dodge', { dir });
     this.invuln = 0.36;
     this.combo = 0;
     bus.emit('dodge', { player: this });

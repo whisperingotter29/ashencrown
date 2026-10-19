@@ -491,6 +491,7 @@ function drawMinimap() {
     }
     if (d.exit) dot(g, (d.exit.x - p.pos.x) * s, (d.exit.z - p.pos.z) * s, '#a8d0ec', 4);
     for (const e of G.entities) if (!e.dead && e.team === 'enemy') dot(g, (e.pos.x - p.pos.x) * s, (e.pos.z - p.pos.z) * s, e.boss ? '#ec7a2a' : '#d9765a', e.boss ? 5 : 2.5);
+    partnerDots(g, p, s, W);
   } else {
     const m = MAP[G.realm];
     if (m?.ready) {
@@ -520,9 +521,10 @@ function drawMinimap() {
       if (Math.abs(x) > W / 2 || Math.abs(z) > W / 2) continue;
       if (e.team === 'enemy') dot(g, x, z, e.boss ? '#ec7a2a' : '#d9765a', e.boss ? 5 : 2.2);
       else if (e.isNpc) dot(g, x, z, e.hunting ? '#e46a72' : '#e8c35a', 2);
-      else if (e.team === 'player') dot(g, x, z, '#b4cc84', 2);
+      else if (e.team === 'player' && !e.isRemote) dot(g, x, z, '#b4cc84', 2);
     }
     for (const q of trackedObjectiveMarkers()) if (q.realm === G.realm) questMark(g, q, p, scale, W);
+    partnerDots(g, p, scale, W);
   }
   g.restore();
   {
@@ -537,6 +539,18 @@ function drawMinimap() {
   g.fillStyle = '#e8c35a'; g.fillText('N', Math.round(W / 2 + Math.cos(na) * (W / 2 - 6)), Math.round(W / 2 + Math.sin(na) * (W / 2 - 6)));
 }
 
+// co-op partners: pale blue, pinned to the rim when they are off the minimap
+function partnerDots(g, p, scale, W) {
+  if (!G.net) return;
+  const lim = W / 2 - 4;
+  for (const o of G.net.ghosts()) {
+    if (o.away) continue;
+    let x = (o.pos.x - p.pos.x) * scale, z = (o.pos.z - p.pos.z) * scale;
+    const m = Math.max(Math.abs(x), Math.abs(z));
+    if (m > lim) { x *= lim / m; z *= lim / m; }
+    dot(g, x, z, o.dead ? '#827d82' : '#a8d0ec', 3.2);
+  }
+}
 function dot(g, x, y, col, r) { const s = Math.max(1, Math.round(r * 0.8)); g.fillStyle = '#140f1c'; g.fillRect(Math.round(x) - s, Math.round(y) - s, s * 2 + 1, s * 2 + 1); g.fillStyle = col; g.fillRect(Math.round(x) - s + 1, Math.round(y) - s + 1, s * 2 - 1, s * 2 - 1); }
 const GLYPHS = { town: [3, 3, 3], dungeon: [1, 3, 5], way: [1, 3, 1], shrine: [1, 3, 1], quest: [1, 5, 3, 5, 1] };
 function glyph(g, X, Z, rows, col) {

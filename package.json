@@ -9,15 +9,18 @@
     "preview": "vite preview --port 4173",
     "check": "node tools/check-sites.mjs",
     "sheets": "node tools/sprite-sheet.mjs sheets",
-    "build:single": "vite build -c vite.single.config.js && node tools/artifact-page.mjs"
+    "build:single": "vite build -c vite.single.config.js && node tools/artifact-page.mjs",
+    "signal": "peerjs --port 9000 --path /"
   },
   "dependencies": {
     "@fontsource/jersey-10": "^5.3.0",
     "@fontsource/pixelify-sans": "^5.3.0",
     "@fontsource/silkscreen": "^5.3.0",
+    "peerjs": "^1.5.5",
     "tone": "15.1.22"
   },
   "devDependencies": {
+    "peer": "^1.0.2",
     "vite": "8.3.1",
     "vite-plugin-singlefile": "^2.3.3"
   },

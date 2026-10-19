@@ -31,7 +31,7 @@ export function entitiesNear(x, z, r, filter) {
   const all = G.entities;
   for (let i = 0; i < all.length; i++) {
     const e = all[i];
-    if (e.dead || e.removed) continue;
+    if (e.dead || e.removed || e.away) continue;
     const dx = e.pos.x - x, dz = e.pos.z - z;
     const rr = r + e.radius;
     if (dx * dx + dz * dz <= rr * rr && (!filter || filter(e))) out.push(e);
@@ -55,8 +55,27 @@ export function targetsInArc(src, range, arcDeg, facing = src.facing) {
 
 // ---------------------------------------------------------------------------------
 // Core damage resolution
+// A co-op partner (or their summon or spell): on this screen it only plays out their actions.
+export const ghostly = (e) => !!e && (e.isRemote || !!e.owner?.isRemote || !!e.owner?.owner?.isRemote);
+
+function ghostHitFx(tgt, o) {
+  if (o.kind === 'dot') return;
+  tgt.hitFlash = 0.1;
+  tgt.hitT = 1;
+  const hx = tgt.pos.x, hy = tgt.pos.y + (tgt.height || 1.8) * 0.65, hz = tgt.pos.z;
+  const el = o.element || 'physical';
+  if (o.kind === 'melee' || o.kind === 'ranged') hitSpark(hx, hy, hz, { color: el === 'physical' ? '#fff4d0' : (ELEM_COLORS[el] || ELEM_COLORS.physical)[1], size: 0.8, rays: 5 });
+  else elemBurst(el, hx, hy, hz, 0.3);
+}
+
 export function dealDamage(src, tgt, amount, o = {}) {
   if (!tgt || tgt.dead || tgt.removed) return 0;
+  if (G.net) {
+    // co-op: 0 = someone else's game resolves this hit, 2 = a partner's replayed hit (show it only)
+    const v = G.net.vetDamage(src, tgt, amount, o);
+    if (v === 0) return 0;
+    if (v === 2) { ghostHitFx(tgt, o); return 0; }
+  }
   if (tgt.invuln > 0 || tgt.buffs?.invuln) { if (tgt.isPlayer && o.kind !== 'dot') floatText(tgt.pos.x, tgt.pos.y + 2, tgt.pos.z, 'Immune', { color: '#ffe080' }); return 0; }
   if (src && src.isPlayer && tgt.team === 'neutral' && !tgt.provoked) { tgt.provoked = true; bus.emit('crime', { type: 'assault', target: tgt }); }
   const el = o.element || 'physical';
@@ -110,9 +129,9 @@ export function dealDamage(src, tgt, amount, o = {}) {
   tgt.lastHitT = G.time;
   if (tgt.sleep > 0) tgt.sleep = 0;
   if (src && !tgt.isPlayer && tgt.onAggro) tgt.onAggro(src);
-  // feedback
+  // feedback (quiet: a partner's hit applied here; their screen already showed it)
   const hx = tgt.pos.x, hy = tgt.pos.y + (tgt.height || 1.8) * 0.65, hz = tgt.pos.z;
-  if (o.kind !== 'dot') {
+  if (o.kind !== 'dot' && !o.quiet) {
     tgt.hitFlash = 0.1;
     tgt.hitT = 1;
     const cols = ELEM_COLORS[el] || ELEM_COLORS.physical;
@@ -128,7 +147,7 @@ export function dealDamage(src, tgt, amount, o = {}) {
     if (tgt.isPlayer) { addShake(0.28 * G.settings.screenShake); bus.emit('playerHit', { amount: dmg, src }); }
     bus.emit('hit', { src, tgt, dmg, crit, element: el, kind: o.kind, heavy: !!o.heavy });
   }
-  if (!o.silent && (o.kind !== 'dot' || dmg >= 1)) {
+  if (!o.silent && !o.quiet && (o.kind !== 'dot' || dmg >= 1)) {
     const col = tgt.isPlayer ? '#ff5a4a' : crit ? '#ffd040' : o.kind === 'dot' ? (ELEM_COLORS[el] || ELEM_COLORS.physical)[1] : el !== 'physical' ? (ELEM_COLORS[el] || ['#fff'])[0] : '#ffffff';
     floatText(hx, hy + 0.4, hz, Math.round(dmg) + (crit ? '!' : ''), { crit, color: col, cls: o.kind === 'dot' ? 'dot' : '' });
   }
@@ -149,7 +168,8 @@ export function dealDamage(src, tgt, amount, o = {}) {
     if (heal > 0) src.heal(heal, true);
   }
   if (tgt.hp <= 0) {
-    if (tgt.isPlayer && tgt.tryCheatDeath && tgt.tryCheatDeath()) { tgt.hp = 1; }
+    if (tgt.netPuppet) tgt.hp = 1;      // the host decides when a mirrored enemy dies
+    else if (tgt.isPlayer && tgt.tryCheatDeath && tgt.tryCheatDeath()) { tgt.hp = 1; }
     else killEntity(tgt, src, o);
   }
   return dmg;
@@ -161,6 +181,8 @@ export function killEntity(tgt, src, o = {}) {
   tgt.dead = true;
   tgt.deathT = 0;
   if (tgt.onDeath) tgt.onDeath(src);
+  // co-op: the host tells the party; a partner's kill far away gives this player nothing
+  if (G.net && !G.net.onKill(tgt, src)) return;
   bus.emit('kill', { victim: tgt, killer: src, element: o.element });
 }
 
@@ -266,8 +288,10 @@ export function spawnProjectile(o) {
 
 const _tmp = new Vec3();
 export function updateProjectiles(dt) {
+  const mute0 = bus.muted;
   for (let i = G.projectiles.length - 1; i >= 0; i--) {
     const p = G.projectiles[i];
+    bus.muted = mute0 || (ghostly(p.owner) ? 1 : 0);
     p.life -= dt;
     // homing
     if (p.homing > 0) {
@@ -334,6 +358,7 @@ export function updateProjectiles(dt) {
       G.projectiles.splice(i, 1);
     }
   }
+  bus.muted = mute0;
 }
 
 export function explodeAt(owner, x, y, z, radius, dmg, element, status, crit) {
@@ -384,8 +409,10 @@ export function spawnHazard(o) {
 }
 
 export function updateHazards(dt) {
+  const mute0 = bus.muted;
   for (let i = G.hazards.length - 1; i >= 0; i--) {
     const h = G.hazards[i];
+    bus.muted = mute0 || (ghostly(h.owner) ? 1 : 0);
     h.life -= dt; h.age += dt;
     if (h.follow) { h.x = h.follow.pos.x; h.z = h.follow.pos.z; h.y = h.follow.pos.y; }
     if (h.particles && !(h.mesh?.gl) && Math.random() < dt * (8 + h.radius * 3)) {
@@ -408,6 +435,7 @@ export function updateHazards(dt) {
     }
     if (h.life <= 0) { h.gone = true; removeZone(h.mesh); G.hazards.splice(i, 1); }
   }
+  bus.muted = mute0;
 }
 
 export function clearCombat() {

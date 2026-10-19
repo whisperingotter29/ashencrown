@@ -84,7 +84,7 @@ function createWindow() {
       nodeIntegration: false,
       sandbox: true,
       spellcheck: false,
-      backgroundThrottling: true,
+      backgroundThrottling: false,   // a co-op host keeps the world running while minimised
     },
   });
   win.once('ready-to-show', () => win.show());
