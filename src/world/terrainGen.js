@@ -349,132 +349,135 @@ export function waterAt(x, z, realm = 'surface') {
 }
 
 // ---------- Colour --------------------------------------------------------
-const linCache = new Map();
-function hexLin(hex) {
-  let c = linCache.get(hex);
-  if (c) return c;
-  const n = parseInt(hex.slice(1), 16);
-  const f = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
-  c = [f((n >> 16) & 255), f((n >> 8) & 255), f(n & 255)];
-  linCache.set(hex, c);
-  return c;
-}
-const PAL = {};
+// The ground is painted from per-biome ramps (BIOMES[*].palette, see docs/ART_STYLE.md) as big flat
+// clusters: an earth base with cover patches, flora clumps, stone, road and plaza layers. Each world
+// sample carries the biome-blended ramps of every layer plus how much of each layer it holds; the
+// terrain worker picks a layer and a ramp step per pixel (stepped blob edges, no smooth blending).
+export const RAMP_N = 5;                      // deep, shadow, base, light, highlight
+export const LAYER = { EARTH: 0, COVER: 1, FLORA: 2, STONE: 3, ROAD: 4, PLAZA: 5 };
+export const SAMPLE_F = 6 * RAMP_N * 3;       // floats per sample: 6 layers x 5 steps x rgb (sRGB 0..255)
+const LAYER_KEYS = ['earth', 'cover', 'flora', 'stone', 'road', 'plaza'];
+const hexRGB = (hex) => { const n = parseInt(hex.slice(1), 16); return [(n >> 16) & 255, (n >> 8) & 255, n & 255]; };
+function flatRamp(list) { const f = new Float32Array(RAMP_N * 3); list.forEach((h, i) => f.set(hexRGB(h), i * 3)); return f; }
+const GP = {};
 for (const k in BIOMES) {
-  const p = BIOMES[k].palette;
-  PAL[k] = {}; for (const c in p) PAL[k][c] = hexLin(p[c]);
+  const p = BIOMES[k].palette, f = new Float32Array(SAMPLE_F);
+  LAYER_KEYS.forEach((l, li) => f.set(flatRamp(p[l]), li * RAMP_N * 3));
+  GP[k] = f;
 }
-const ROAD_COL = { wastes: hexLin('#8a5a3a'), gilded: hexLin('#b4a888'), verdant: hexLin('#6a5a3e'), frost: hexLin('#8a8a88'), coast: hexLin('#a89878'), maw: hexLin('#504650'), deep: hexLin('#4a4050') };
-const PLAZA_COL = { wastes: hexLin('#a87250'), gilded: hexLin('#bcb094'), verdant: hexLin('#7a6a48'), frost: hexLin('#9a9a98'), coast: hexLin('#b8a888'), maw: hexLin('#5a5060'), deep: hexLin('#5a5060') };
-const GLASS = hexLin('#1e1016');
-const SNOW = hexLin('#eef2f8');
-const SAND = hexLin('#d8c49a');
-const WETSAND = hexLin('#9a8a6a');
-const MOSSDARK = hexLin('#24361e');
+export const BIOME_INDEX = Object.fromEntries(BIOME_IDS.map((k, i) => [k, i]));
+const SNOW_R = flatRamp(BIOMES.frost.palette.snow);
+const WETSAND_R = flatRamp(['#4a3838', '#5e4a42', '#72604e', '#84705a', '#9e8a6e']);
+const GLASS_R = flatRamp(['#140a10', '#1e1016', '#2a141e', '#3e1c28', '#5e2a3a']);
+// share of the ground under cover patches, and the chance of a flora clump per 9-px cell
+const COVER = { wastes: 0.08, gilded: 0.3, verdant: 0.44, frost: 0.36, coast: 0.5, maw: 0.24, deep: 0.18 };
+const FLORA = { wastes: 0.012, gilded: 0.03, verdant: 0.08, frost: 0.012, coast: 0.03, maw: 0.025, deep: 0.035 };
 const GLASS_SEA = LANDMARKS.find((l) => l.id === 'glass_sea');
 
-function mix3(o, a, b, t) { o[0] = a[0] + (b[0] - a[0]) * t; o[1] = a[1] + (b[1] - a[1]) * t; o[2] = a[2] + (b[2] - a[2]) * t; return o; }
-
-function biomeColor(b, x, z, h, slope, out) {
-  const P = PAL[b];
-  const n1 = N4(x * 0.02, z * 0.02) * 0.5 + 0.5;
-  const n2 = N1(x * 0.07 + 3, z * 0.07) * 0.5 + 0.5;
-  const tmp = [0, 0, 0];
-  switch (b) {
-    case 'wastes': {
-      mix3(out, P.low, P.mid, clamp(n1 * 1.2, 0, 1));
-      mix3(out, out, P.high, smooth(9, 15, h) * 0.6 * n2);
-      mix3(out, out, P.alt, smooth(0.62, 0.8, N2(x * 0.01, z * 0.01 + 4)) * 0.7);
-      break;
-    }
-    case 'gilded': {
-      mix3(out, P.low, P.mid, n1);
-      mix3(out, out, P.alt, smooth(0.55, 0.8, N3(x * 0.012, z * 0.012)) * 0.8);
-      mix3(out, out, P.high, smooth(0.7, 0.9, n2) * 0.35);
-      break;
-    }
-    case 'verdant': {
-      mix3(out, P.low, P.mid, n1);
-      mix3(out, out, P.high, smooth(16, 26, h) * 0.6);
-      mix3(out, out, P.alt, smooth(0.6, 0.85, N2(x * 0.008 + 20, z * 0.008)) * 0.75);
-      mix3(out, out, MOSSDARK, smooth(0.55, 0.75, n2) * 0.4);
-      break;
-    }
-    case 'frost': {
-      mix3(out, P.low, P.mid, smooth(14, 30, h));
-      const snowT = smooth(24, 34, h + n1 * 8) * (1 - smooth(0.55, 0.85, slope) * 0.8);
-      mix3(out, out, SNOW, clamp(snowT + smooth(-850, -1000, z) * 0.5, 0, 1));
-      mix3(out, out, P.alt, smooth(0.7, 0.9, n2) * 0.3);
-      break;
-    }
-    case 'coast': {
-      mix3(out, P.mid, P.high, n1);
-      mix3(out, out, SAND, smooth(3.2, 1.2, h));
-      mix3(out, out, WETSAND, smooth(0.9, 0.0, h));
-      mix3(out, out, P.alt, smooth(0.72, 0.9, N3(x * 0.03, z * 0.03)) * 0.4 * smooth(3, 1, h));
-      break;
-    }
-    case 'maw': {
-      mix3(out, P.low, P.mid, n1);
-      mix3(out, out, P.alt, smooth(0.5, 0.8, n2) * 0.7);
-      mix3(out, out, P.rock, smooth(14, 4, h) * 0.6);
-      break;
-    }
-    case 'deep': {
-      mix3(out, P.low, P.mid, n1);
-      mix3(out, out, P.alt, smooth(0.55, 0.85, N2(x * 0.015, z * 0.015)) * 0.8);
-      mix3(out, out, P.rock, smooth(4, 10, h));
-      break;
-    }
-    default: mix3(out, P.low, P.mid, 0.5);
-  }
-  // rocky slopes
-  const rockT = smooth(0.55, 0.9, slope) * (b === 'frost' ? 0.9 : 0.8);
-  mix3(out, out, P.rock, rockT);
-  return out;
+const _tmpR = new Float32Array(SAMPLE_F);
+// add w * ramp-set into R at o; layers listed in `swap` take a replacement ramp mixed in by t
+function addRamps(R, o, src, w) { for (let i = 0; i < SAMPLE_F; i++) R[o + i] += src[i] * w; }
+function mixLayer(R, o, li, ramp, t) {
+  if (t <= 0) return;
+  const b = o + li * RAMP_N * 3;
+  for (let i = 0; i < RAMP_N * 3; i++) R[b + i] += (ramp[i] - R[b + i]) * t;
 }
 
-const _c = [0, 0, 0];
-export function colorAt(x, z, h, slope, realm, out) {
+// Ground layers at a world point. Writes SAMPLE_F floats of ramps into R at offset o and the layer
+// amounts into `am`: cov (cover share), flo (flora clump chance), stone (stone share), road (distance
+// to the road centre line), plaza (signed distance inside a town plaza), style (dominant biome index).
+export function groundSample(x, z, h, slope, realm, R, o, am) {
+  for (let i = 0; i < SAMPLE_F; i++) R[o + i] = 0;
   if (realm === 'deep') {
-    biomeColor('deep', x, z, h, slope, out);
-    const rd = roadAt(x, z, 'deep');
-    mix3(out, out, ROAD_COL.deep, smooth(7, 3, rd) * 0.6);
-    if (h < -0.2) mix3(out, out, hexLin('#140a10'), 0.8);
-    return out;
+    addRamps(R, o, GP.deep, 1);
+    am.cov = clamp(COVER.deep + N2(x * 0.02, z * 0.02) * 0.2, 0, 1);
+    am.flo = FLORA.deep;
+    am.stone = Math.max(smooth(5.4, 6.8, h), smooth(0.55, 0.9, slope) * 0.9);
+    am.road = roadAt(x, z, 'deep');
+    am.plaza = -99;
+    am.style = BIOME_INDEX.deep;
+    return am;
   }
   biomeWeights(x, z, _w);
-  out[0] = out[1] = out[2] = 0;
+  let cov = 0, flo = 0, stone = 0, pb = 'gilded', bw = -1;
   for (const k in _w) {
     const wt = _w[k];
     if (wt < 0.02) continue;
-    biomeColor(k, x, z, h, slope, _c);
-    out[0] += _c[0] * wt; out[1] += _c[1] * wt; out[2] += _c[2] * wt;
+    if (wt > bw) { bw = wt; pb = k; }
+    let c = COVER[k];
+    const src = GP[k];
+    switch (k) {
+      case 'frost': {
+        // snow above the snowline (and on the northern wall), slate tundra below it
+        const n = N4(x * 0.02, z * 0.02);
+        const snowT = clamp(smooth(22, 32, h + n * 8) * (1 - smooth(0.55, 0.85, slope) * 0.8) + smooth(-850, -1000, z) * 0.6, 0, 1);
+        _tmpR.set(src);
+        mixLayer(_tmpR, 0, LAYER.EARTH, SNOW_R, snowT);
+        // on snow the cover patches are wind-scoured slate showing through
+        mixLayer(_tmpR, 0, LAYER.COVER, src.subarray(LAYER.STONE * 15, LAYER.STONE * 15 + 15), snowT * 0.8);
+        addRamps(R, o, _tmpR, wt);
+        c = lerp(c + N1(x * 0.012, z * 0.012 + 7) * 0.24, 0.12, snowT);
+        break;
+      }
+      case 'coast': {
+        // beach sand by the water (wet and darker at the tide line), dune grass inland
+        _tmpR.set(src);
+        mixLayer(_tmpR, 0, LAYER.EARTH, WETSAND_R, smooth(0.9, 0.0, h));
+        addRamps(R, o, _tmpR, wt);
+        c = (c + N4(x * 0.011 + 9, z * 0.011) * 0.34) * smooth(1.6, 3.4, h);
+        break;
+      }
+      case 'verdant': addRamps(R, o, src, wt); c += N2(x * 0.012 + 20, z * 0.012) * 0.34; break;
+      case 'gilded': addRamps(R, o, src, wt); c += N3(x * 0.011, z * 0.011) * 0.24; break;
+      case 'wastes': addRamps(R, o, src, wt); c += N2(x * 0.01, z * 0.01 + 4) * 0.16; stone += wt * smooth(12.5, 14.5, h) * 0.55; break;
+      default: addRamps(R, o, src, wt); c += N3(x * 0.014 + 3, z * 0.014) * 0.16;
+    }
+    cov += wt * clamp(c, 0, 0.95);
+    flo += wt * FLORA[k];
   }
-  // primary biome for road / plaza tint
-  let pb = 'gilded', bw = -1;
-  for (const k in _w) if (_w[k] > bw) { bw = _w[k]; pb = k; }
-  // Glass sea
-  const gs = GLASS_SEA;
-  const gd = Math.hypot(x - gs.x, z - gs.z) + N1(x * 0.05, z * 0.05) * 14;
-  if (gd < gs.r) mix3(out, out, GLASS, smooth(gs.r, gs.r * 0.6, gd) * 0.9);
-  // Roads
-  const rd = roadAt(x, z);
-  const roadT = smooth(5.5, 2.5, rd + N2(x * 0.15, z * 0.15) * 1.2);
-  if (roadT > 0) mix3(out, out, ROAD_COL[pb], roadT * 0.85);
-  // Town plazas
+  // glass sea: fused black-red glass over the waste
+  const gd = Math.hypot(x - GLASS_SEA.x, z - GLASS_SEA.z) + N1(x * 0.05, z * 0.05) * 14;
+  if (gd < GLASS_SEA.r) {
+    const t = smooth(GLASS_SEA.r, GLASS_SEA.r * 0.6, gd) * 0.9;
+    mixLayer(R, o, LAYER.EARTH, GLASS_R, t); mixLayer(R, o, LAYER.COVER, GLASS_R, t * 0.7);
+    cov *= 1 - t; flo *= 1 - t;
+  }
+  // trodden ground round towns, a paved plaza in the middle
+  let plaza = -99;
   for (const t of TOWNS) {
     const d = Math.hypot(x - t.x, z - t.z);
-    if (d < t.r * 0.95) {
-      const pt = smooth(t.r * 0.95, t.r * 0.6, d + N3(x * 0.1, z * 0.1) * 3);
-      mix3(out, out, PLAZA_COL[pb], pt * 0.75);
-    }
+    if (d > t.r * 1.2) continue;
+    cov *= 0.35 + 0.65 * smooth(t.r * 0.45, t.r * 1.15, d);
+    plaza = Math.max(plaza, t.r * 0.33 + N1(x * 0.2, z * 0.2) * 1.5 - d);
   }
-  // Underwater darkening
-  if (h < 0) {
+  am.cov = cov; am.flo = flo;
+  am.stone = Math.min(1, stone + smooth(0.5, 0.85, slope) * 0.9);
+  am.road = roadAt(x, z);
+  am.plaza = plaza;
+  am.style = BIOME_INDEX[pb];
+  return am;
+}
+
+// A representative colour (linear rgb) for the world map: the layers mixed by their amounts.
+const _am = {};
+const toLin = (v) => { v /= 255; return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4); };
+function mix3(o, a, b, t) { o[0] = a[0] + (b[0] - a[0]) * t; o[1] = a[1] + (b[1] - a[1]) * t; o[2] = a[2] + (b[2] - a[2]) * t; return o; }
+const rampCol = (li, idx, o) => { const b = li * RAMP_N * 3 + idx * 3; o[0] = _tmpS[b]; o[1] = _tmpS[b + 1]; o[2] = _tmpS[b + 2]; return o; };
+const _tmpS = new Float32Array(SAMPLE_F), _ca = [0, 0, 0];
+export function colorAt(x, z, h, slope, realm, out) {
+  groundSample(x, z, h, slope, realm, _tmpS, 0, _am);
+  rampCol(LAYER.EARTH, 2, out);
+  mix3(out, out, rampCol(LAYER.COVER, 2, _ca), clamp(_am.cov, 0, 1));
+  mix3(out, out, rampCol(LAYER.STONE, 2, _ca), _am.stone);
+  mix3(out, out, rampCol(LAYER.ROAD, 2, _ca), smooth(5.5, 2.5, _am.road) * 0.85);
+  if (_am.plaza > -6) mix3(out, out, rampCol(LAYER.PLAZA, 2, _ca), smooth(-3, 0, _am.plaza) * 0.85);
+  out[0] = toLin(out[0]); out[1] = toLin(out[1]); out[2] = toLin(out[2]);
+  // underwater darkening
+  if (h < 0 && realm !== 'deep') {
     const t = smooth(0, -6, h);
     out[0] *= 1 - t * 0.65; out[1] *= 1 - t * 0.45; out[2] *= 1 - t * 0.25;
   }
+  if (realm === 'deep' && h < -0.2) mix3(out, out, [0.007, 0.004, 0.008], 0.8);
   return out;
 }
 

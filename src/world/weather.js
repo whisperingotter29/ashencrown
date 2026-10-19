@@ -1,8 +1,11 @@
 // Weather: each biome cycles its own weather; crisp pixel layers (rain streaks, snow, sand,
-// embers) wrap around the view, with lightning strikes and ground splashes.
+// embers) wrap around the view, with lightning strikes and ground splashes. Fog and haze drift as
+// big dithered banks in the biome's own muted tone rather than washing the whole view (see
+// docs/ART_STYLE.md); particle colours come from the master palette.
 import { lightning as boltFx, flash, burst } from '../render/vfx.js';
 import { scene } from '../px/scene.js';
-import { ART, ap } from '../px/pix.js';
+import { ART, ap, bayer } from '../px/pix.js';
+import { R } from '../render/renderer.js';
 import { view } from '../px/view.js';
 import { BIOMES } from '../data/world.js';
 import { G } from '../game.js';
@@ -13,16 +16,16 @@ import { bus } from '../core/events.js';
 
 export const WEATHER_DEFS = {
   clear: { name: 'Clear', overcast: 0, storm: 0, fog: 0, layers: [] },
-  haze: { name: 'Heat Haze', overcast: 0.15, storm: 0, fog: 0.45, fogTint: '#e0a070', fogTintAmt: 0.3, layers: [['dust', 0.5]] },
+  haze: { name: 'Heat Haze', overcast: 0.15, storm: 0, fog: 0.45, fogTint: '#a8705a', fogTintAmt: 0.3, layers: [['dust', 0.5]] },
   cloudy: { name: 'Overcast', overcast: 0.6, storm: 0, fog: 0.15, layers: [] },
   rain: { name: 'Rain', overcast: 0.85, storm: 0.3, fog: 0.35, layers: [['rain', 0.6]], wet: true },
   thunderstorm: { name: 'Thunderstorm', overcast: 1, storm: 1, fog: 0.4, layers: [['rain', 1]], lightning: true, wet: true },
-  sandstorm: { name: 'Sandstorm', overcast: 0.45, storm: 0.4, fog: 1.6, fogTint: '#c88a50', fogTintAmt: 0.7, layers: [['sand', 1], ['dust', 1]], wind: 3, slow: 0.15 },
-  glassstorm: { name: 'Glass Storm', overcast: 0.6, storm: 0.6, fog: 1.0, fogTint: '#a02838', fogTintAmt: 0.55, layers: [['glass', 1], ['sand', 0.5]], wind: 3.5, hurts: 0.018, danger: true },
-  emberfall: { name: 'Ember-Fall', overcast: 0.3, storm: 0, fog: 0.35, fogTint: '#d05a2a', fogTintAmt: 0.35, layers: [['emberfall', 1], ['ash', 0.6]] },
-  snow: { name: 'Snowfall', overcast: 0.7, storm: 0.1, fog: 0.45, fogTint: '#c8d4e4', fogTintAmt: 0.3, layers: [['snow', 0.7]] },
-  blizzard: { name: 'Blizzard', overcast: 0.95, storm: 0.6, fog: 1.8, fogTint: '#d8e4f0', fogTintAmt: 0.7, layers: [['blizzard', 1]], wind: 3, chill: true, danger: true },
-  fog: { name: 'Fog', overcast: 0.5, storm: 0, fog: 1.7, fogTint: '#9aa8b0', fogTintAmt: 0.5, layers: [] },
+  sandstorm: { name: 'Sandstorm', overcast: 0.45, storm: 0.4, fog: 1.6, fogTint: '#a8644c', fogTintAmt: 0.6, layers: [['sand', 1], ['dust', 1]], wind: 3, slow: 0.15 },
+  glassstorm: { name: 'Glass Storm', overcast: 0.6, storm: 0.6, fog: 1.0, fogTint: '#7a1e30', fogTintAmt: 0.5, layers: [['glass', 1], ['sand', 0.5]], wind: 3.5, hurts: 0.018, danger: true },
+  emberfall: { name: 'Ember-Fall', overcast: 0.3, storm: 0, fog: 0.35, fogTint: '#7a2e20', fogTintAmt: 0.3, layers: [['emberfall', 1], ['ash', 0.6]] },
+  snow: { name: 'Snowfall', overcast: 0.7, storm: 0.1, fog: 0.45, fogTint: '#a4a6c8', fogTintAmt: 0.3, layers: [['snow', 0.7]] },
+  blizzard: { name: 'Blizzard', overcast: 0.95, storm: 0.6, fog: 1.8, fogTint: '#b4b6d6', fogTintAmt: 0.6, layers: [['blizzard', 1]], wind: 3, chill: true, danger: true },
+  fog: { name: 'Fog', overcast: 0.5, storm: 0, fog: 1.7, layers: [] },
   sporebloom: { name: 'Spore Bloom', overcast: 0.3, storm: 0, fog: 0.5, fogTint: '#6a4a8a', fogTintAmt: 0.35, layers: [['spores', 1]] },
   aurora: { name: 'Aurora', overcast: 0, storm: 0, fog: 0.1, aurora: 1, layers: [['snow', 0.15]] },
   voidstorm: { name: 'Void Storm', overcast: 0.85, storm: 0.7, fog: 0.9, fogTint: '#4a2a6a', fogTintAmt: 0.6, layers: [['motes', 1]], lightning: true, voidBolts: true, danger: true },
@@ -36,20 +39,20 @@ const AMBIENT = { wastes: [['embers', 0.5], ['dust', 0.25]], gilded: [['pollen',
 // world as it always did; flakes and motes stay 1-2 px. `glow` layers are drawn after lighting so
 // embers, glass and spores shine at night.
 const LAYERS0 = {
-  rain: { n: 650, vel: [40, 330], len: 5, color: '#a8bcd0', alpha: 0.55, streak: true },
-  snow: { n: 420, vel: [10, 26], wob: 9, color: '#ffffff', alpha: 0.9, size: 1 },
-  blizzard: { n: 900, vel: [170, 55], wob: 14, color: '#ffffff', alpha: 0.85, streak: true, len: 3 },
-  sand: { n: 700, vel: [220, 8], wob: 18, color: '#d8a060', alpha: 0.6, streak: true, len: 3 },
-  dust: { n: 120, vel: [30, 2], wob: 10, color: '#d09060', alpha: 0.14, size: 4 },
+  rain: { n: 650, vel: [40, 330], len: 5, color: '#8cb4c4', alpha: 0.55, streak: true },
+  snow: { n: 420, vel: [10, 26], wob: 9, color: '#ecebf6', alpha: 0.9, size: 1 },
+  blizzard: { n: 900, vel: [170, 55], wob: 14, color: '#dcdcf0', alpha: 0.85, streak: true, len: 3 },
+  sand: { n: 700, vel: [220, 8], wob: 18, color: '#c48e74', alpha: 0.6, streak: true, len: 3 },
+  dust: { n: 120, vel: [30, 2], wob: 10, color: '#a8705a', alpha: 0.14, size: 4 },
   glass: { n: 260, vel: [200, 20], wob: 12, color: '#ff2a48', alpha: 1, glow: true, twinkle: 1 },
-  embers: { n: 140, vel: [12, -9], wob: 10, color: '#ff8a30', alpha: 1, glow: true, twinkle: 1 },
-  emberfall: { n: 320, vel: [10, 16], wob: 10, color: '#ff7020', alpha: 1, glow: true, twinkle: 1 },
-  ash: { n: 220, vel: [9, 13], wob: 7, color: '#4a4040', alpha: 0.75, size: 1 },
-  spores: { n: 220, vel: [3, -6], wob: 8, color: '#c080ff', alpha: 0.9, glow: true, twinkle: 1 },
-  fireflies: { n: 70, vel: [0, 0], wob: 14, color: '#d8ff60', alpha: 1, glow: true, twinkle: 2 },
-  pollen: { n: 110, vel: [6, -1], wob: 6, color: '#fff0b0', alpha: 0.7, glow: true },
-  motes: { n: 200, vel: [2, -5], wob: 12, color: '#a060ff', alpha: 1, glow: true, twinkle: 1 },
-  deepmotes: { n: 180, vel: [1, -3], wob: 10, color: '#60e0ff', alpha: 0.9, glow: true, twinkle: 1 },
+  embers: { n: 140, vel: [12, -9], wob: 10, color: '#ec7a2a', alpha: 1, glow: true, twinkle: 1 },
+  emberfall: { n: 320, vel: [10, 16], wob: 10, color: '#ec7a2a', alpha: 1, glow: true, twinkle: 1 },
+  ash: { n: 220, vel: [9, 13], wob: 7, color: '#3a2a34', alpha: 0.75, size: 1 },
+  spores: { n: 220, vel: [3, -6], wob: 8, color: '#c860f0', alpha: 0.9, glow: true, twinkle: 1 },
+  fireflies: { n: 70, vel: [0, 0], wob: 14, color: '#f6e39a', alpha: 1, glow: true, twinkle: 2 },
+  pollen: { n: 110, vel: [6, -1], wob: 6, color: '#f3e1b5', alpha: 0.7, glow: true },
+  motes: { n: 200, vel: [2, -5], wob: 12, color: '#a026ef', alpha: 1, glow: true, twinkle: 1 },
+  deepmotes: { n: 180, vel: [1, -3], wob: 10, color: '#7cd8c8', alpha: 0.9, glow: true, twinkle: 1 },
 };
 const LAYERS = Object.fromEntries(Object.entries(LAYERS0).map(([k, c]) => [k, { ...c, vel: [c.vel[0] * ART, c.vel[1] * ART], wob: (c.wob || 0) * ART, len: c.len ? ap(c.len) : 0 }]));
 
@@ -114,7 +117,7 @@ function stepLayers(dt) {
 // rain splashes: tiny crisp rings on the ground
 const splashes = [];
 function drawSplashes(ctx) {
-  ctx.fillStyle = '#c8d8e8';
+  ctx.fillStyle = '#a8c8d4';
   const now = performance.now() / 1000;
   for (let i = splashes.length - 1; i >= 0; i--) {
     const sp = splashes[i];
@@ -130,9 +133,60 @@ function drawSplashes(ctx) {
   ctx.globalAlpha = 1;
 }
 
+// ---- fog banks: big soft blobs drifting with the wind in the current haze tone. Fading effects are
+// the one place dithering belongs, so each bank is an ordered-dithered shape (dense core, sparse
+// rim) drawn into the pixel layer, which lets the lighting darken it at night.
+const BANKS = [];
+const bankShapes = [], bankTint = new Map();
+function bankShape(i) {
+  if (bankShapes[i]) return bankShapes[i];
+  const w = ap(110 + (i % 3) * 30), h = ap(40 + (i % 2) * 14);
+  const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+  const g = cv.getContext('2d'), img = g.createImageData(w, h);
+  const lobes = [];
+  for (let k = 0; k < 4; k++) lobes.push([w * (0.22 + k * 0.18 + Math.sin(i * 7.1 + k) * 0.05), h * (0.5 + Math.sin(i * 3.3 + k * 2.1) * 0.12), w * (0.2 + 0.06 * Math.cos(i + k)), h * (0.36 + 0.08 * Math.sin(i * 2 + k))]);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let d = 0;
+    for (const [cx, cy, rx, ry] of lobes) { const e = ((x - cx) / rx) ** 2 + ((y - cy) / ry) ** 2; if (e < 1) d = Math.max(d, 1 - e); }
+    const keep = d > 0.6 ? 0.5 : d > 0.32 ? 0.25 : d > 0.08 ? 0.125 : 0;
+    if (keep && bayer(x, y) < keep) img.data[(y * w + x) * 4 + 3] = 255;
+  }
+  g.putImageData(img, 0, 0);
+  return (bankShapes[i] = cv);
+}
+function tintedBank(i, col) {
+  const key = i + ':' + col;
+  let cv = bankTint.get(key);
+  if (cv) return cv;
+  if (bankTint.size > 48) bankTint.clear();
+  const src = bankShape(i);
+  cv = document.createElement('canvas'); cv.width = src.width; cv.height = src.height;
+  const g = cv.getContext('2d');
+  g.drawImage(src, 0, 0); g.globalCompositeOperation = 'source-in'; g.fillStyle = col; g.fillRect(0, 0, cv.width, cv.height);
+  bankTint.set(key, cv);
+  return cv;
+}
+function drawFogBanks(ctx) {
+  const a = Math.min(0.5, Math.max(0, ((G.weather?.fog || 0) - 0.3) * 0.42));
+  if (a < 0.02) return;
+  if (!BANKS.length) for (let i = 0; i < 9; i++) BANKS.push({ x: Math.random() * 3200, y: Math.random() * 3200, s: i % 6 });
+  // tone: the haze colour, quantised so the tinted copies stay few
+  const f = R.fog.color, q = (v) => Math.min(255, (v >> 3) << 3);
+  const col = `rgb(${q(f[0])},${q(f[1])},${q(f[2])})`;
+  const Wm = view.W + MARGIN * 6, Hm = view.H + MARGIN * 6;
+  ctx.globalAlpha = a;
+  for (const b of BANKS) {
+    const cv = tintedBank(b.s, col);
+    const x = ((b.x - view.x0) % Wm + Wm) % Wm - MARGIN * 3, y = ((b.y - view.y0) % Hm + Hm) % Hm - MARGIN * 3;
+    ctx.drawImage(cv, Math.round(x - cv.width / 2), Math.round(y - cv.height / 2));
+  }
+  ctx.globalAlpha = 1;
+}
+function stepFogBanks(dt) { for (const b of BANKS) b.x += ap(6 + (b.s % 3) * 3) * (state.wind || 1) * dt; }
+
 export function initWeather() {
   for (const [id, cfg] of Object.entries(LAYERS)) makeLayer(id, cfg);
-  scene.persist.screen.push((ctx) => { drawSplashes(ctx); drawLayers(ctx, false); });
+  scene.persist.screen.push((ctx) => { drawFogBanks(ctx); drawSplashes(ctx); drawLayers(ctx, false); });
   scene.persist.emissives.push((ctx) => drawLayers(ctx, true));
   G.weather = { id: 'clear', def: WEATHER_DEFS.clear, overcast: 0, storm: 0, fog: 0, aurora: 0, fogTint: null, fogTintAmt: 0, wind: 1, name: 'Clear' };
 }
@@ -190,6 +244,7 @@ export function updateWeather(dt, focus, indoor) {
   }
   for (const [lid, L] of Object.entries(layers)) L.alpha = damp(L.alpha, targets[lid] || 0, 0.6, dt);
   stepLayers(dt);
+  stepFogBanks(dt);
   if ((layers.rain?.alpha || 0) > 0.05 && Math.random() < dt * 40 * layers.rain.alpha) splashes.push({ x: view.x0 + Math.random() * view.W, y: view.y0 + Math.random() * view.H, t: performance.now() / 1000 });
   if (splashes.length > 80) splashes.shift();
 
@@ -200,7 +255,7 @@ export function updateWeather(dt, focus, indoor) {
       state.boltTimer = 3 + Math.random() * 9;
       const a = Math.random() * Math.PI * 2, r = 15 + Math.random() * 60;
       const x = focus.x + Math.cos(a) * r, z = focus.z + Math.sin(a) * r;
-      const col = d.voidBolts ? '#b080ff' : '#d0dcff';
+      const col = d.voidBolts ? '#c860f0' : '#e6e0ff';
       boltFx(x, focus.y + 90, z, x + (Math.random() - 0.5) * 6, focus.y, z + (Math.random() - 0.5) * 6, { color: col, segs: 16, jag: 5, dur: 0.3 });
       flash(x, focus.y + 6, z, col, 60, 60, 0.35);
       burst(x, focus.y + 0.5, z, { count: 18, speed: 9, color: col, life: 0.5, gravity: -10 });
