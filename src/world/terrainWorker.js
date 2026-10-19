@@ -61,8 +61,11 @@ const WATER = ['#142640', '#1a344e', '#21465c', '#2a5a6a', '#357074', '#5a8e88']
 const GLOWW = ['#0a1a22', '#10262e', '#16343a', '#1e4648', '#2a5e5a', '#3e7e74'].map(hexRGB);
 const FOAM = hexRGB('#efdab4'), FOAM2 = hexRGB('#c8c4a4');
 const LAVA = ['#3a0e10', '#7a1e14', '#c2401c', '#ec7a2a', '#f8b848'].map(hexRGB);
-// crack network from a noise isoline: dark seam, a lit lip on one side, a shaded lip on the other
-const crackStep = (v, w) => (v > -w && v < w ? -9 : v >= w && v < w * 2.4 ? 1 : v <= -w && v > -w * 2.4 ? -1 : 0);
+// Crack network from a noise isoline. Cracks are not ink: a seam is one step darker on the local
+// ramp (never below the shadow step), about 2 px wide, broken into short segments by the roughness
+// field, and only shows where the sub-patch field gathers it into clusters. Returns true on a seam.
+const crackSeam = (v, w, f2, r3, gate) => f2 > gate && r3 > -0.28 && v > -w && v < w;
+const crackIdx = (idx) => Math.max(1, idx - 1);
 
 // Low-frequency noise sampled on a coarse grid over the chunk (with its margin) and interpolated
 // per pixel: one noise call per step x step pixels instead of one per pixel.
@@ -223,9 +226,12 @@ function buildChunk(m) {
             const ph = wx * (0.11 * iA) + wz * (0.045 * iA) + (gRip ||= field(N1, 0.004 * iA, 8, WX0 - M, WZ0 - M, PM))(X, Y) * 4;
             if (f2 > -0.15) { if (Math.sin(ph) > 0.94) idx++; else if (Math.sin(ph - 0.5) > 0.96) idx--; }
           } else if (style === S_MAW) {
-            // ash crust with a crack network; aether seeps from the odd crack
-            const ck = crackStep((gCrack ||= field(N2, 0.6 / PPU, 2, WX0 - M, WZ0 - M, PM))(X, Y), 0.03);
-            if (ck === -9) { idx = 0; const n = h2(wx, wz, 3); if (n > 0.9) { layer = LAYER.FLORA; idx = n > 0.97 ? 3 : 2; glow = 1; } } else idx += ck;
+            // ash crust with clusters of cracks; aether seeps from the odd one
+            if (crackSeam((gCrack ||= field(N2, 0.6 / PPU, 2, WX0 - M, WZ0 - M, PM))(X, Y), 0.045, f2, r3, -0.05)) {
+              idx = crackIdx(idx);
+              const n = h2(wx >> 1, wz >> 1, 3);
+              if (n > 0.93) { layer = LAYER.FLORA; idx = n > 0.98 ? 3 : 2; glow = 1; }
+            }
           } else if (style === S_FROST && h2(wx, wz, 3) < 0.005) idx = 4;          // frost glint
           // pebbles: a lit stone with its shadow under it
           const pcx = Math.floor(wx / PEB), pcz = Math.floor(wz / PEB);
@@ -240,9 +246,9 @@ function buildChunk(m) {
         case L_STONE: {
           layer = LAYER.STONE;
           idx = 2 + step + mot;
-          const ck = crackStep((gCrack ||= field(N2, 0.6 / PPU, 2, WX0 - M, WZ0 - M, PM))(X, Y), 0.035);
-          if (ck === -9) idx = 0; else idx += ck;
           if (LY[li - PM] !== L_STONE) idx++;
+          // clustered cracks (wastes mesa tops, rocky slopes)
+          if (crackSeam((gCrack ||= field(N2, 0.6 / PPU, 2, WX0 - M, WZ0 - M, PM))(X, Y), 0.05, f2, r3, 0.12)) idx = crackIdx(idx);
           break;
         }
         case L_ROAD: case L_RIM: {
@@ -260,22 +266,24 @@ function buildChunk(m) {
           break;
         }
         case L_PLAZA: {
-          // flagstones: offset courses, 1-px mortar, a bevel lit on the top-left, per-stone tone
+          // flagstones: offset courses, 1-px mortar in the ramp's shadow step (not ink), a bevel lit on
+          // the top-left, per-stone tone
           layer = LAYER.PLAZA;
           const row = Math.floor(wz / FLAG), off = (row & 1) * (FLAG >> 1);
           const bxs = Math.floor((wx + off) / FLAG);
           const mx = md(wx + off, FLAG), mz = md(wz, FLAG);
-          if (mx === 0 || mz === 0) idx = 0;
+          if (mx === 0 || mz === 0) idx = 1;
           else {
             const t = h2(bxs, row, 8);
             idx = t < 0.22 ? 1 : t > 0.86 ? 3 : 2;
             if (mx === 1 || mz === 1) idx++; else if (mx === FLAG - 1 || mz === FLAG - 1) idx--;
-            // the odd cracked slab: a jagged hairline across part of the stone
+            // the odd cracked slab, in clusters of neighbouring slabs: a jagged seam one step darker
+            // than the stone, broken where the roughness field dips
             const ch = h2(bxs, row, 13);
-            if (ch < 0.09) {
+            if (ch < (f2 > 0.1 ? 0.22 : 0.03)) {
               const sl = (h2(bxs, row, 14) - 0.5) * 1.6, c0 = 3 + h2(bxs, row, 15) * (FLAG - 6);
               const zz = mz + (md(mz, 4) === 0 ? 1 : 0);
-              if (Math.abs(mx - Math.round(c0 + (zz - FLAG / 2) * sl)) < 1 && mz > 2 && mz < FLAG - 2 - ch * 40) idx = 0;
+              if (Math.abs(mx - Math.round(c0 + (zz - FLAG / 2) * sl)) < 1 && mz > 2 && mz < FLAG - 2 - ch * 30 && r3 > -0.3) idx = crackIdx(idx);
             }
           }
           break;

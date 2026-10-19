@@ -424,11 +424,13 @@ export function groundSample(x, z, h, slope, realm, R, o, am) {
         _tmpR.set(src);
         mixLayer(_tmpR, 0, LAYER.EARTH, WETSAND_R, smooth(0.9, 0.0, h));
         addRamps(R, o, _tmpR, wt);
-        c = (c + N4(x * 0.011 + 9, z * 0.011) * 0.34) * smooth(1.6, 3.4, h);
+        // one layer dominates at a time: dune-grass meadows holding a few sand islands, or open sand
+        // with the odd grass tuft patch, joined by a short transition (never an even 50/50 mix)
+        c = (0.08 + 0.82 * smooth(-0.1, 0.1, N4(x * 0.0095 + 9, z * 0.0095) + N1(x * 0.04, z * 0.04 + 3) * 0.05)) * smooth(1.6, 3.4, h);
         break;
       }
       case 'verdant': addRamps(R, o, src, wt); c += N2(x * 0.012 + 20, z * 0.012) * 0.34; break;
-      case 'gilded': addRamps(R, o, src, wt); c += N3(x * 0.011, z * 0.011) * 0.24; break;
+      case 'gilded': addRamps(R, o, src, wt); c = 0.1 + 0.62 * smooth(-0.14, 0.14, N3(x * 0.011, z * 0.011)); break;
       case 'wastes': addRamps(R, o, src, wt); c += N2(x * 0.01, z * 0.01 + 4) * 0.16; stone += wt * smooth(12.5, 14.5, h) * 0.55; break;
       default: addRamps(R, o, src, wt); c += N3(x * 0.014 + 3, z * 0.014) * 0.16;
     }
