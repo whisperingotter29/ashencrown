@@ -13,6 +13,7 @@ import { particle } from '../render/vfx.js';
 import { addObject, removeObject } from '../px/scene.js';
 import { view } from '../px/view.js';
 import { PPU, ART, ap, C, bayer, hash2 } from '../px/pix.js';
+import { RAMPS } from '../px/palette.js';
 import * as B from '../px/sprites/buildings.js';
 import * as LM from '../px/sprites/landmarks.js';
 import { propSprite } from '../px/sprites/props.js';
@@ -37,6 +38,10 @@ export function initStructures() {
   for (const l of LANDMARKS) sites.push({ kind: 'landmark', id: l.id, data: l, x: l.x, z: l.z, realm: 'surface', big: true });
   for (const g of REALM_GATES) sites.push({ kind: 'gate', id: g.id, data: g, x: g.x, z: g.z, realm: g.realm });
 }
+
+// palette picks (docs/ART_STYLE.md): fire in the ember ramp, magic in aether violet
+const FIRE = RAMPS.ember[3], FIRE_HOT = RAMPS.ember[4], DEEP_FIRE = '#c068f0', LAMP = RAMPS.ember[4];
+const SHADOW_FILL = 'rgba(20,12,30,0.42)';
 
 // ---------------------------------------------------------------------------- update
 let scanT = 0;
@@ -85,7 +90,7 @@ function buildSite(s) {
   b.update = (dt) => {
     for (const f of fires) if (Math.random() < dt * (f.big ? 26 : 9)) {
       const sp = f.big || 1;
-      particle({ x: f.x + (Math.random() - 0.5) * 0.4 * sp, y: f.y + 0.4, z: f.z + (Math.random() - 0.5) * 0.3 * sp, vx: (Math.random() - 0.5) * 0.6, vy: 2 + Math.random() * 2, vz: (Math.random() - 0.5) * 0.4, life: 0.7, size: 0.3 * Math.sqrt(sp), size1: 0.1, color: '#ffd080', color2: f.color, gravity: 1.5 });
+      particle({ x: f.x + (Math.random() - 0.5) * 0.4 * sp, y: f.y + 0.4, z: f.z + (Math.random() - 0.5) * 0.3 * sp, vx: (Math.random() - 0.5) * 0.6, vy: 2 + Math.random() * 2, vz: (Math.random() - 0.5) * 0.4, life: 0.7, size: 0.3 * Math.sqrt(sp), size1: 0.1, color: f.color === DEEP_FIRE ? RAMPS.aether[5] : FIRE_HOT, color2: f.color, gravity: 1.5 });
     }
     for (const u of b.updates) u(dt);
   };
@@ -116,7 +121,7 @@ function obj(b, spr, wx, wz, o = {}) {
     bounds() { const s = this.cur(); const [x, y] = this.pos(); return { x: x - s.pix.ox, y: y - s.pix.oy, w: s.pix.w, h: s.pix.h }; },
   };
   // contact shadow: a flat pixel oval o.shadow px to each side of the pivot
-  if (o.shadow) ob.shadow = (ctx) => { const [x, y] = ob.pos(); const w = o.shadow, k = Math.max(1, Math.round(w * 0.2)); ctx.fillStyle = 'rgba(10,6,12,0.28)'; ctx.fillRect(x - w + k, y - 2, w * 2 + 1 - k * 2, 1); ctx.fillRect(x - w, y - 1, w * 2 + 1, 3); ctx.fillRect(x - w + k, y + 2, w * 2 + 1 - k * 2, 1); };
+  if (o.shadow) ob.shadow = (ctx) => { const [x, y] = ob.pos(); const w = o.shadow, k = Math.max(1, Math.round(w * 0.2)); ctx.fillStyle = SHADOW_FILL; ctx.fillRect(x - w + k, y - 2, w * 2 + 1 - k * 2, 1); ctx.fillRect(x - w, y - 1, w * 2 + 1, 3); ctx.fillRect(x - w + k, y + 2, w * 2 + 1 - k * 2, 1); };
   // directional cast shadow; houses cap the casting height so the roof's depth doesn't stretch it
   if (!o.flat && o.cast !== false && spr.pix.oy > ap(6)) {
     const cap = o.shadowCap || (spr.footprint ? Math.round(spr.pix.h * 0.58) : 0);
@@ -136,9 +141,10 @@ function prop(b, id, x, z, scale = 1, variant = 0, o = {}) {
   return at(b, frames[0], x, z, { frames: frames.length > 1 ? frames : null, fps: 2.5, phase: x * 0.37, shadow: Math.round(frames[0].pix.w * 0.3), ...o });
 }
 // crisp flickering flame (emissive pixels) + soft glow, for braziers and torches; sizes are in
-// design pixels scaled by ART, drawn one art pixel at a time
-function flame(b, wx, wz, h, big = 1, color = '#ff9030') {
-  const c = C(color), edge = `rgb(${c[0]},${Math.round(c[1] * 0.6)},${Math.round(c[2] * 0.4)})`;
+// design pixels scaled by ART, drawn one art pixel at a time in stepped bands (deep edge, body,
+// hot inner band, pale core) from B.flamePalette
+function flame(b, wx, wz, h, big = 1, color = FIRE) {
+  const [edge, body, hot, core] = B.flamePalette(color);
   const s = big * ART;
   const o = {
     sortZ: wz + 0.01, hidden: false, draw() {},
@@ -150,8 +156,8 @@ function flame(b, wx, wz, h, big = 1, color = '#ff9030') {
         const w = Math.max(0, Math.round((1 - k / hgt) * 2.6 * s - (k === 0 ? 0 : 0.3)));
         const sway = Math.round(Math.sin(t * 0.7 + k * 0.6) * (k / hgt) * 1.3 * ART);
         for (let i = -w; i <= w; i++) {
-          const core = Math.abs(i) < w * 0.45 && k < hgt * 0.6;
-          ctx.fillStyle = core ? '#fff0b0' : Math.abs(i) === w ? edge : color;
+          const a = Math.abs(i);
+          ctx.fillStyle = a === w ? edge : a < w * 0.4 && k < hgt * 0.45 ? core : a < w * 0.7 && k < hgt * 0.7 ? hot : body;
           ctx.fillRect(x + i + sway, y - k, 1, 1);
         }
       }
@@ -161,7 +167,7 @@ function flame(b, wx, wz, h, big = 1, color = '#ff9030') {
   b.objs.push(o);
   return o;
 }
-function brazier(b, x, z, color = '#ff9030', big = 1) {
+function brazier(b, x, z, color = FIRE, big = 1) {
   const spr = B.brazierSprite(big);
   at(b, spr, x, z, { shadow: ap(4 * big) });
   const y = H(b.sx + x, b.sz + z, b.realm);
@@ -184,24 +190,24 @@ function buildTown(s, b) {
   // fountains: the pivot is the basin's front foot, so place it to keep the rim centre on the plaza
   const basinZ = (spr, c) => -spr.basinAt[1] / PPU + c;
   if (t.id === 'emberwell') {
-    const fs = B.fountainSprite(3.6, '#8a5a3a', 0);
+    const fs = B.fountainSprite(3.6, '#9c6a5a', 0);
     at(b, fs, 0, basinZ(fs, -0.32), { sortOff: 0 });
-    flame(b, s.x, s.z, 0.8, 2.6, '#ffa030');
-    b.lights.push({ x: s.x, y: H(s.x, s.z, realm) + 3, z: s.z, color: '#ff9030', i: 22, d: 20, always: true });
-    b.fires.push({ x: s.x, y: H(s.x, s.z, realm) + 1.3, z: s.z, color: '#ffa030', big: 2 });
+    flame(b, s.x, s.z, 0.8, 2.6, FIRE);
+    b.lights.push({ x: s.x, y: H(s.x, s.z, realm) + 3, z: s.z, color: FIRE, i: 22, d: 20, always: true });
+    b.fires.push({ x: s.x, y: H(s.x, s.z, realm) + 1.3, z: s.z, color: FIRE, big: 2 });
     b.colliders.push({ x: 0, z: 0, r: 3.6 });
   } else if (style === 'marble' || style === 'desert') {
-    const stone = style === 'marble' ? '#e0d8c4' : '#b08060';
+    const stone = style === 'marble' ? '#d2c4a6' : '#b88a70';
     const fs = B.fountainSprite(3, stone, 0);
     at(b, fs, 0, basinZ(fs, -0.25), { frames: [0, 1, 2, 3].map((f) => B.fountainSprite(3, stone, f)), fps: 5 });
     b.colliders.push({ x: 0, z: 0, r: 3.3 });
   } else if (style === 'camp' || style === 'stone') {
-    brazier(b, 0, 0, style === 'camp' ? '#ffa040' : realm === 'deep' ? '#60d0ff' : '#ff9030', 2.2);
+    brazier(b, 0, 0, realm === 'deep' ? DEEP_FIRE : FIRE, 2.2);
   } else if (style === 'wood') {
     if (t.id === 'mirewisp') prop(b, 'mushroom_giant', 0, 0, 1.35);
     else prop(b, 'oak_big', 0, 0, 1.35);
     b.colliders.push({ x: 0, z: 0, r: 2 });
-  } else if (style === 'port') brazier(b, 0, 0, '#ffb060', 1.4);
+  } else if (style === 'port') brazier(b, 0, 0, FIRE, 1.4);
   // houses
   let tries = 0;
   while (placed.length < n && tries++ < 300) {
@@ -220,7 +226,7 @@ function buildTown(s, b) {
     if (spr.chimney && rng.chance(0.6)) {
       const cxw = s.x + x + spr.chimney[0] / PPU, czw = s.z + z + d / 2;
       const chH = -spr.chimney[1] / PPU;
-      b.updates.push((dt) => { if (Math.random() < dt * 3) particle({ x: cxw, y: H(cxw, czw, realm) + chH, z: czw, vx: 0.4 + Math.random() * 0.3, vy: 1.2, vz: -0.1, life: 2.2, size: 0.5, size1: 1.0, color: '#8a8480', color2: '#5a5654', alpha: 0.6, additive: false, gravity: 0.2, drag: 0.6 }); });
+      b.updates.push((dt) => { if (Math.random() < dt * 3) particle({ x: cxw, y: H(cxw, czw, realm) + chH, z: czw, vx: 0.4 + Math.random() * 0.3, vy: 1.2, vz: -0.1, life: 2.2, size: 0.5, size1: 1.0, color: '#8a7a86', color2: '#56485a', alpha: 0.6, additive: false, gravity: 0.2, drag: 0.6 }); });
     }
     b.colliders.push(style === 'camp' || mush ? { x, z, r: Math.max(w, d) * 0.5 } : { x, z, hw: w / 2 + 0.3, hd: d / 2 + 0.3, rot: 0 });
   }
@@ -239,16 +245,16 @@ function buildTown(s, b) {
     const r = t.r * 0.35;
     const x = Math.cos(a) * r, z = Math.sin(a) * r;
     if (style === 'wood' || style === 'port') {
-      const col = t.id === 'mirewisp' ? '#c0ff80' : '#ffc060';
+      const col = t.id === 'mirewisp' ? '#e0a0f0' : LAMP;
       const spr = B.lampSprite(col);
       at(b, spr, x, z, { shadow: ap(2), windows: false, glow: (ctx) => { const px = (s.x + x) * PPU - view.x0, py = (s.z + z) * PPU - view.y0 + spr.lightAt[1]; glowPx(ctx, px, py, col, ap(9), 0.2 + nightF * 0.4); } });
       b.lights.push({ x: s.x + x, y: H(s.x + x, s.z + z, realm) + 3.5, z: s.z + z, color: col, i: 8, d: 12 });
       b.colliders.push({ x, z, r: 0.25 });
-    } else brazier(b, x, z, style === 'stone' && realm === 'deep' ? '#60d0ff' : '#ff9030');
+    } else brazier(b, x, z, realm === 'deep' ? DEEP_FIRE : FIRE);
   }
   // faction banners
   if (t.faction) {
-    const col = { sunward: '#e8c050', ashen: '#b02a20', tidebound: '#2a7a8a', choir: '#5a3a8a' }[t.faction];
+    const col = { sunward: RAMPS.gold[3], ashen: RAMPS.red[3], tidebound: RAMPS.teal[3], choir: RAMPS.lavender[2] }[t.faction];
     for (let i = 0; i < 4; i++) {
       const a = (i / 4) * Math.PI * 2 + Math.PI / 4, r = t.r * 0.95;
       const x = Math.cos(a) * r, z = Math.sin(a) * r;
@@ -276,12 +282,12 @@ function buildTown(s, b) {
       const a = (i / steps) * Math.PI * 2;
       if (gates.some((ra) => Math.abs(Math.atan2(Math.sin(a - ra), Math.cos(a - ra))) < 0.2)) continue;
       const x = Math.cos(a) * R0, z = Math.sin(a) * R0;
-      at(b, B.wallBlock(S.wall[1], 4.2, snow), x, z + 0.6, { occlude: true });
+      at(b, B.wallBlock(S.wallStone || S.wall[1], 4.2, snow), x, z + 0.6, { occlude: true });
     }
     for (const ga of gates) for (const sd of [-1, 1]) {
       const a = ga + sd * 0.24;
       const x = Math.cos(a) * R0, z = Math.sin(a) * R0;
-      at(b, B.towerSprite(1.4, 6.5, S.wall[0], S.roof[0], 0, style === 'desert'), x, z + 1.4, { windows: true, occlude: true });
+      at(b, B.towerSprite(1.4, 6.5, S.wallStone || S.wall[0], S.roof[0], 0, style === 'desert'), x, z + 1.4, { windows: true, occlude: true });
       b.colliders.push({ x, z, hw: 1.5, hd: 1.5, rot: 0 });
     }
     // wall colliders as short chords
@@ -313,7 +319,7 @@ function buildPier(b, s, rng) {
   for (let i = 0; i < 2; i++) {
     const r = t.r + 12 + i * 10, side = i ? 1 : -1;
     const x = Math.cos(best) * r + Math.cos(best + Math.PI / 2) * side * 5, z = Math.sin(best) * r + Math.sin(best + Math.PI / 2) * side * 5;
-    at(b, B.boatSprite('#5a3a24', '#e8e0d0'), x, z + 1, { occlude: true });
+    at(b, B.boatSprite(RAMPS.wood[2], '#e2d4b4'), x, z + 1, { occlude: true });
   }
   void rng;
 }
@@ -322,7 +328,7 @@ function buildPier(b, s, rng) {
 function buildWaystone(s, b) {
   const active = G.char?.discovered.waystones.includes(s.id);
   const spr = B.waystoneSprite(active);
-  const rc = active ? '#90c8ff' : '#707078';
+  const rc = active ? RAMPS.aether[4] : RAMPS.stone[3];
   // rune circle on the ground (crisp dotted ring that slowly turns)
   b.objs.push({
     sortZ: -1e9, flat: true, draw(ctx) {}, emissive(ctx) {
@@ -335,7 +341,7 @@ function buildWaystone(s, b) {
     },
   });
   at(b, spr, 0, 0.4, { shadow: ap(8) });
-  const cr = B.crystalSprite(active ? '#a0d8ff' : '#808890', ap(12));
+  const cr = B.crystalSprite(active ? '#c87ef0' : RAMPS.stone[4], ap(12));
   const bob = () => Math.round(Math.sin(now() * 1.5) * ap(2.5));
   at(b, cr, 0, 0.41, { lift: 0, extraEmissive: () => {} }).draw = function (ctx) {
     const x = Math.round(s.x * PPU - view.x0), y = Math.round((s.z + 0.4) * PPU - view.y0) + spr.crystalAt[1] + bob();
@@ -343,8 +349,8 @@ function buildWaystone(s, b) {
     if (active) this._g = [x, y - ap(6)];
   };
   b.objs[b.objs.length - 1].emissive = function (ctx) { if (!active) return; const x = Math.round(s.x * PPU - view.x0), y = Math.round((s.z + 0.4) * PPU - view.y0) + spr.crystalAt[1] + bob(); ctx.drawImage(cr.pix.canvas(), x - cr.pix.ox, y - cr.pix.oy); };
-  b.objs[b.objs.length - 1].glow = function (ctx) { if (active && this._g) glowPx(ctx, this._g[0], this._g[1], '#90c8ff', ap(14), 0.5); };
-  if (active) b.lights.push({ x: s.x, y: H(s.x, s.z, s.realm) + 6, z: s.z, color: '#90c8ff', i: 10, d: 14, always: true });
+  b.objs[b.objs.length - 1].glow = function (ctx) { if (active && this._g) glowPx(ctx, this._g[0], this._g[1], RAMPS.aether[3], ap(14), 0.5); };
+  if (active) b.lights.push({ x: s.x, y: H(s.x, s.z, s.realm) + 6, z: s.z, color: '#c068f0', i: 10, d: 14, always: true });
   b.colliders.push({ x: 0, z: 0, r: 0.9 });
   G.interactables.push({ site: s.id, kind: 'waystone', x: s.x, z: s.z, r: 3.5, label: active ? `Travel from ${s.data.name}` : `Attune to ${s.data.name}`, data: s.data, realm: s.realm });
 }
@@ -354,7 +360,7 @@ function buildEntrance(s, b) {
   const d = s.data;
   const th = DUNGEON_THEMES[d.theme];
   const cleared = G.char?.cleared[d.id];
-  const glowC = cleared ? '#e0c080' : th.light;
+  const glowC = cleared ? RAMPS.gold[4] : th.light;
   const spr = B.entranceSprite(d.theme, d.biome, th.light);
   // sprite faces south; the doorway is at its front-centre
   const ob = at(b, spr, 0, 2.2, { occlude: true, extraEmissive: (ctx, [x, y]) => {
@@ -372,7 +378,7 @@ function buildEntrance(s, b) {
     }
   } });
   ob.glow = (ctx) => { const [x, y] = ob.pos(); glowPx(ctx, x, y + spr.door[1] - spr.door[3] / 2, glowC, ap(20), 0.4 + Math.sin(now() * 2) * 0.1); };
-  if (d.theme === 'bandit_hideout' || d.theme === 'pirate_cove') brazier(b, 4.5, 4, '#ff9040', 0.8);
+  if (d.theme === 'bandit_hideout' || d.theme === 'pirate_cove') brazier(b, 4.5, 4, FIRE, 0.8);
   if (d.theme === 'glass_cavern') for (let i = 0; i < 4; i++) prop(b, 'glass_shard', Math.cos(i * 1.7) * 6, 3 + Math.sin(i * 1.7) * 2, 1.2, i);
   if (d.theme === 'void_rift') for (let i = 0; i < 4; i++) prop(b, 'void_crystal', Math.cos(i * 1.7) * 6, 3 + Math.sin(i * 1.7) * 2, 1.2, i);
   if (d.theme === 'fungal_warren') for (let i = 0; i < 3; i++) prop(b, 'mushroom_giant', Math.cos(i * 2.1) * 7, 3 + Math.sin(i * 2.1) * 2, 1.0, i);
@@ -412,7 +418,7 @@ function floatingOrb(b, wx, wz, liftPx, color, visible = () => true) {
       const [x, y] = this.pos();
       ctx.fillStyle = rim; for (const [dy, w] of ORB) ctx.fillRect(x - w, y + dy, w * 2 + 1, 1);
       ctx.fillStyle = body; for (const [dy, w] of ORB) if (w > 0 && Math.abs(dy) < ORB.length / 2 - 1) ctx.fillRect(x - w + 1, y + dy, w * 2 - 1, 1);
-      ctx.fillStyle = '#ffffff'; ctx.fillRect(x - 1, y - 1, 2, 2); ctx.fillRect(x - 2, y - 2, 1, 1);
+      ctx.fillStyle = '#fff4dc'; ctx.fillRect(x - 1, y - 1, 2, 2); ctx.fillRect(x - 2, y - 2, 1, 1);
     },
     glow(ctx) { if (!visible()) return; const [x, y] = this.pos(); glowPx(ctx, x, y, color, ap(14), 0.55); },
   };
@@ -424,9 +430,9 @@ function buildShrine(s, b) {
   const used = G.char?.shrinesUsed.includes(sh.id);
   const spr = B.shrineSprite();
   at(b, spr, 0, 0.9);
-  const col = { s_sun: '#ffd060', s_moon: '#c0d0ff', s_glass: '#ff3050', s_storm: '#a0b0ff', s_aurora: '#60ffb0', s_void: '#a060ff', s_spore: '#c080ff' };
+  const col = { s_sun: RAMPS.ember[4], s_moon: RAMPS.frost[4], s_glass: RAMPS.rose[3], s_storm: RAMPS.blue[5], s_aurora: '#7ce0b8', s_void: RAMPS.aether[3], s_spore: RAMPS.aether[4] };
   const key = Object.keys(col).find((k) => sh.id.startsWith(k)) || null;
-  const gc = key ? col[key] : '#ffe0a0';
+  const gc = key ? col[key] : RAMPS.gold[5];
   const awake = () => shrineAwake(sh) && !G.char?.shrinesUsed.includes(sh.id);
   floatingOrb(b, s.x, s.z + 0.9, spr.orbAt[1], gc, awake);
   const y = H(s.x, s.z, s.realm);
@@ -443,8 +449,8 @@ function buildRelic(s, b) {
   const spr = B.relicSprite(taken);
   at(b, spr, 0, 0.7);
   if (!taken) {
-    floatingOrb(b, s.x, s.z + 0.7, spr.orbAt[1], '#ffe080', () => !G.char?.relicsTaken.includes(r.id));
-    b.lights.push({ x: s.x, y: H(s.x, s.z, 'surface') + 3, z: s.z, color: '#ffd080', i: 6, d: 9, always: true });
+    floatingOrb(b, s.x, s.z + 0.7, spr.orbAt[1], RAMPS.gold[4], () => !G.char?.relicsTaken.includes(r.id));
+    b.lights.push({ x: s.x, y: H(s.x, s.z, 'surface') + 3, z: s.z, color: RAMPS.gold[4], i: 6, d: 9, always: true });
     G.interactables.push({ site: s.id, kind: 'relic', x: s.x, z: s.z, r: 3, label: `Touch the ${r.name}`, data: r, realm: 'surface' });
   }
   b.colliders.push({ x: 0, z: 0, r: 1.0 });
@@ -466,18 +472,18 @@ function buildGate(s, b) {
           const u = k / N, r = u * R0;
           const a = arm * (Math.PI * 2 / 5) + u * 7 - t * 1.4;
           const x = Math.round(cx + Math.cos(a) * r), yy = Math.round(cy + Math.sin(a) * r);
-          ctx.fillStyle = u < 0.2 ? '#ffffff' : u < 0.5 ? '#c090ff' : '#7040c0';
+          ctx.fillStyle = u < 0.2 ? RAMPS.aether[6] : u < 0.35 ? RAMPS.aether[5] : u < 0.6 ? RAMPS.aether[4] : RAMPS.aether[2];
           ctx.globalAlpha = 1 - u * 0.8;
           const sz = u < 0.25 ? 3 : u < 0.5 ? 2 : 1;
           ctx.fillRect(x, yy, sz, sz);
         }
         ctx.globalAlpha = 1;
       },
-      glow(ctx) { glowPx(ctx, s.x * PPU - view.x0, s.z * PPU - view.y0, '#a060ff', ap(90), 0.5); glowPx(ctx, s.x * PPU - view.x0, s.z * PPU - view.y0, '#ffffff', ap(18), 0.6); },
+      glow(ctx) { glowPx(ctx, s.x * PPU - view.x0, s.z * PPU - view.y0, RAMPS.aether[3], ap(90), 0.5); glowPx(ctx, s.x * PPU - view.x0, s.z * PPU - view.y0, RAMPS.aether[5], ap(18), 0.6); },
     });
     for (let i = 0; i < 10; i++) prop(b, 'void_crystal', Math.cos(i * 0.628) * 18, Math.sin(i * 0.628) * 18, 1.35, i);
-    b.lights.push({ x: s.x, y: y + 4, z: s.z, color: '#a060ff', i: 40, d: 40, always: true });
-    b.updates.push((dt) => { if (Math.random() < dt * 30) particle({ x: s.x + (Math.random() - 0.5) * 20, y: y + 0.5, z: s.z + (Math.random() - 0.5) * 20, vy: 3 + Math.random() * 4, life: 2, size: 0.4, color: '#b080ff', wobble: 2 }); });
+    b.lights.push({ x: s.x, y: y + 4, z: s.z, color: RAMPS.aether[3], i: 40, d: 40, always: true });
+    b.updates.push((dt) => { if (Math.random() < dt * 30) particle({ x: s.x + (Math.random() - 0.5) * 20, y: y + 0.5, z: s.z + (Math.random() - 0.5) * 20, vy: 3 + Math.random() * 4, life: 2, size: 0.4, color: RAMPS.aether[4], wobble: 2 }); });
   } else {
     // a shaft of daylight falling from the surface onto a rune ring
     b.objs.push({
@@ -535,18 +541,18 @@ function buildLandmark(s, b) {
         const kind = rng.int(0, 4);
         if (kind === 0) {
           const w = 6 + rng.f() * 10, h = 3 + rng.f() * 8;
-          at(b, B.ruinWallSprite(Math.round(w), Math.round(h), rng.pick(['#e0d8c4', '#d4ccb4', '#c8c0a8']), i), x, z + 0.7, { occlude: true });
+          at(b, B.ruinWallSprite(Math.round(w), Math.round(h), rng.pick(['#d2c4a6', '#c8b89c', '#bcae96']), i), x, z + 0.7, { occlude: true });
           col({ x, z, hw: w / 2, hd: 0.9, rot: 0 });
         } else if (kind === 1) {
           const n = rng.int(3, 7);
           for (let k = 0; k < n; k++) {
             const cx = x + k * 3, cz = z;
-            at(b, B.columnSprite(9, '#e8e0cc', rng.chance(0.4) ? 0.35 + rng.f() * 0.35 : 0, i * 10 + k), cx, cz + 0.3, { shadow: ap(4) });
+            at(b, B.columnSprite(9, '#dccaa6', rng.chance(0.4) ? 0.35 + rng.f() * 0.35 : 0, i * 10 + k), cx, cz + 0.3, { shadow: ap(4) });
             col({ x: cx, z: cz, r: 1.0 });
           }
         } else if (kind === 2) {
           const dr = 4 + rng.f() * 4;
-          at(b, B.rockSprite(Math.round(dr * PPU), Math.round(dr * 0.6 * PPU), rng.chance(0.5) ? '#c8a050' : '#d8d0b8', i), x, z + dr * 0.5, { occlude: true });
+          at(b, B.rockSprite(Math.round(dr * PPU), Math.round(dr * 0.6 * PPU), rng.chance(0.5) ? '#b89060' : '#ccbc9e', i), x, z + dr * 0.5, { occlude: true });
           col({ x, z, r: dr * 0.85 });
         } else if (kind === 3) { prop(b, 'statue_frag', x, z, 1.35, i); col({ x, z, r: 2.4 }); }
         else for (let k = 0; k < 4; k++) prop(b, 'marble_block', x + rng.range(-3, 3), z + rng.range(-3, 3), 1 + rng.f() * 0.35, k);
@@ -554,26 +560,26 @@ function buildLandmark(s, b) {
       // palace: stepped platform, a ring of columns, the broken golden dome and the throne
       b.objs.push({ sortZ: -1e9, flat: true, draw(ctx) {
         const cx = Math.round(s.x * PPU - view.x0), cy = Math.round(s.z * PPU - view.y0);
-        const cols = ['#c8c0a8', '#d8d0b8', '#e8e0cc'];
+        const cols = ['#b4a690', '#c4b49c', '#d2c2a6'];
         for (let i = 0; i < 3; i++) {
           const r = ap(130) - i * ap(12);
           ctx.fillStyle = cols[i]; ctx.fillRect(cx - r, cy - r, r * 2, r * 2);
-          ctx.fillStyle = 'rgba(255,250,236,0.35)'; ctx.fillRect(cx - r, cy - r, r * 2, 1); ctx.fillRect(cx - r, cy - r, 1, r * 2);
-          ctx.fillStyle = 'rgba(0,0,0,0.12)'; ctx.fillRect(cx - r, cy + r - ap(2), r * 2, ap(2));
+          ctx.fillStyle = 'rgba(243,225,181,0.4)'; ctx.fillRect(cx - r, cy - r, r * 2, 1); ctx.fillRect(cx - r, cy - r, 1, r * 2);
+          ctx.fillStyle = 'rgba(42,24,56,0.22)'; ctx.fillRect(cx - r, cy + r - ap(2), r * 2, ap(2));
           // flagstone joints on each terrace
-          ctx.fillStyle = 'rgba(80,70,50,0.16)';
+          ctx.fillStyle = 'rgba(85,50,61,0.2)';
           for (let g = cx - r + ap(16); g < cx + r; g += ap(16)) ctx.fillRect(g, cy - r, 1, r * 2 - ap(2));
           for (let g = cy - r + ap(16); g < cy + r - ap(2); g += ap(16)) ctx.fillRect(cx - r, g, r * 2, 1);
         }
       } });
       for (let k = 0; k < 12; k++) {
         const a = (k / 12) * Math.PI * 2;
-        at(b, B.columnSprite(14.5, '#ece4d0', k % 3 === 0 ? 0.42 : 0, k), Math.cos(a) * 11, Math.sin(a) * 11 + 0.3, { shadow: ap(4) });
+        at(b, B.columnSprite(14.5, '#e2d2b2', k % 3 === 0 ? 0.42 : 0, k), Math.cos(a) * 11, Math.sin(a) * 11 + 0.3, { shadow: ap(4) });
         col({ x: Math.cos(a) * 11, z: Math.sin(a) * 11, r: 1.3 });
       }
       at(b, LM.palaceDome(), 0, -3, { occlude: true });
-      at(b, LM.throneSprite(), 0, 1.5, { glow: (ctx) => glowPx(ctx, s.x * PPU - view.x0, (s.z + 1.5) * PPU - view.y0 - ap(52), '#ffd060', ap(10), 0.5) });
-      b.lights.push({ x: s.x, y: H(s.x, s.z, 'surface') + 7, z: s.z, color: '#ffd060', i: 12, d: 18, always: true });
+      at(b, LM.throneSprite(), 0, 1.5, { glow: (ctx) => glowPx(ctx, s.x * PPU - view.x0, (s.z + 1.5) * PPU - view.y0 - ap(52), RAMPS.gold[4], ap(10), 0.5) });
+      b.lights.push({ x: s.x, y: H(s.x, s.z, 'surface') + 7, z: s.z, color: RAMPS.gold[4], i: 12, d: 18, always: true });
       break;
     }
     case 'fallen_statue': {
@@ -615,7 +621,7 @@ function buildLandmark(s, b) {
         const cx = Math.round(s.x * PPU - view.x0), cy = Math.round(s.z * PPU - view.y0);
         // a worn stone disc, filled row by row so its edge stays on the pixel grid
         const disc = (r, oy, col) => { ctx.fillStyle = col; for (let y = -r; y <= r; y++) { const w = Math.round(Math.sqrt(r * r - y * y)); ctx.fillRect(cx - w, cy + oy + y, w * 2 + 1, 1); } };
-        disc(ap(32), 0, '#5a5a52'); disc(ap(28), -1, '#6a6a62'); disc(ap(10), -1, '#62625a');
+        disc(ap(32), 0, RAMPS.stone[2]); disc(ap(28), -1, '#5e5a64'); disc(ap(10), -1, '#56525c');
       } });
       for (let i = 0; i < 9; i++) {
         const a = (i / 9) * Math.PI * 2;
@@ -651,19 +657,20 @@ function buildLandmark(s, b) {
       for (let i = 0; i < 10; i++) {
         const a = (i / 10) * Math.PI * 2;
         const x = Math.cos(a) * 14, z = Math.sin(a) * 9;
-        at(b, B.columnSprite(13, '#7a9a90', i % 3 === 1 ? 0.45 + rng.f() * 0.3 : 0, i), x, z + 0.3, { shadow: ap(4) });
+        at(b, B.columnSprite(13, '#6a8a86', i % 3 === 1 ? 0.45 + rng.f() * 0.3 : 0, i), x, z + 0.3, { shadow: ap(4) });
         if (i % 2 === 0) prop(b, 'coral', x + 1.6, z + 0.5, 1.1, i);
         col({ x, z, r: 1.2 });
       }
       const roof = B.memo('templeRoof', () => {
         const W = ap(240), RH = ap(70), FH = ap(8), p = B.mk(W, ap(80));
-        B.fillRoof(p, 0, 0, W, RH, '#6a8a88', 'tile', 3, 0, { ridge: 0.18, moss: 0.35 });
+        const TS = B.R5('#5e7e7a'), WD = RAMPS.teal;
+        B.fillRoof(p, 0, 0, W, RH, '#557572', 'tile', 3, 0, { ridge: 0.18, moss: 0.35 });
         // entablature under the eave: a lit band, a frieze with triglyphs, a shadow line
-        p.rect(0, RH, W, FH, '#6a8a88'); p.rect(0, RH, W, 1, '#8aaaa8'); p.rect(0, RH + FH - 1, W, 1, '#3a5a58');
-        for (let x = ap(4); x < W; x += ap(12)) { p.rect(x, RH + 2, ap(3), FH - 4, '#4a6a68'); p.rect(x, RH + 2, 1, FH - 4, '#5a7a78'); }
-        // weed and algae creeping over it
-        for (let k = 0; k < 200; k++) p.over(Math.floor(hash2(k, 1, 4) * W), Math.floor(hash2(k, 2, 4) * (RH + FH)), hash2(k, 3, 4) < 0.5 ? '#3a7a5a' : '#2a6a4a');
-        for (let k = 0; k < 24; k++) { const x = Math.floor(hash2(k, 5, 4) * W), L = ap(2) + Math.floor(hash2(k, 6, 4) * ap(6)); for (let j = 0; j < L; j++) p.over(x + (j % 3 === 2 ? 1 : 0), RH + FH - 2 + j, j % 2 ? '#2a6a4a' : '#3a7a5a'); }
+        p.rect(0, RH, W, FH, TS[2]); p.rect(0, RH, W, 1, TS[4]); p.rect(0, RH + FH - 1, W, 1, TS[0]);
+        for (let x = ap(4); x < W; x += ap(12)) { p.rect(x, RH + 2, ap(3), FH - 4, TS[1]); p.rect(x, RH + 2, 1, FH - 4, TS[2]); }
+        // weed and algae creeping over it, in small clumps
+        for (let k = 0; k < 60; k++) { const x = Math.floor(hash2(k, 1, 4) * W), y = Math.floor(hash2(k, 2, 4) * (RH + FH)); for (let j = 0; j < 2; j++) for (let i = 0; i < 3; i++) p.over(x + i, y + j, j ? WD[2] : WD[3]); }
+        for (let k = 0; k < 24; k++) { const x = Math.floor(hash2(k, 5, 4) * W), L = ap(2) + Math.floor(hash2(k, 6, 4) * ap(6)); for (let j = 0; j < L; j++) p.over(x + (j % 3 === 2 ? 1 : 0), RH + FH - 2 + j, j % 2 ? WD[2] : WD[3]); }
         return B.done(p, null);
       });
       at(b, roof, 2, 10, { lift: 7, occlude: true });
@@ -696,7 +703,7 @@ function buildLandmark(s, b) {
         const x = Math.cos(a) * r, z = Math.sin(a) * r;
         const k = rng.int(0, 4);
         if (k === 0) at(b, B.stuckWeapon(rng.pick(['sword', 'spear', 'greatsword']), i), x, z, { shadow: ap(2) });
-        else if (k === 1) at(b, B.bannerSprite(rng.pick(['#8a2020', '#c8a040', '#3a4a6a']), 3.4, 0), x, z, { shadow: ap(2) });
+        else if (k === 1) at(b, B.bannerSprite(rng.pick([RAMPS.red[3], RAMPS.gold[3], RAMPS.slate[2]]), 3.4, 0), x, z, { shadow: ap(2) });
         else if (k === 2) prop(b, 'rib_bones', x, z, 0.75, i);
         else if (k === 3) { const sh = shieldSprite({ base: rng.pick(['Round Shield', 'Kite Shield', 'Heater Shield']), color: '#6a6a70', trim: rng.pick(['#6a4a2a', '#8a7a5a']) }); at(b, { pix: sh.front, emis: null }, x, z); }
         else at(b, LM.skullSprite(), x, z);
