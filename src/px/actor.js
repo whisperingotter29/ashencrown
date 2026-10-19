@@ -296,7 +296,7 @@ export class Actor {
   // pixel dust puffs at the feet (lit, not additive); n scales the amount
   footDust(side, n = 1) {
     const e = this.ent;
-    if (e.flying || this.hidden || this.kind === 'wraith' || this.kind === 'eye' || this.kind === 'flyer' || this.kind === 'serpent' || this.kind === 'blob') return;
+    if (e.flying || this.hidden || this.spr?.hover || this.kind === 'wraith' || this.kind === 'eye' || this.kind === 'flyer' || this.kind === 'serpent' || this.kind === 'blob') return;
     const sx = e.pos.x * PPU - view.x0, sy = e.pos.z * PPU - view.y0;
     if (sx < -32 || sy < -32 || sx > view.W + 32 || sy > view.H + 32) return;
     if (e.swimming || e.wading) return;
@@ -971,11 +971,11 @@ export class Actor {
     else if (st.flying && V.fly) fr = V.fly[Math.floor(this.t * 6) % 2];
     else if (this.spr.flapFps) fr = V.run[Math.floor(this.t * this.spr.flapFps) % V.run.length];
     else if (this.moving) fr = V.run[Math.floor(this.ph * (V.run.length / 6)) % V.run.length];
-    else fr = V.idle[Math.abs(Math.floor(this.t * (this.kind === 'wraith' ? 5 : 1.8) + (st.seed || 0))) % V.idle.length];
+    else fr = V.idle[Math.abs(Math.floor(this.t * (this.spr.idleFps ?? (this.kind === 'wraith' ? 5 : 1.8)) + (st.seed || 0))) % V.idle.length];
     // hovering bodies bob; anticipation pulls back, the strike lunges; knock-back; death.
     // gx/gz move the body over the ground (its shadow follows), lift raises it off the ground
     let gx = 0, gz = 0, lift = 0, rot = 0;
-    const hover = this.kind === 'wraith' || this.kind === 'eye';
+    const hover = this.spr.hover ?? (this.kind === 'wraith' || this.kind === 'eye');
     if (hover) lift = Math.round((3 + Math.sin(this.t * 2.2 + (st.seed || 0)) * 1.5) * mk);
     if (kind && !e.dead) {
       const ph = phases(u, su);
@@ -993,11 +993,11 @@ export class Actor {
     if ((st.hitT || 0) > 0.35 && !e.dead) { const r = Math.round(((st.hitT || 0) - 0.35) * 3 * mk); gx -= fx * r; gz -= fz * r * 0.6; }
     if (e.dead) {
       const d = easeOut(clamp01(e.deathT * 3));
-      if (this.kind === 'quadruped' || this.kind === 'arachnid' || this.kind === 'dragon') {
+      if (this.spr.fall ?? (this.kind === 'quadruped' || this.kind === 'arachnid' || this.kind === 'dragon')) {
         if (e.deathT > 0.3) this._dead90 = true;
         else lift += Math.round(Math.sin(e.deathT / 0.3 * Math.PI) * 2 * mk);
       }
-      if (this.kind === 'wraith' || this.kind === 'eye' || this.kind === 'flyer') lift -= Math.round(d * 4 * mk);
+      if (hover || this.kind === 'flyer') lift -= Math.round(d * 4 * mk);
     }
     gx = Math.round(gx); gz = Math.round(gz);
     this.hoverPx = Math.max(0, lift);

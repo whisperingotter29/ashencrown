@@ -22,6 +22,8 @@ export function enemySpec(tpl, { scale = 1, ilvl = 5, rarity = 'common', seed = 
   const [c1, c2, c3] = tpl.colors;
   const s = tpl.size * scale;
   const body = tpl.body || 'humanoid';
+  // hand-built monsters (src/px/sprites/monsters, docs/BESTIARY.md)
+  if (tpl.design) return { type: 'creature', scale: s, creature: { body, design: tpl.design, s, c1, c2, c3 } };
   if (body === 'humanoid') {
     const h = hashS(tpl.name || '') + seed;
     const look = {
