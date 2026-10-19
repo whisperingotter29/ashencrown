@@ -125,8 +125,8 @@ export function buildHud() {
     bindTip(s, () => `<div class="tip-s"><b>${esc(CONSUMABLES[id].name)}</b><span>${esc(CONSUMABLES[id].desc)}</span><span class="dim">${G.char.consumables[id] || 0} left</span></div>`, { pos: 'top' });
     return s;
   };
-  H.potHp = potSlot('hp_potion', 'Z', '#d03030');
-  H.potMp = potSlot('mana_potion', 'V', '#3050d0');
+  H.potHp = potSlot('hp_potion', 'Z', '#b04a3e');
+  H.potMp = potSlot('mana_potion', 'V', '#3973af');
   pots.append(H.potHp, H.potMp);
   bar.append(wg, el('i', 'sep'), H.bar, el('i', 'sep'), H.sig, el('i', 'sep'), pots);
   mid.append(H.stam, bar);
@@ -163,7 +163,8 @@ function usableNote(id) {
 // Pixel-art orb: a 34px glass globe drawn pixel by pixel and scaled up with nearest-neighbour.
 // Liquid level sloshes, bubbles rise, the value is printed in the pixel font.
 const ORB_N = 34;
-const ORB_COLS = { hp: ['#ff7058', '#c8281e', '#5a0a08'], mp: ['#80b8ff', '#2a50c8', '#0a1648'] };
+// liquid ramps from the master palette: health on the red ramp, mana on blue leaning aether
+const ORB_COLS = { hp: ['#d9765a', '#b04a3e', '#4a1420'], mp: ['#8cb8de', '#3973af', '#1a0f47'] };
 function orb(kind) {
   const node = el('div', 'orb px ' + kind);
   const cv = document.createElement('canvas');
@@ -187,10 +188,10 @@ function drawOrb(o, frac, value, shield, t) {
     const dx = x + 0.5 - c, dy = y + 0.5 - c, r = Math.hypot(dx, dy);
     if (r > R + 3) continue;
     const ang = Math.atan2(dy, dx);
-    if (r > R + 2) sink.px(x, y, [18, 12, 10]);
+    if (r > R + 2) sink.px(x, y, [20, 15, 28]);
     else if (r > R) {
       const l = -Math.cos(ang + Math.PI * 0.25);
-      sink.px(x, y, shield ? (l > 0.3 ? [220, 240, 255] : [130, 180, 230]) : l > 0.45 ? [240, 208, 128] : l > -0.35 ? [176, 138, 58] : [106, 74, 26]);
+      sink.px(x, y, shield ? (l > 0.3 ? [230, 244, 252] : [106, 160, 208]) : l > 0.45 ? [246, 227, 154] : l > -0.35 ? [201, 154, 58] : [106, 62, 28]);
     } else {
       const wave = Math.round(Math.sin(x * 0.55 + t * 3.2) * (frac > 0.02 && frac < 0.98 ? 0.7 : 0));
       const sy = surf + wave;
@@ -200,16 +201,16 @@ function drawOrb(o, frac, value, shield, t) {
         sink.px(x, y, edge ? lo : depth < 0.35 && dx < 2 ? mid : depth > 0.7 ? lo : mid);
         if (!edge && dx < -3 && dx > -7 && depth > 0.1 && depth < 0.7) sink.px(x, y, mixc(mid, hi, 0.5));
       } else if (y === sy && frac > 0.01) sink.px(x, y, hi);
-      else sink.px(x, y, r > R - 1.5 ? [36, 22, 26] : [20, 12, 16]);
+      else sink.px(x, y, r > R - 1.5 ? [42, 24, 56] : [26, 16, 34]);
     }
   }
   for (let b = 0; b < 3; b++) {
     const bx = Math.round(c - 6 + b * 6 + Math.sin(t * 2 + b) * 1.2), by = Math.round(c + R - 2 - ((t * 6 + b * 9) % (R * 2)));
     if (by > surf + 1) sink.px(bx, by, hi);
   }
-  for (const [gx, gy] of [[10, 7], [9, 8], [8, 9], [8, 10], [7, 11], [12, 6], [13, 6]]) sink.px(gx, gy, [255, 255, 255]);
+  for (const [gx, gy] of [[10, 7], [9, 8], [8, 9], [8, 10], [7, 11], [12, 6], [13, 6]]) sink.px(gx, gy, [255, 244, 220]);
   const txt = String(value);
-  drawText(sink, Math.round(c - textWidth(txt, TINY) / 2), Math.round(c - 2), txt, [255, 255, 255], TINY, [20, 10, 12]);
+  drawText(sink, Math.round(c - textWidth(txt, TINY) / 2), Math.round(c - 2), txt, [255, 244, 220], TINY, [20, 15, 28]);
   o.ctx.putImageData(o.img, 0, 0);
 }
 
@@ -264,7 +265,7 @@ export function refreshSkillbar() {
     s._max = a?.def.cd || 1;
   });
   const cls = CLASS_BY_ID[c.cls];
-  setSrc(H.sig.ic, skillIcon({ id: 'sig_' + cls.id, type: 'sig', color: '#a8641c' }));
+  setSrc(H.sig.ic, skillIcon({ id: 'sig_' + cls.id, type: 'sig', color: '#9a6424' }));
   H.sig.style.setProperty('--rc', cls.resource.color);
   tog(H.sig, 'discrete', !!cls.resource.discrete);
   if (cls.resource.discrete && H.sig.pips.children.length !== cls.resource.max) { H.sig.pips.innerHTML = ''; for (let i = 0; i < cls.resource.max; i++) H.sig.pips.appendChild(el('span', '')); }
@@ -410,7 +411,8 @@ export function updateHud(dt) {
 }
 
 // ------------------------------------------------------------------ kill streak
-const HEAT = [[3, '#fff4d0'], [5, '#ffe070'], [10, '#ffb030'], [20, '#ff6a20'], [35, '#ff2a3a'], [60, '#ff40c0'], [100, '#c060ff']];
+// kill-streak heat climbs the ember ramp, then crosses into aether
+const HEAT = [[3, '#fff4dc'], [5, '#f6e39a'], [10, '#f8b848'], [20, '#ec7a2a'], [35, '#e46a72'], [60, '#e48fb0'], [100, '#c860f0']];
 function heat(n) { let c = HEAT[0][1]; for (const [m, col] of HEAT) if (n >= m) c = col; return c; }
 function updateStreak() {
   const s = G.streak;
@@ -440,7 +442,7 @@ bus.on('streakShout', ({ n, name } = {}) => {
   if (!built || !name) return;
   const col = heat(n || 10);
   H.shout.innerHTML = '';
-  H.shout.appendChild(pxTitle(name, uiUnit() >= 3 ? 2 : 3, { bands: ['#ffffff', col, col, '#5a1008'] }));
+  H.shout.appendChild(pxTitle(name, uiUnit() >= 3 ? 2 : 3, { bands: ['#fff4dc', col, col, '#4a1420'] }));
   H.shout.appendChild(el('div', 'shout-n', `${n} kills`));
   H.shout.classList.remove('hidden', 'out');
   pop(H.shout, 'in');
@@ -469,7 +471,7 @@ function drawMinimap() {
   g.imageSmoothingEnabled = false;
   const W = cv.width;
   const p = G.player;
-  g.fillStyle = '#060404';
+  g.fillStyle = '#090410';
   g.fillRect(0, 0, W, W);
   const scale = 0.6;
   const fx = -Math.sin(cam.yaw), fz = -Math.cos(cam.yaw);
@@ -484,11 +486,11 @@ function drawMinimap() {
       if (d.grid[j * d.w + i] !== 0) continue;
       const x = (d.ox + i * d.tile - p.pos.x) * s, z = (d.oz + j * d.tile - p.pos.z) * s;
       if (Math.abs(x) > W || Math.abs(z) > W) continue;
-      g.fillStyle = '#5a4a3a';
+      g.fillStyle = '#4a3266';
       g.fillRect(x, z, d.tile * s + 0.5, d.tile * s + 0.5);
     }
-    if (d.exit) dot(g, (d.exit.x - p.pos.x) * s, (d.exit.z - p.pos.z) * s, '#80c0ff', 4);
-    for (const e of G.entities) if (!e.dead && e.team === 'enemy') dot(g, (e.pos.x - p.pos.x) * s, (e.pos.z - p.pos.z) * s, e.boss ? '#ff4020' : '#d03030', e.boss ? 5 : 2.5);
+    if (d.exit) dot(g, (d.exit.x - p.pos.x) * s, (d.exit.z - p.pos.z) * s, '#a8d0ec', 4);
+    for (const e of G.entities) if (!e.dead && e.team === 'enemy') dot(g, (e.pos.x - p.pos.x) * s, (e.pos.z - p.pos.z) * s, e.boss ? '#ec7a2a' : '#d9765a', e.boss ? 5 : 2.5);
   } else {
     const m = MAP[G.realm];
     if (m?.ready) {
@@ -498,7 +500,7 @@ function drawMinimap() {
       g.drawImage(m.canvas, px - sz, pz - sz, sz * 2, sz * 2, -W, -W, W * 2, W * 2);
       const fog = fogMask(G.realm);
       const cell = (m.half * 2) / FOG_N;
-      g.fillStyle = 'rgba(6,4,4,0.92)';
+      g.fillStyle = 'rgba(9,4,16,0.92)';
       const r = Math.ceil(W / scale / cell) + 1;
       const ci = Math.floor((p.pos.x + m.half) / cell), cj = Math.floor((p.pos.z + m.half) / cell);
       for (let j = cj - r; j <= cj + r; j++) for (let i = ci - r; i <= ci + r; i++) {
@@ -508,17 +510,17 @@ function drawMinimap() {
       }
     }
     const towns = G.realm === 'deep' ? DEEP_TOWNS : TOWNS;
-    for (const t of towns) mark(g, t.x, t.z, p, scale, '#ffe0a0', 5, 'town');
-    for (const d of DUNGEONS) if ((d.realm || 'surface') === G.realm) mark(g, d.x, d.z, p, scale, G.char.cleared[d.id] ? '#8a8070' : d.shard ? '#ff70ff' : '#ff6040', 4, 'dungeon');
-    for (const w of WAYSTONES) if (w.realm === G.realm) mark(g, w.x, w.z, p, scale, G.char.discovered.waystones.includes(w.id) ? '#80c0ff' : '#3a5a78', 3.5, 'way');
-    for (const s of SHRINES) if (s.realm === G.realm) mark(g, s.x, s.z, p, scale, G.char.shrinesUsed.includes(s.id) ? '#6a6a60' : '#60ffc0', 3, 'shrine');
+    for (const t of towns) mark(g, t.x, t.z, p, scale, '#f3e1b5', 5, 'town');
+    for (const d of DUNGEONS) if ((d.realm || 'surface') === G.realm) mark(g, d.x, d.z, p, scale, G.char.cleared[d.id] ? '#827d82' : d.shard ? '#c860f0' : '#d9765a', 4, 'dungeon');
+    for (const w of WAYSTONES) if (w.realm === G.realm) mark(g, w.x, w.z, p, scale, G.char.discovered.waystones.includes(w.id) ? '#a8d0ec' : '#3e4a5a', 3.5, 'way');
+    for (const s of SHRINES) if (s.realm === G.realm) mark(g, s.x, s.z, p, scale, G.char.shrinesUsed.includes(s.id) ? '#66626a' : '#7cbca8', 3, 'shrine');
     for (const e of G.entities) {
       if (e.dead || e.removed) continue;
       const x = (e.pos.x - p.pos.x) * scale, z = (e.pos.z - p.pos.z) * scale;
       if (Math.abs(x) > W / 2 || Math.abs(z) > W / 2) continue;
-      if (e.team === 'enemy') dot(g, x, z, e.boss ? '#ff4020' : '#d03030', e.boss ? 5 : 2.2);
-      else if (e.isNpc) dot(g, x, z, e.hunting ? '#ff3020' : '#e8d080', 2);
-      else if (e.team === 'player') dot(g, x, z, '#80ff90', 2);
+      if (e.team === 'enemy') dot(g, x, z, e.boss ? '#ec7a2a' : '#d9765a', e.boss ? 5 : 2.2);
+      else if (e.isNpc) dot(g, x, z, e.hunting ? '#e46a72' : '#e8c35a', 2);
+      else if (e.team === 'player') dot(g, x, z, '#b4cc84', 2);
     }
     for (const q of trackedObjectiveMarkers()) if (q.realm === G.realm) questMark(g, q, p, scale, W);
   }
@@ -526,20 +528,20 @@ function drawMinimap() {
   {
     const c = Math.floor(W / 2), f = G.player.facing;
     const nx = Math.round(Math.sin(f) * 1.4), nz = Math.round(Math.cos(f) * 1.4);
-    g.fillStyle = '#000'; g.fillRect(c - 2, c - 2, 5, 5); g.fillRect(c + nx * 2 - 1, c + nz * 2 - 1, 3, 3);
-    g.fillStyle = '#fff4d0'; g.fillRect(c - 1, c - 1, 3, 3); g.fillRect(c + nx * 2, c + nz * 2, 1, 1);
+    g.fillStyle = '#140f1c'; g.fillRect(c - 2, c - 2, 5, 5); g.fillRect(c + nx * 2 - 1, c + nz * 2 - 1, 3, 3);
+    g.fillStyle = '#fff4dc'; g.fillRect(c - 1, c - 1, 3, 3); g.fillRect(c + nx * 2, c + nz * 2, 1, 1);
   }
   const na = rot - Math.PI / 2;
   g.font = "8px 'Silkscreen'"; g.textAlign = 'center'; g.textBaseline = 'middle';
-  g.fillStyle = '#000'; g.fillText('N', Math.round(W / 2 + Math.cos(na) * (W / 2 - 6)) + 1, Math.round(W / 2 + Math.sin(na) * (W / 2 - 6)) + 1);
-  g.fillStyle = '#e8c47a'; g.fillText('N', Math.round(W / 2 + Math.cos(na) * (W / 2 - 6)), Math.round(W / 2 + Math.sin(na) * (W / 2 - 6)));
+  g.fillStyle = '#140f1c'; g.fillText('N', Math.round(W / 2 + Math.cos(na) * (W / 2 - 6)) + 1, Math.round(W / 2 + Math.sin(na) * (W / 2 - 6)) + 1);
+  g.fillStyle = '#e8c35a'; g.fillText('N', Math.round(W / 2 + Math.cos(na) * (W / 2 - 6)), Math.round(W / 2 + Math.sin(na) * (W / 2 - 6)));
 }
 
-function dot(g, x, y, col, r) { const s = Math.max(1, Math.round(r * 0.8)); g.fillStyle = '#000'; g.fillRect(Math.round(x) - s, Math.round(y) - s, s * 2 + 1, s * 2 + 1); g.fillStyle = col; g.fillRect(Math.round(x) - s + 1, Math.round(y) - s + 1, s * 2 - 1, s * 2 - 1); }
+function dot(g, x, y, col, r) { const s = Math.max(1, Math.round(r * 0.8)); g.fillStyle = '#140f1c'; g.fillRect(Math.round(x) - s, Math.round(y) - s, s * 2 + 1, s * 2 + 1); g.fillStyle = col; g.fillRect(Math.round(x) - s + 1, Math.round(y) - s + 1, s * 2 - 1, s * 2 - 1); }
 const GLYPHS = { town: [3, 3, 3], dungeon: [1, 3, 5], way: [1, 3, 1], shrine: [1, 3, 1], quest: [1, 5, 3, 5, 1] };
 function glyph(g, X, Z, rows, col) {
   const h = rows.length, x0 = Math.round(X), y0 = Math.round(Z) - Math.floor(h / 2);
-  g.fillStyle = '#000';
+  g.fillStyle = '#140f1c';
   rows.forEach((w, j) => g.fillRect(x0 - (w >> 1) - 1, y0 + j - 1, w + 2, 3));
   g.fillStyle = col;
   rows.forEach((w, j) => g.fillRect(x0 - (w >> 1), y0 + j, w, 1));
@@ -554,5 +556,5 @@ function questMark(g, q, p, scale, W) {
   const lim = W / 2 - 5;
   const m = Math.max(Math.abs(X), Math.abs(Z));
   if (m > lim) { X *= lim / m; Z *= lim / m; }
-  glyph(g, X, Z, GLYPHS.quest, q.tracked ? '#ffd040' : '#c0a060');
+  glyph(g, X, Z, GLYPHS.quest, q.tracked ? '#e8c35a' : '#c99a3a');
 }

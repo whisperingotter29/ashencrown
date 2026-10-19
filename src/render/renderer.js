@@ -5,6 +5,7 @@
 import { scene } from '../px/scene.js';
 import { view } from '../px/view.js';
 import { PPU, ART, C } from '../px/pix.js';
+import { pal } from './elements.js';
 import { drawMagic } from './magic.js';
 import { initPost, presentPost } from './post.js';
 import { drawCastShadows } from '../px/shadow.js';
@@ -278,7 +279,7 @@ export function renderFrame(time) {
       ctx.globalAlpha = 1;
     }
     ctx.restore();
-    stepLight(ctx, W, H);
+    stepLight(ctx, W, H, GLOW_LUT);
     main.globalCompositeOperation = 'screen';
     main.globalAlpha = 0.95;
     main.imageSmoothingEnabled = false;
@@ -298,14 +299,17 @@ export function renderFrame(time) {
 
 // Light map quantised to hard steps with a 4x4 ordered dither: pools of light get crisp pixel
 // rings instead of smooth gradients, and blended coloured lights stop fringing into rainbows.
-const LIGHT_STEP = 18;
-const STEP_LUT = (() => {
+// Glows use coarser steps, so a halo reads as two or three flat rings around its source.
+const LIGHT_STEP = 18, GLOW_STEP = 30;
+const stepLut = (STEP) => {
   const B = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
   const t = new Uint8Array(16 * 256);
-  for (let k = 0; k < 16; k++) for (let v = 0; v < 256; v++) t[k * 256 + v] = Math.min(255, Math.floor(v / LIGHT_STEP + (B[k] + 0.5) / 16) * LIGHT_STEP);
+  for (let k = 0; k < 16; k++) for (let v = 0; v < 256; v++) t[k * 256 + v] = Math.min(255, Math.floor(v / STEP + (B[k] + 0.5) / 16) * STEP);
   return t;
-})();
-function stepLight(L, W, H) {
+};
+const STEP_LUT = stepLut(LIGHT_STEP), GLOW_LUT = stepLut(GLOW_STEP);
+function stepLight(L, W, H, STEP_LUT_ = STEP_LUT) {
+  const STEP_LUT = STEP_LUT_;
   const img = L.getImageData(0, 0, W, H), d = img.data;
   for (let y = 0; y < H; y++) {
     const row = (y & 3) * 4;
@@ -317,14 +321,17 @@ function stepLight(L, W, H) {
   L.putImageData(img, 0, 0);
 }
 
-// fog, vignette, damage edge, white flash, letterbox, fade
+// fog, vignette, damage edge, white flash, letterbox, fade. Fog is a light veil in the biome's own
+// tone nudged toward dusky mauve (docs/ART_STYLE.md: no grey or green wash); the vignette, fades and
+// letterbox use violet-black ink instead of pure black.
 let vigCv = null, vigKey = '';
+const FOG_TINT = [92, 66, 92];
 function overlays(ctx) {
   const w = R.canvas.width, h = R.canvas.height;
   ctx.globalCompositeOperation = 'source-over';
   if (R.fog.amount > 0.01) {
-    const f = R.fog.color;
-    ctx.fillStyle = `rgba(${f[0]},${f[1]},${f[2]},${Math.min(0.75, R.fog.amount)})`;
+    const f = R.fog.color, k = 0.3;
+    ctx.fillStyle = `rgba(${Math.round(f[0] + (FOG_TINT[0] - f[0]) * k)},${Math.round(f[1] + (FOG_TINT[1] - f[1]) * k)},${Math.round(f[2] + (FOG_TINT[2] - f[2]) * k)},${Math.min(0.3, R.fog.amount * 0.55)})`;
     ctx.fillRect(0, 0, w, h);
   }
   // vignette (cached)
@@ -335,7 +342,7 @@ function overlays(ctx) {
     vigCv.width = 256; vigCv.height = 256;
     const g = vigCv.getContext('2d');
     const grd = g.createRadialGradient(128, 128, 60, 128, 128, 182);
-    grd.addColorStop(0, 'rgba(0,0,0,0)'); grd.addColorStop(1, 'rgba(0,0,0,1)');
+    grd.addColorStop(0, 'rgba(20,10,28,0)'); grd.addColorStop(1, 'rgba(20,10,28,1)');
     g.fillStyle = grd; g.fillRect(0, 0, 256, 256);
   }
   ctx.globalAlpha = R.vignette;
@@ -344,30 +351,32 @@ function overlays(ctx) {
     ctx.globalAlpha = Math.min(1, R.damage);
     ctx.globalCompositeOperation = 'source-over';
     const g = ctx.createRadialGradient(w / 2, h / 2, Math.min(w, h) * 0.3, w / 2, h / 2, Math.max(w, h) * 0.7);
-    g.addColorStop(0, 'rgba(160,0,0,0)'); g.addColorStop(1, 'rgba(170,10,10,0.85)');
+    g.addColorStop(0, 'rgba(138,52,52,0)'); g.addColorStop(1, 'rgba(150,34,40,0.85)');
     ctx.fillStyle = g; ctx.fillRect(0, 0, w, h);
   }
   ctx.globalAlpha = 1;
-  if (R.white > 0.01) { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,255,255,${Math.min(0.9, R.white)})`; ctx.fillRect(0, 0, w, h); ctx.globalCompositeOperation = 'source-over'; }
-  if (R.letterbox > 0.001) { const lb = R.letterbox * h; ctx.fillStyle = '#000'; ctx.fillRect(0, 0, w, lb); ctx.fillRect(0, h - lb, w, lb); }
-  if (R.fade > 0.001) { ctx.fillStyle = `rgba(0,0,0,${Math.min(1, R.fade)})`; ctx.fillRect(0, 0, w, h); }
+  if (R.white > 0.01) { ctx.globalCompositeOperation = 'lighter'; ctx.fillStyle = `rgba(255,244,220,${Math.min(0.9, R.white)})`; ctx.fillRect(0, 0, w, h); ctx.globalCompositeOperation = 'source-over'; }
+  if (R.letterbox > 0.001) { const lb = R.letterbox * h; ctx.fillStyle = '#090410'; ctx.fillRect(0, 0, w, lb); ctx.fillRect(0, h - lb, w, lb); }
+  if (R.fade > 0.001) { ctx.fillStyle = `rgba(9,4,16,${Math.min(1, R.fade)})`; ctx.fillRect(0, 0, w, h); }
 }
 
-// Draw a soft glow sprite at a world point on the full-res layer (used by vfx / sprites)
+// Draw a soft glow sprite at a world point on the full-res layer (used by vfx / sprites). Glow
+// colours snap to the master palette.
+const glowTint = (color) => tintedLight(pal(typeof color === 'string' ? color : `rgb(${color[0]},${color[1]},${color[2]})`));
 export function glowAt(ctx, x, z, h, color, radiusUnits, a = 1) {
   const s = view.scale;
   const r = radiusUnits * PPU * s;
   const px = (x * PPU - view.x0) * s, py = (z * PPU - view.y0 - h * PPU) * s;
   if (px < -r || py < -r || px > view.W * s + r || py > view.H * s + r) return;
   ctx.globalAlpha = Math.max(0, Math.min(1, a));
-  ctx.drawImage(tintedLight(typeof color === 'string' ? color : `rgb(${color[0]},${color[1]},${color[2]})`), px - r, py - r, r * 2, r * 2);
+  ctx.drawImage(glowTint(color), px - r, py - r, r * 2, r * 2);
   ctx.globalAlpha = 1;
 }
 // same, but at a low-res pixel position (actors know their pixel anchors)
 export function glowPx(ctx, px, py, color, rPx, a = 1) {
   const s = view.scale, r = rPx * s;
   ctx.globalAlpha = Math.max(0, Math.min(1, a));
-  ctx.drawImage(tintedLight(typeof color === 'string' ? color : `rgb(${color[0]},${color[1]},${color[2]})`), px * s - r, py * s - r, r * 2, r * 2);
+  ctx.drawImage(glowTint(color), px * s - r, py * s - r, r * 2, r * 2);
   ctx.globalAlpha = 1;
 }
 export { tintedLight };

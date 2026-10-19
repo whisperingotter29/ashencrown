@@ -1,8 +1,14 @@
-// Canvas-painted item and skill icons (cached as data URLs).
+// Canvas-painted item and skill icons (cached as data URLs). Colours sit on the master palette
+// (src/px/palette.js): ink outlines and strokes, wood / gold ramps, element and gem colours from the
+// ramps, and every finished icon pixel snapped to its nearest palette swatch.
 import { RARITY, MATERIALS } from '../data/items.js';
 import { TOMES } from '../data/tomes.js';
 
-import { Pix } from '../px/pix.js';
+import { Pix, C, light, dark } from '../px/pix.js';
+import { RAMPS, INK, CREAM, CREAM_HI } from '../px/palette.js';
+import { pal, rarityPal } from '../render/elements.js';
+
+const WOOD = RAMPS.wood[3], WOOD_D = RAMPS.wood[2], GOLD = RAMPS.gold[3], BRONZE = RAMPS.gold[2];
 
 const cache = new Map();
 const S = 64;
@@ -23,11 +29,10 @@ function pixelize(cv, n = ICON_N) {
     }
     const cov = a / (sub * sub);
     if (cov < 0.42) continue;
-    const q = (v) => Math.min(255, Math.round(v / a / 20) * 20);
-    p.set(x, y, [q(r), q(g), q(b), 255]);
+    p.set(x, y, [...C(pal([Math.round(r / a), Math.round(g / a), Math.round(b / a)])).slice(0, 3), 255]);
   }
   p.rim(1.15, 0.82);
-  p.outline([14, 9, 8, 255]);
+  p.outline(C(INK));
   return p.canvas();
 }
 
@@ -35,42 +40,44 @@ function c2d() { const c = document.createElement('canvas'); c.width = c.height 
 
 function metal(item) {
   const m = MATERIALS.find((x) => x.id === item.material);
-  return m ? m.color : '#b0b0b8';
+  return m ? m.color : RAMPS.steel[5];
 }
 
-function poly(g, pts, fill, stroke = '#000') {
+function poly(g, pts, fill, stroke = INK) {
   g.beginPath(); g.moveTo(pts[0], pts[1]);
   for (let i = 2; i < pts.length; i += 2) g.lineTo(pts[i], pts[i + 1]);
   g.closePath(); g.fillStyle = fill; g.fill(); g.lineWidth = 2; g.strokeStyle = stroke; g.stroke();
 }
 
 const DRAW = {
-  sword(g, col, acc) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 4); poly(g, [-4, -26, 4, -26, 4, 10, -4, 10], col); poly(g, [-4, -26, 0, -32, 4, -26], col); poly(g, [-12, 10, 12, 10, 12, 14, -12, 14], acc); poly(g, [-3, 14, 3, 14, 3, 26, -3, 26], '#5a3a20'); g.restore(); },
-  greatsword(g, col, acc) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 4); poly(g, [-6, -30, 6, -30, 6, 12, -6, 12], col); poly(g, [-6, -30, 0, -36, 6, -30], col); poly(g, [-15, 12, 15, 12, 15, 17, -15, 17], acc); poly(g, [-3, 17, 3, 17, 3, 30, -3, 30], '#5a3a20'); g.restore(); },
-  dagger(g, col, acc) { g.save(); g.translate(32, 34); g.rotate(-Math.PI / 4); poly(g, [-4, -18, 4, -18, 3, 4, -3, 4], col); poly(g, [-4, -18, 0, -24, 4, -18], col); poly(g, [-9, 4, 9, 4, 9, 8, -9, 8], acc); poly(g, [-2.5, 8, 2.5, 8, 2.5, 18, -2.5, 18], '#5a3a20'); g.restore(); },
-  mace(g, col, acc) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 4); poly(g, [-2.5, -8, 2.5, -8, 2.5, 28, -2.5, 28], '#5a3a20'); g.beginPath(); g.arc(0, -16, 10, 0, Math.PI * 2); g.fillStyle = col; g.fill(); g.stroke(); for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; poly(g, [Math.cos(a) * 9, -16 + Math.sin(a) * 9, Math.cos(a + 0.3) * 15, -16 + Math.sin(a + 0.3) * 15, Math.cos(a + 0.5) * 9, -16 + Math.sin(a + 0.5) * 9], acc); } g.restore(); },
-  spear(g, col, acc) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 4); poly(g, [-2, -16, 2, -16, 2, 32, -2, 32], '#6a4a2a'); poly(g, [0, -32, 6, -18, 0, -12, -6, -18], col); poly(g, [-6, -14, 6, -14, 6, -11, -6, -11], acc); g.restore(); },
-  halberd(g, col, acc) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 4); poly(g, [-2, -24, 2, -24, 2, 32, -2, 32], '#6a4a2a'); poly(g, [0, -32, 4, -24, -4, -24], col); poly(g, [2, -22, 16, -26, 18, -12, 2, -12], col); poly(g, [-2, -20, -10, -17, -2, -14], acc); g.restore(); },
-  bow(g, col) { g.beginPath(); g.lineWidth = 5; g.strokeStyle = '#000'; g.arc(18, 32, 26, -1.1, 1.1); g.stroke(); g.lineWidth = 3; g.strokeStyle = col; g.arc(18, 32, 26, -1.1, 1.1); g.stroke(); g.beginPath(); g.lineWidth = 1; g.strokeStyle = '#e8e0d0'; g.moveTo(18 + Math.cos(-1.1) * 26, 32 + Math.sin(-1.1) * 26); g.lineTo(18 + Math.cos(1.1) * 26, 32 + Math.sin(1.1) * 26); g.stroke(); poly(g, [14, 31, 54, 31, 54, 33, 14, 33], '#c8b890', '#000'); poly(g, [54, 28, 60, 32, 54, 36], '#a8b0b8'); },
-  crossbow(g, col, acc) { poly(g, [28, 14, 36, 14, 36, 56, 28, 56], '#6a4a2a'); g.beginPath(); g.lineWidth = 5; g.strokeStyle = '#000'; g.arc(32, 34, 22, -2.6, -0.54); g.stroke(); g.lineWidth = 3; g.strokeStyle = col; g.arc(32, 34, 22, -2.6, -0.54); g.stroke(); poly(g, [26, 50, 38, 50, 38, 58, 26, 58], acc); },
-  staff(g, col, acc, glow) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 5); poly(g, [-2.5, -18, 2.5, -18, 2.5, 30, -2.5, 30], '#6a4a2a'); g.beginPath(); g.arc(0, -22, 8, 0, Math.PI * 2); const gr = g.createRadialGradient(0, -22, 1, 0, -22, 9); gr.addColorStop(0, '#fff'); gr.addColorStop(1, glow || '#80b0ff'); g.fillStyle = gr; g.fill(); g.lineWidth = 2; g.strokeStyle = acc; g.stroke(); g.restore(); },
-  wand(g, col, acc, glow) { g.save(); g.translate(32, 34); g.rotate(-Math.PI / 4); poly(g, [-2, -10, 2, -10, 2.5, 22, -2.5, 22], '#5a3a20'); poly(g, [0, -22, 5, -14, 0, -8, -5, -14], glow || '#c0a0ff'); g.restore(); },
+  sword(g, col, acc) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 4); poly(g, [-4, -26, 4, -26, 4, 10, -4, 10], col); poly(g, [-4, -26, 0, -32, 4, -26], col); poly(g, [-12, 10, 12, 10, 12, 14, -12, 14], acc); poly(g, [-3, 14, 3, 14, 3, 26, -3, 26], WOOD); g.restore(); },
+  greatsword(g, col, acc) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 4); poly(g, [-6, -30, 6, -30, 6, 12, -6, 12], col); poly(g, [-6, -30, 0, -36, 6, -30], col); poly(g, [-15, 12, 15, 12, 15, 17, -15, 17], acc); poly(g, [-3, 17, 3, 17, 3, 30, -3, 30], WOOD); g.restore(); },
+  dagger(g, col, acc) { g.save(); g.translate(32, 34); g.rotate(-Math.PI / 4); poly(g, [-4, -18, 4, -18, 3, 4, -3, 4], col); poly(g, [-4, -18, 0, -24, 4, -18], col); poly(g, [-9, 4, 9, 4, 9, 8, -9, 8], acc); poly(g, [-2.5, 8, 2.5, 8, 2.5, 18, -2.5, 18], WOOD); g.restore(); },
+  mace(g, col, acc) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 4); poly(g, [-2.5, -8, 2.5, -8, 2.5, 28, -2.5, 28], WOOD); g.beginPath(); g.arc(0, -16, 10, 0, Math.PI * 2); g.fillStyle = col; g.fill(); g.stroke(); for (let i = 0; i < 6; i++) { const a = i / 6 * Math.PI * 2; poly(g, [Math.cos(a) * 9, -16 + Math.sin(a) * 9, Math.cos(a + 0.3) * 15, -16 + Math.sin(a + 0.3) * 15, Math.cos(a + 0.5) * 9, -16 + Math.sin(a + 0.5) * 9], acc); } g.restore(); },
+  spear(g, col, acc) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 4); poly(g, [-2, -16, 2, -16, 2, 32, -2, 32], WOOD); poly(g, [0, -32, 6, -18, 0, -12, -6, -18], col); poly(g, [-6, -14, 6, -14, 6, -11, -6, -11], acc); g.restore(); },
+  halberd(g, col, acc) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 4); poly(g, [-2, -24, 2, -24, 2, 32, -2, 32], WOOD); poly(g, [0, -32, 4, -24, -4, -24], col); poly(g, [2, -22, 16, -26, 18, -12, 2, -12], col); poly(g, [-2, -20, -10, -17, -2, -14], acc); g.restore(); },
+  bow(g, col) { g.beginPath(); g.lineWidth = 5; g.strokeStyle = INK; g.arc(18, 32, 26, -1.1, 1.1); g.stroke(); g.lineWidth = 3; g.strokeStyle = col; g.arc(18, 32, 26, -1.1, 1.1); g.stroke(); g.beginPath(); g.lineWidth = 1; g.strokeStyle = CREAM; g.moveTo(18 + Math.cos(-1.1) * 26, 32 + Math.sin(-1.1) * 26); g.lineTo(18 + Math.cos(1.1) * 26, 32 + Math.sin(1.1) * 26); g.stroke(); poly(g, [14, 31, 54, 31, 54, 33, 14, 33], RAMPS.sand[4], INK); poly(g, [54, 28, 60, 32, 54, 36], RAMPS.steel[5]); },
+  crossbow(g, col, acc) { poly(g, [28, 14, 36, 14, 36, 56, 28, 56], WOOD); g.beginPath(); g.lineWidth = 5; g.strokeStyle = INK; g.arc(32, 34, 22, -2.6, -0.54); g.stroke(); g.lineWidth = 3; g.strokeStyle = col; g.arc(32, 34, 22, -2.6, -0.54); g.stroke(); poly(g, [26, 50, 38, 50, 38, 58, 26, 58], acc); },
+  staff(g, col, acc, glow) { g.save(); g.translate(32, 32); g.rotate(-Math.PI / 5); poly(g, [-2.5, -18, 2.5, -18, 2.5, 30, -2.5, 30], WOOD); g.beginPath(); g.arc(0, -22, 8, 0, Math.PI * 2); const gr = g.createRadialGradient(0, -22, 1, 0, -22, 9); gr.addColorStop(0, CREAM_HI); gr.addColorStop(1, glow || RAMPS.frost[3]); g.fillStyle = gr; g.fill(); g.lineWidth = 2; g.strokeStyle = acc; g.stroke(); g.restore(); },
+  wand(g, col, acc, glow) { g.save(); g.translate(32, 34); g.rotate(-Math.PI / 4); poly(g, [-2, -10, 2, -10, 2.5, 22, -2.5, 22], WOOD); poly(g, [0, -22, 5, -14, 0, -8, -5, -14], glow || RAMPS.aether[4]); g.restore(); },
   shield(g, col, acc) { poly(g, [12, 10, 52, 10, 52, 32, 32, 56, 12, 32], col); poly(g, [20, 16, 44, 16, 44, 30, 32, 46, 20, 30], acc); },
-  helm(g, col, acc) { g.beginPath(); g.moveTo(14, 44); g.lineTo(14, 26); g.quadraticCurveTo(14, 10, 32, 10); g.quadraticCurveTo(50, 10, 50, 26); g.lineTo(50, 44); g.closePath(); g.fillStyle = col; g.fill(); g.lineWidth = 2; g.strokeStyle = '#000'; g.stroke(); poly(g, [20, 28, 44, 28, 44, 32, 20, 32], '#1a1410'); poly(g, [30, 32, 34, 32, 34, 44, 30, 44], acc); },
+  helm(g, col, acc) { g.beginPath(); g.moveTo(14, 44); g.lineTo(14, 26); g.quadraticCurveTo(14, 10, 32, 10); g.quadraticCurveTo(50, 10, 50, 26); g.lineTo(50, 44); g.closePath(); g.fillStyle = col; g.fill(); g.lineWidth = 2; g.strokeStyle = INK; g.stroke(); poly(g, [20, 28, 44, 28, 44, 32, 20, 32], INK); poly(g, [30, 32, 34, 32, 34, 44, 30, 44], acc); },
   chest(g, col, acc) { poly(g, [16, 12, 26, 8, 38, 8, 48, 12, 54, 26, 46, 28, 46, 56, 18, 56, 18, 28, 10, 26], col); poly(g, [26, 8, 32, 18, 38, 8], acc); poly(g, [18, 42, 46, 42, 46, 46, 18, 46], acc); },
   gloves(g, col, acc) { poly(g, [18, 54, 18, 30, 22, 16, 27, 16, 27, 28, 30, 12, 35, 12, 35, 28, 38, 14, 43, 14, 43, 30, 46, 22, 50, 24, 46, 54], col); poly(g, [18, 46, 46, 46, 46, 54, 18, 54], acc); },
   legs(g, col, acc) { poly(g, [16, 10, 48, 10, 50, 56, 36, 56, 32, 26, 28, 56, 14, 56], col); poly(g, [16, 10, 48, 10, 48, 16, 16, 16], acc); },
   boots(g, col, acc) { poly(g, [16, 10, 32, 10, 32, 40, 52, 44, 52, 54, 16, 54], col); poly(g, [16, 22, 32, 22, 32, 26, 16, 26], acc); },
-  ring(g, col, acc, glow) { g.beginPath(); g.lineWidth = 8; g.strokeStyle = '#000'; g.arc(32, 38, 15, 0, Math.PI * 2); g.stroke(); g.lineWidth = 5; g.strokeStyle = '#d8b050'; g.arc(32, 38, 15, 0, Math.PI * 2); g.stroke(); poly(g, [32, 12, 40, 22, 32, 30, 24, 22], glow || '#ff4060'); },
-  amulet(g, col, acc, glow) { g.beginPath(); g.lineWidth = 2; g.strokeStyle = '#d8b050'; g.moveTo(14, 8); g.quadraticCurveTo(32, 36, 50, 8); g.stroke(); g.beginPath(); g.arc(32, 40, 12, 0, Math.PI * 2); g.fillStyle = '#d8b050'; g.fill(); g.strokeStyle = '#000'; g.stroke(); g.beginPath(); g.arc(32, 40, 7, 0, Math.PI * 2); g.fillStyle = glow || '#40a0ff'; g.fill(); },
-  tome(g, col, acc, glow) { poly(g, [14, 10, 48, 8, 50, 54, 16, 56], col); poly(g, [18, 12, 46, 10, 47, 52, 19, 54], '#e8dcc0', 'rgba(0,0,0,0.4)'); poly(g, [16, 10, 22, 10, 22, 56, 16, 56], col); g.beginPath(); g.arc(34, 31, 8, 0, Math.PI * 2); g.fillStyle = glow || '#ffd060'; g.fill(); },
-  potion(g, col) { poly(g, [28, 8, 36, 8, 36, 20, 48, 34, 48, 54, 16, 54, 16, 34, 28, 20], 'rgba(200,220,230,0.4)'); poly(g, [18, 36, 46, 36, 46, 52, 18, 52], col); poly(g, [26, 4, 38, 4, 38, 10, 26, 10], '#7a5a3a'); },
-  gem(g, col) { poly(g, [32, 8, 52, 24, 44, 54, 20, 54, 12, 24], col); poly(g, [32, 8, 40, 24, 32, 54, 24, 24], 'rgba(255,255,255,0.25)', 'rgba(0,0,0,0.3)'); },
-  fists(g, col) { DRAW.gloves(g, '#c8a080', '#8a6a4a'); },
+  ring(g, col, acc, glow) { g.beginPath(); g.lineWidth = 8; g.strokeStyle = INK; g.arc(32, 38, 15, 0, Math.PI * 2); g.stroke(); g.lineWidth = 5; g.strokeStyle = GOLD; g.arc(32, 38, 15, 0, Math.PI * 2); g.stroke(); poly(g, [32, 12, 40, 22, 32, 30, 24, 22], glow || RAMPS.rose[3]); },
+  amulet(g, col, acc, glow) { g.beginPath(); g.lineWidth = 2; g.strokeStyle = GOLD; g.moveTo(14, 8); g.quadraticCurveTo(32, 36, 50, 8); g.stroke(); g.beginPath(); g.arc(32, 40, 12, 0, Math.PI * 2); g.fillStyle = GOLD; g.fill(); g.strokeStyle = INK; g.stroke(); g.beginPath(); g.arc(32, 40, 7, 0, Math.PI * 2); g.fillStyle = glow || RAMPS.blue[5]; g.fill(); },
+  tome(g, col, acc, glow) { poly(g, [14, 10, 48, 8, 50, 54, 16, 56], col); poly(g, [18, 12, 46, 10, 47, 52, 19, 54], CREAM, 'rgba(20,15,28,0.4)'); poly(g, [16, 10, 22, 10, 22, 56, 16, 56], col); g.beginPath(); g.arc(34, 31, 8, 0, Math.PI * 2); g.fillStyle = glow || RAMPS.gold[4]; g.fill(); },
+  potion(g, col) { poly(g, [28, 8, 36, 8, 36, 20, 48, 34, 48, 54, 16, 54, 16, 34, 28, 20], 'rgba(168,208,236,0.4)'); poly(g, [18, 36, 46, 36, 46, 52, 18, 52], col); poly(g, [26, 4, 38, 4, 38, 10, 26, 10], WOOD); },
+  gem(g, col) { poly(g, [32, 8, 52, 24, 44, 54, 20, 54, 12, 24], col); poly(g, [32, 8, 40, 24, 32, 54, 24, 24], 'rgba(255,244,220,0.25)', 'rgba(20,15,28,0.3)'); },
+  fists(g, col) { DRAW.gloves(g, RAMPS.skin[4], RAMPS.wood[4]); },
 };
 
 const SLOT_ICON = { helm: 'helm', chest: 'chest', gloves: 'gloves', legs: 'legs', boots: 'boots' };
-const ELEM_GLOW = { fire: '#ff6a20', frost: '#70c8ff', lightning: '#c0d0ff', void: '#a060ff', holy: '#ffe080', rot: '#70d040' };
+// element glows: the same values the weapon sprites use (sprites/weapons.js)
+const ELEM_GLOW = { fire: '#ec7a2a', frost: '#8cc8ec', lightning: '#c8d0f0', rot: '#a8c860', nature: '#90ac5c', void: '#c860f0', holy: '#f6e39a', water: '#5a9ad0', sand: '#e2c494', blood: '#cc4a5a', sound: '#e48fb0', earth: '#b07e52' };
+const GEMS = { Ruby: '#cc4a5a', Sapphire: RAMPS.blue[4], Topaz: RAMPS.ember[4], Amethyst: RAMPS.aether[4], Emerald: RAMPS.green[4], Onyx: RAMPS.stone[2], Opal: RAMPS.frost[5], Garnet: RAMPS.red[3], Jade: RAMPS.teal[5], Moonstone: RAMPS.frost[4] };
 
 export function itemIconKind(item) {
   if (item.kind === 'weapon') return item.type;
@@ -84,18 +91,18 @@ export function itemIconKind(item) {
 export function itemIcon(item) {
   const kind = itemIconKind(item);
   const col = item.kind === 'tome' ? TOMES[item.tome]?.color : metal(item);
-  const r = RARITY[item.rarity];
+  const r = RARITY[item.rarity], rc = rarityPal(item.rarity);
   const key = `${kind}|${col}|${item.rarity}|${item.element || ''}|${item.gem || ''}`;
   let url = cache.get(key);
   if (url) return url;
   const [c, g] = c2d();
   // rarity backdrop
   const gr = g.createRadialGradient(32, 32, 4, 32, 32, 34);
-  gr.addColorStop(0, r.color + '55'); gr.addColorStop(1, 'rgba(0,0,0,0)');
+  gr.addColorStop(0, rc + '55'); gr.addColorStop(1, 'rgba(20,15,28,0)');
   g.fillStyle = gr; g.fillRect(0, 0, S, S);
-  const acc = r.index >= 3 ? r.color : '#a07a40';
-  const glowC = item.element ? ELEM_GLOW[item.element] : item.kind === 'trinket' ? ({ Ruby: '#ff3040', Sapphire: '#3060ff', Topaz: '#ffc030', Amethyst: '#a050ff', Emerald: '#30d060', Onyx: '#303030', Opal: '#e0f0ff', Garnet: '#a01030', Jade: '#40a060', Moonstone: '#c0d0ff' })[item.gem] : null;
-  (DRAW[kind] || DRAW.gem)(g, col || '#b0b0b8', acc, glowC);
+  const acc = r.index >= 3 ? rc : BRONZE;
+  const glowC = item.element ? ELEM_GLOW[item.element] : item.kind === 'trinket' ? GEMS[item.gem] : null;
+  (DRAW[kind] || DRAW.gem)(g, col || RAMPS.steel[5], acc, glowC);
   if (item.element && kind !== 'staff' && kind !== 'wand') { g.globalCompositeOperation = 'source-atop'; g.fillStyle = ELEM_GLOW[item.element] + '40'; g.fillRect(0, 0, S, S); g.globalCompositeOperation = 'source-over'; }
   url = pixelize(c).toDataURL();
   cache.set(key, url);
@@ -107,7 +114,7 @@ export function simpleIcon(kind, color) {
   let url = cache.get(key);
   if (url) return url;
   const [c, g] = c2d();
-  (DRAW[kind] || DRAW.gem)(g, color, '#a07a40', color);
+  (DRAW[kind] || DRAW.gem)(g, color, BRONZE, color);
   url = pixelize(c).toDataURL();
   cache.set(key, url);
   return url;
@@ -119,11 +126,9 @@ export function simpleIcon(kind, color) {
 // ability's element colour, with a hand-placed 12px glyph for the ability type in bone white,
 // outlined in the element's darkest shade and drop-shadowed. Crisp at every integer scale.
 const ICON_EL = {
-  physical: '#6c7888', fire: '#d4481a', frost: '#2a88cc', lightning: '#5464e0', rot: '#4a9a2a', nature: '#3e9a34',
-  void: '#6c2ad2', holy: '#d8a020', water: '#2a78c4', sand: '#c08a3a', blood: '#a81424', sound: '#b050c8', earth: '#8a6030',
+  physical: RAMPS.steel[3], fire: RAMPS.ember[2], frost: RAMPS.frost[2], lightning: RAMPS.lavender[2], rot: RAMPS.moss[3], nature: RAMPS.teal[3],
+  void: RAMPS.aether[2], holy: RAMPS.gold[3], water: RAMPS.water[3], sand: RAMPS.sand[2], blood: RAMPS.red[3], sound: RAMPS.rose[2], earth: RAMPS.wood[4],
 };
-const hex = (h) => [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16), 255];
-const scaleC = (c, k, add = 0) => [Math.max(0, Math.min(255, Math.round(c[0] * k + add))), Math.max(0, Math.min(255, Math.round(c[1] * k + add))), Math.max(0, Math.min(255, Math.round(c[2] * k + add))), 255];
 
 // glyph painter on a 12 x 12 mask
 function glyph(fn) {
@@ -188,14 +193,15 @@ export function skillIcon(def, element) {
   let url = cache.get(key);
   if (url) return url;
   const N = 20, p = new Pix(N, N);
-  const base = hex(baseHex);
-  const hi = scaleC(base, 1.25, 30), mid = base, lo = scaleC(base, 0.62), deep = scaleC(base, 0.32), out = [16, 10, 8, 255];
+  // hue-shifted medallion ramp (highlights lean cream, shadows lean plum), ink outline
+  const base = C(pal(baseHex));
+  const hi = light(base, 1.28), mid = base, lo = dark(base, 0.66), deep = dark(base, 0.36), out = C(INK);
   // medallion: clipped corners, outline, bevel, banded fill with a dithered seam between bands
   for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
     const cx = Math.min(x, N - 1 - x), cy = Math.min(y, N - 1 - y);
     if (cx + cy < 2) continue;
     if (cx === 0 || cy === 0 || cx + cy === 2) { p.set(x, y, out); continue; }
-    if (cx + cy === 3 || ((x === 1 || y === 1) && cx + cy > 3)) { p.set(x, y, x < N / 2 && y < N / 2 ? scaleC(hi, 1.1, 10) : x === 1 || y === 1 ? hi : lo); continue; }
+    if (cx + cy === 3 || ((x === 1 || y === 1) && cx + cy > 3)) { p.set(x, y, x < N / 2 && y < N / 2 ? light(hi, 1.1) : x === 1 || y === 1 ? hi : lo); continue; }
     if (x === N - 2 || y === N - 2) { p.set(x, y, deep); continue; }
     const band = y < 7 ? hi : y < 13 ? mid : lo;
     let c = band;
@@ -203,7 +209,7 @@ export function skillIcon(def, element) {
     if (y === 13 && (x % 2)) c = mid;
     p.set(x, y, c);
   }
-  // glyph: drop shadow, element-dark outline, bone-white face with a lit top edge
+  // glyph: drop shadow, element-dark outline, cream face with a lit top edge
   const m = glyphMask(type), ox = 4, oy = 4;
   const on = (x, y) => x >= 0 && y >= 0 && x < 12 && y < 12 && m[y * 12 + x];
   for (let y = -1; y <= 12; y++) for (let x = -1; x <= 12; x++) {
@@ -214,9 +220,9 @@ export function skillIcon(def, element) {
     if (on(x, y)) continue;
     if (on(x - 1, y) || on(x + 1, y) || on(x, y - 1) || on(x, y + 1)) p.set(ox + x, oy + y, deep);
   }
-  for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (on(x, y)) p.set(ox + x, oy + y, on(x, y - 1) ? [250, 240, 220, 255] : [255, 255, 250, 255]);
+  for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (on(x, y)) p.set(ox + x, oy + y, on(x, y - 1) ? C(CREAM) : C(CREAM_HI));
   // shade the lower-right of the glyph a touch for volume
-  for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (on(x, y) && !on(x + 1, y + 1) && on(x, y - 1)) p.set(ox + x, oy + y, [214, 200, 178, 255]);
+  for (let y = 0; y < 12; y++) for (let x = 0; x < 12; x++) if (on(x, y) && !on(x + 1, y + 1) && on(x, y - 1)) p.set(ox + x, oy + y, C(RAMPS.sand[4]));
   url = p.canvas().toDataURL();
   cache.set(key, url);
   return url;

@@ -65,11 +65,11 @@ function tableSprite() {
   const p = new Pix(R0 * 2 + 8, R0 * 2 + H + 8); p.ox = R0 + 4; p.oy = R0 + 4 + H;
   const cx = p.ox, top = p.oy - H;
   // pedestal side, then the slab top with a brass rim and the inlaid circle of fate
-  for (let y = top; y <= top + H; y++) for (let x = cx - R0 + 3; x <= cx + R0 - 3; x++) { const u = (x - cx) / R0; if (y - top > Math.sqrt(Math.max(0, 1 - u * u)) * 6 + H - 2) continue; p.set(x, y, u < -0.4 ? '#5a4c40' : u > 0.5 ? '#2e2620' : '#4a3e34'); }
-  p.ellipse(cx, top, R0, R0 * 0.62, '#8a6a3a');
-  p.ellipse(cx, top - 1, R0 - 2, R0 * 0.62 - 2, '#5a4c40');
-  p.ellipse(cx, top - 1, R0 - 9, R0 * 0.62 - 7, '#2a1a14');
-  for (let i = 0; i < 260; i++) { const x = cx + (hash2(i, 1, 3) - 0.5) * R0 * 1.8, y = top + (hash2(i, 2, 3) - 0.5) * R0 * 1.1; if (p.a(x, y) && p.get(Math.round(x), Math.round(y))[0] === 0x5a) p.set(x, y, '#64554a'); }
+  for (let y = top; y <= top + H; y++) for (let x = cx - R0 + 3; x <= cx + R0 - 3; x++) { const u = (x - cx) / R0; if (y - top > Math.sqrt(Math.max(0, 1 - u * u)) * 6 + H - 2) continue; p.set(x, y, u < -0.4 ? '#66626a' : u > 0.5 ? '#2f2c38' : '#4e4b53'); }
+  p.ellipse(cx, top, R0, R0 * 0.62, '#9a6424');
+  p.ellipse(cx, top - 1, R0 - 2, R0 * 0.62 - 2, '#4e4b53');
+  p.ellipse(cx, top - 1, R0 - 9, R0 * 0.62 - 7, '#2a1838');
+  for (let i = 0; i < 260; i++) { const x = cx + (hash2(i, 1, 3) - 0.5) * R0 * 1.8, y = top + (hash2(i, 2, 3) - 0.5) * R0 * 1.1; if (p.a(x, y) && p.get(Math.round(x), Math.round(y))[0] === 0x4e) p.set(x, y, '#5a565e'); }
   p.outline();
   return { pix: p };
 }
@@ -78,10 +78,10 @@ function buildHall() {
   const objs = [];
   const add = (o) => { objs.push(o); addObject(o); return o; };
   const FT = Math.round(3.6 * PPU);   // floor tile: 3.6 world units
-  const tiles = dungeonTiles({ name: 'fatehall', floor: '#3a3230', wall: '#2a2422', accent: '#6a5048', layout: 'rooms' }, FT, ap(26));
+  const tiles = dungeonTiles({ name: 'fatehall', floor: '#2f2c38', wall: '#1f1d26', accent: '#55323d', layout: 'rooms' }, FT, ap(26));
   const prevGround = world.ground;
   world.ground = (ctx) => {
-    ctx.fillStyle = '#0c0a0e'; ctx.fillRect(0, 0, view.W, view.H);
+    ctx.fillStyle = '#090410'; ctx.fillRect(0, 0, view.W, view.H);
     const ox = FX * PPU - view.x0, oy = FZ * PPU - view.y0;
     for (let j = -6; j <= 6; j++) for (let i = -6; i <= 6; i++) {
       if (i * i + j * j > 34) continue;
@@ -92,7 +92,7 @@ function buildHall() {
   // ring of ruined columns
   for (let i = 0; i < 10; i++) {
     const a = (i / 10) * Math.PI * 2;
-    const spr = columnSprite(i % 3 === 0 ? 5 : 11, '#6a6058', i % 3 === 0 ? 0.5 : 0, i);
+    const spr = columnSprite(i % 3 === 0 ? 5 : 11, '#66626a', i % 3 === 0 ? 0.5 : 0, i);
     const x = FX + Math.cos(a) * 11, z = FZ + Math.sin(a) * 11;
     add({ sortZ: z, draw(ctx) { ctx.drawImage(spr.pix.canvas(), Math.round(x * PPU - view.x0) - spr.pix.ox, Math.round(z * PPU - view.y0) - spr.pix.oy); } });
   }
@@ -100,7 +100,7 @@ function buildHall() {
   const tbl = tableSprite();
   add({
     sortZ: FZ - 3.2,
-    shadow(ctx) { ctx.fillStyle = 'rgba(0,0,0,0.35)'; ctx.beginPath(); ctx.ellipse(Math.round(FX * PPU - view.x0) + 4, Math.round(FZ * PPU - view.y0) + 4, 48, 30, 0, 0, Math.PI * 2); ctx.fill(); },
+    shadow(ctx) { ctx.fillStyle = 'rgba(20,12,30,0.42)'; ctx.beginPath(); ctx.ellipse(Math.round(FX * PPU - view.x0) + 4, Math.round(FZ * PPU - view.y0) + 4, 48, 30, 0, 0, Math.PI * 2); ctx.fill(); },
     draw(ctx) { ctx.drawImage(tbl.pix.canvas(), Math.round(FX * PPU - view.x0) - tbl.pix.ox, Math.round(FZ * PPU - view.y0) - tbl.pix.oy); },
     emissive(ctx) {
       const cx = Math.round(FX * PPU - view.x0), cy = Math.round(FZ * PPU - view.y0) - TABLE_Y * PPU - 1;
@@ -108,7 +108,7 @@ function buildHall() {
       for (let i = 0; i < 12; i++) {
         const a = (i / 12) * Math.PI * 2 + t * 0.05;
         ctx.globalAlpha = 0.65 + Math.sin(t * 2 + i) * 0.3;
-        ctx.fillStyle = '#ff9040';
+        ctx.fillStyle = '#c860f0';
         ctx.fillRect(Math.round(cx + Math.cos(a) * 30) - 1, Math.round(cy + Math.sin(a) * 19), 3, 1);
         ctx.fillRect(Math.round(cx + Math.cos(a) * 30), Math.round(cy + Math.sin(a) * 19) - 1, 1, 3);
       }
@@ -123,14 +123,14 @@ function buildHall() {
     candles.push({ x, y: TABLE_Y + h / 10 + 0.15, z });
     add({
       sortZ: FZ + z + 0.01,
-      draw(ctx) { const px = Math.round((FX + x) * PPU - view.x0), py = Math.round((FZ + z) * PPU - view.y0) - TABLE_Y * PPU; ctx.fillStyle = '#e8dcc0'; ctx.fillRect(px - 1, py - h, 3, h); ctx.fillStyle = '#c8bca0'; ctx.fillRect(px + 1, py - h, 1, h); },
+      draw(ctx) { const px = Math.round((FX + x) * PPU - view.x0), py = Math.round((FZ + z) * PPU - view.y0) - TABLE_Y * PPU; ctx.fillStyle = '#f3e1b5'; ctx.fillRect(px - 1, py - h, 3, h); ctx.fillStyle = '#e2c494'; ctx.fillRect(px + 1, py - h, 1, h); },
       emissive(ctx) {
         const px = Math.round((FX + x) * PPU - view.x0), py = Math.round((FZ + z) * PPU - view.y0) - TABLE_Y * PPU - h;
         const f = Math.sin(now() * 13 + x) > 0.2 ? 1 : 0;
-        ctx.fillStyle = '#ff9030'; ctx.fillRect(px, py - 3 - f, 1, 3 + f);
+        ctx.fillStyle = '#ec7a2a'; ctx.fillRect(px, py - 3 - f, 1, 3 + f);
         ctx.fillStyle = '#fff0b0'; ctx.fillRect(px, py - 2, 1, 2);
       },
-      glow(ctx) { glowPx(ctx, (FX + x) * PPU - view.x0, (FZ + z) * PPU - view.y0 - TABLE_Y * PPU - h - 2, '#ffb040', 7, 0.5); },
+      glow(ctx) { glowPx(ctx, (FX + x) * PPU - view.x0, (FZ + z) * PPU - view.y0 - TABLE_Y * PPU - h - 2, '#f8b848', 7, 0.5); },
     });
   }
   return { objs, candles, prevGround };
@@ -143,7 +143,7 @@ function dieObj(d) {
     shadow(ctx) {
       const px = Math.round((FX + d.x) * PPU - view.x0), py = Math.round((FZ + d.z) * PPU - view.y0) - TABLE_Y * PPU;
       const k = Math.max(0.4, 1 - d.h * 0.25);
-      ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fillRect(px - Math.round(9 * k), py + 5, Math.round(18 * k), 3);
+      ctx.fillStyle = 'rgba(20,12,30,0.45)'; ctx.fillRect(px - Math.round(9 * k), py + 5, Math.round(18 * k), 3);
     },
     draw(ctx) {
       const px = Math.round((FX + d.x) * PPU - view.x0), py = Math.round((FZ + d.z) * PPU - view.y0 - (TABLE_Y + d.h) * PPU);
@@ -158,10 +158,10 @@ function dieObj(d) {
 export function startFateTable(onDone) {
   setTerrainVisible(false);
   atmo.indoor = true;
-  atmo.indoorCfg = { fog: '#0a0606', ambient: '#3a2a30', light: '#ff9040' };
+  atmo.indoorCfg = { fog: '#090410', ambient: '#3a2a3e', light: '#f8b848' };
   const hall = buildHall();
-  const raceDie = { x: -1.2, z: 0.3, h: 0.1, rot: 0, face: 12, body: '#8a2018', ink: '#ffe8c0' };
-  const classDie = { x: 1.2, z: 0.3, h: 0.1, rot: 0, face: 12, body: '#d0a040', ink: '#2a1408' };
+  const raceDie = { x: -1.2, z: 0.3, h: 0.1, rot: 0, face: 12, body: '#8a3434', ink: '#f3e1b5' };
+  const classDie = { x: 1.2, z: 0.3, h: 0.1, rot: 0, face: 12, body: '#c99a3a', ink: '#140f1c' };
   const dieObjs = [addObject(dieObj(raceDie)), addObject(dieObj(classDie))];
   scene = { hall, candles: hall.candles, raceDie, classDie, dieObjs, t: 0, rolls: [], rolling: false, state: 'name', rerolled: false, onDone };
   scene.prevZoom = R.zoomStep;
@@ -224,10 +224,10 @@ export function updateFate(dt) {
   if (!scene) return;
   scene.t += dt;
   for (const c of scene.candles) {
-    requestLight(FX + c.x, c.y + 0.3, FZ + c.z, '#ffa040', 3.5 + Math.sin(scene.t * 9 + c.x) * 0.6, 7);
+    requestLight(FX + c.x, c.y + 0.3, FZ + c.z, '#f8b848', 3.5 + Math.sin(scene.t * 9 + c.x) * 0.6, 7);
     if (Math.random() < dt * 3) particle({ x: FX + c.x, y: c.y + 0.4, z: FZ + c.z, vy: 0.8, life: 0.8, size: 0.12, color: '#ffb060' });
   }
-  requestLight(FX, TABLE_Y + 6, FZ, '#ffd8a0', 18, 18);
+  requestLight(FX, TABLE_Y + 6, FZ, '#f6e39a', 18, 18);
   if (Math.random() < dt * 14) particle({ x: FX + (Math.random() - 0.5) * 16, y: 0.2, z: FZ + (Math.random() - 0.5) * 16, vx: (Math.random() - 0.5) * 0.4, vy: 0.6 + Math.random(), vz: (Math.random() - 0.5) * 0.4, life: 5, size: 0.14, color: '#ff8030', wobble: 1.2 });
   if (scene.rolling) {
     let allDone = true;
@@ -296,7 +296,7 @@ function showResult() {
     if (doubles) r.innerHTML += `<div class="k" style="margin-top:6px">DOUBLES · OMEN OF THE CROWN</div><div class="d">Both dice show ${scene.race}. The crown remembers you: +2 to every attribute and an Epic heirloom.</div>`;
     ui.appendChild(r);
     ui.rare = r;
-    flash(FX, TABLE_Y + 2, FZ, '#ffa040', 40, 14, 1.2);
+    flash(FX, TABLE_Y + 2, FZ, '#f8b848', 40, 14, 1.2);
     burst(FX, TABLE_Y + 0.5, FZ, { count: 80, speed: 6, color: '#ffd080', color2: '#ff6020', life: 1.5, up: 1.4 });
     bus.emit('rareFate');
   }

@@ -3,15 +3,20 @@
 //   a bobbing chevron over the tracked objective (NPC, dungeon door, destination),
 //   a dashed ring on kill-quest hunting grounds with small arrows over the targets,
 //   and, when the objective is off-screen, an arrow on the screen edge with the distance.
+// Whatever the interact prompt points at (NPC, door, shrine...) gets a pair of cream "( )"
+// brackets either side of it. Colours: the master palette's gold ramp, cream, red for targets,
+// violet-black ink outlines.
 import { G } from '../game.js';
 import { scene } from '../px/scene.js';
 import { view } from '../px/view.js';
 import { Pix, PPU, ART, C } from '../px/pix.js';
+import { RAMPS, CREAM, CREAM_HI, INK as INK_HEX } from '../px/palette.js';
 import { drawText, textWidth, REGULAR } from '../px/font.js';
 import { trackedObjectiveMarkers, pendingTalkNpcs, questsOffered } from '../systems/quests.js';
 import { DUNGEONS } from '../data/world.js';
 
-const GOLD = C('#ffd040'), GOLD_HI = C('#fff4b0'), GOLD_LO = C('#b07818'), GOLD_MID = C('#e8a828'), INK = C('#1a0c06');
+const GOLD = C(RAMPS.gold[4]), GOLD_HI = C(RAMPS.gold[5]), GOLD_LO = C(RAMPS.gold[2]), GOLD_MID = C(RAMPS.gold[3]), INK = C(INK_HEX), GLINT = C(CREAM_HI);
+const GOLD_HEX = RAMPS.gold[4], GOLD_DIM_HEX = RAMPS.gold[3];
 const ap = (v) => Math.round(v * ART);
 
 function sprite(rows, colorAt) {
@@ -25,15 +30,19 @@ function sprite(rows, colorAt) {
 // gold ramp: lit left column and top, a warm mid band, deep right column; one white glint
 const on = (rows, x, y) => y >= 0 && y < rows.length && rows[y][x] === '#';
 const shade = (x, y, w, h, rows) => {
-  if (y < 2 && !on(rows, x - 1, y) && !on(rows, x, y - 1)) return [255, 255, 255, 255];
+  if (y < 2 && !on(rows, x - 1, y) && !on(rows, x, y - 1)) return GLINT;
   if (!on(rows, x - 1, y) || !on(rows, x, y - 1)) return GOLD_HI;
   if (!on(rows, x + 1, y) || !on(rows, x, y + 1)) return GOLD_LO;
   return !on(rows, x + 2, y) ? GOLD_MID : GOLD;
 };
 const BANG = sprite(['.###.', '#####', '#####', '#####', '#####', '#####', '.###.', '.###.', '.###.', '..#..', '.....', '.###.', '#####', '.###.'], shade);
 const ASK = sprite(['..#####..', '.#######.', '###...###', '###...###', '......###', '.....###.', '....###..', '...###...', '...###...', '.........', '.........', '...###...', '...###...'], shade);
-const CHEVRON = sprite(['##############', '.############.', '..##########..', '...########...', '....######....', '.....####.....', '......##......'], (x, y, w) => (y === 0 ? (x === 1 ? [255, 255, 255, 255] : GOLD_HI) : y > 3 ? GOLD_LO : x < w / 2 ? GOLD : GOLD_MID));
-const MINI = sprite(['########', '.######.', '..####..', '...##...'], (x, y) => (y === 0 ? [255, 190, 150, 255] : y === 1 ? [240, 96, 60, 255] : [200, 50, 30, 255]));
+const CHEVRON = sprite(['##############', '.############.', '..##########..', '...########...', '....######....', '.....####.....', '......##......'], (x, y, w) => (y === 0 ? (x === 1 ? GLINT : GOLD_HI) : y > 3 ? GOLD_LO : x < w / 2 ? GOLD : GOLD_MID));
+const MINI = sprite(['########', '.######.', '..####..', '...##...'], (x, y) => (y === 0 ? C(RAMPS.rose[5]) : y === 1 ? C(RAMPS.red[5]) : C(RAMPS.red[4])));
+// interact brackets: a cream "(" (mirrored for ")"), lit inner edge, ink ring
+const BRACKET_ROWS = ['..##', '.##.', '##..', '##..', '##..', '##..', '.##.', '..##'];
+const BRACKET_L = sprite(BRACKET_ROWS, (x, y) => (x === 0 || (y < 2 && x < 3) ? C(CREAM_HI) : C(CREAM)));
+const BRACKET_R = sprite(BRACKET_ROWS.map((r) => [...r].reverse().join('')), (x, y) => (y > 5 ? C(RAMPS.sand[5]) : C(CREAM)));
 
 // edge arrows, cached per 1/32 turn
 const arrows = new Map();
@@ -48,10 +57,10 @@ function arrowSprite(ang, col) {
   const fill = C(col);
   p.poly([pt(5.6 * ART, 0), pt(5 * ART, 2.45), pt(1.6 * ART, Math.PI), pt(5 * ART, -2.45)], fill);
   // lit upper half, white-hot tip
-  const lit = [Math.min(255, fill[0] + 40), Math.min(255, fill[1] + 40), Math.min(255, fill[2] + 30), 255];
+  const lit = col === GOLD_HEX ? GOLD_HI : C(CREAM);
   p.poly([pt(5.6 * ART, 0), pt(5 * ART, -2.45), pt(1.6 * ART, Math.PI)], lit);
   const [tx, ty] = pt(4 * ART, 0), [tx2, ty2] = pt(3 * ART, 0);
-  p.set(Math.floor(tx), Math.floor(ty), [255, 255, 255, 255]); p.set(Math.floor(tx2), Math.floor(ty2), [255, 255, 255, 255]);
+  p.set(Math.floor(tx), Math.floor(ty), GLINT); p.set(Math.floor(tx2), Math.floor(ty2), GLINT);
   p.outline(INK, true);
   p.ox = Math.floor(c); p.oy = Math.floor(c);
   arrows.set(key, p);
@@ -83,9 +92,9 @@ function ring(ctx, x, z, r, t, col) {
     if ((i + Math.floor(t * 8)) % 4 === 0) continue;
     const a = (i / n) * Math.PI * 2;
     const X = Math.round(cx + Math.cos(a) * R), Y = Math.round(cy + Math.sin(a) * R * 0.8);
-    ctx.fillStyle = '#1a0c06'; ctx.fillRect(X - 1, Y - 1, 5, 4);
+    ctx.fillStyle = INK_HEX; ctx.fillRect(X - 1, Y - 1, 5, 4);
     ctx.fillStyle = col; ctx.fillRect(X, Y, 3, 2);
-    ctx.fillStyle = '#fff4b0'; ctx.fillRect(X, Y, 1, 1);
+    ctx.fillStyle = RAMPS.gold[5]; ctx.fillRect(X, Y, 1, 1);
   }
 }
 
@@ -115,6 +124,26 @@ function draw(ctx) {
     const X = SX(e.pos.x), Y = SY(e.pos.z) - (e.model.heightPx || ap(24)) - ap(4) + bob;
     if (onScr(X, Y, -ap(8))) blit(ctx, ask ? ASK : BANG, X, Y);
   }
+  // ---- interact brackets around whatever the prompt points at (same pick as the interact key)
+  if (G.prompt && !G.menuOpen) {
+    let tx = null, tz = 0, hh = ap(18), bd = 1e9;
+    if (G.prompt.startsWith('Talk to')) {
+      for (const e of npcById.values()) { const d = Math.hypot(e.pos.x - p.pos.x, e.pos.z - p.pos.z); if (d < 3.2 && d < bd && !e.hunting) { bd = d; tx = e.pos.x; tz = e.pos.z; hh = e.model.heightPx || ap(24); } }
+    } else {
+      for (const it of G.interactables || []) {
+        if (it.realm && it.realm !== G.realm && !(inDungeon && it.site === 'dungeon')) continue;
+        if (inDungeon && it.site !== 'dungeon') continue;
+        const d = Math.hypot(it.x - p.pos.x, it.z - p.pos.z);
+        if (d < it.r && d < bd) { bd = d; tx = it.x; tz = it.z; hh = ap(14); }
+      }
+    }
+    if (tx !== null) {
+      const X = SX(tx), Y = SY(tz) - Math.round(hh * 0.45);
+      const gap = ap(9) + (Math.floor(t * 3) % 2);
+      blit(ctx, BRACKET_L, X - gap, Y + BRACKET_L.h / 2);
+      blit(ctx, BRACKET_R, X + gap, Y + BRACKET_R.h / 2);
+    }
+  }
   // ---- tutorial target (the training dummy)
   const tt = G.tutorialTarget;
   if (tt && !tt.removed && !tt.dead) {
@@ -137,7 +166,7 @@ function draw(ctx) {
     const dist = Math.hypot(x - p.pos.x, z - p.pos.z);
     if (q.area) {
       // hunting ground: ring + targets
-      ring(ctx, x, z, q.r || 9, t, '#ffd040');
+      ring(ctx, x, z, q.r || 9, t, GOLD_HEX);
       if (q.enemy) for (const e of G.entities) {
         if (e.dead || e.removed || e.isNpc || e.team !== 'enemy') continue;
         if (!(e.tplId === q.enemy || (Array.isArray(q.enemy) && q.enemy.includes(e.tplId)))) continue;
@@ -156,9 +185,9 @@ function draw(ctx) {
     const ax = ecx + dx * k, ay = ecy + dy * k;
     const ang = Math.atan2(dy, dx);
     const pulse = Math.round(Math.sin(t * 5) * 1.2 * ART);
-    const arr = arrowSprite(ang, q.tracked ? '#ffd040' : '#c8a060');
+    const arr = arrowSprite(ang, q.tracked ? GOLD_HEX : GOLD_DIM_HEX);
     blit(ctx, arr, ax + Math.cos(ang) * pulse, ay + Math.sin(ang) * pulse);
-    const lb = label(dist >= 1000 ? (dist / 1000).toFixed(1) + 'km' : Math.round(dist) + 'm', q.tracked ? '#fff0c0' : '#d8c8a0');
+    const lb = label(dist >= 1000 ? (dist / 1000).toFixed(1) + 'km' : Math.round(dist) + 'm', q.tracked ? CREAM_HI : CREAM);
     ctx.drawImage(lb.canvas(), Math.round(ax - Math.cos(ang) * 11 * ART - lb.w / 2), Math.round(ay - Math.sin(ang) * 9 * ART - lb.h / 2));
   }
 }
