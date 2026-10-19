@@ -14,7 +14,7 @@ import { clearCombat } from '../systems/combat.js';
 import { addShake } from './cameraRig.js';
 import { scene, addObject, removeObject } from '../px/scene.js';
 import { view } from '../px/view.js';
-import { PPU, ART, ap, C, bayer } from '../px/pix.js';
+import { PPU, ART, ap, C, bayer, hash2 } from '../px/pix.js';
 import { dungeonTiles, dpropSprite, chestSprite, torchSprite, bulbSprite } from '../px/sprites/dprops.js';
 import { propSprite } from '../px/sprites/props.js';
 import { bannerSprite, brazierSprite, flamePalette } from '../px/sprites/buildings.js';
@@ -226,6 +226,13 @@ function drawFloor(d, ctx) {
     ctx.drawImage(cv, Math.round(ox + ci * CH * T), Math.round(oy + cj * CH * T));
   }
 }
+// smooth value noise over tile coordinates (cells of 3 tiles), for floor clusters
+function tileNoise(ti, tj, s) {
+  const fx = ti / 3, fy = tj / 3, ix = Math.floor(fx), iy = Math.floor(fy);
+  let tx = fx - ix, ty = fy - iy; tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
+  const a = hash2(ix, iy, s), b = hash2(ix + 1, iy, s), c = hash2(ix, iy + 1, s), e = hash2(ix + 1, iy + 1, s);
+  return a + (b - a) * tx + (c - a) * ty + (a - b - c + e) * tx * ty;
+}
 function bakeFloorChunk(d, ci, cj, CH, T) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = CH * T;
@@ -236,7 +243,10 @@ function bakeFloorChunk(d, ci, cj, CH, T) {
     if (ti >= d.w || tj >= d.h) continue;
     if (d.grid[tj * d.w + ti] === 1 && !d.maze) { g.fillStyle = VOID; g.fillRect(i * T, j * T, T, T); continue; }
     const h = ((ti * 73856093) ^ (tj * 19349663)) >>> 0;
-    g.drawImage(tiles.floor[h % 11 < 7 ? h % 3 : 3 + (h % 3)].canvas(), i * T, j * T);
+    // big clusters of darker slabs and worn patches give the room its value structure
+    const n = tileNoise(ti, tj, d.def.id.length);
+    const set = n < 0.36 && tiles.floorDark ? tiles.floorDark : n > 0.7 && tiles.floorWorn ? tiles.floorWorn : tiles.floor;
+    g.drawImage(set[h % 11 < 7 ? h % 3 : 3 + (h % 3)].canvas(), i * T, j * T);
     // flat plum shadow bands where a wall stands to the north or west (the maze's walls move, so
     // its floor stays unshaded)
     if (!d.maze) {

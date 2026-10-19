@@ -109,7 +109,7 @@ writeFileSync(out + '/sites-night.png', png(sheet([Object.entries(DUNGEON_THEMES
 
 // ---- dungeon dressing
 const drows = [];
-const types = ['barrel', 'crate', 'coffin', 'urn', 'candles', 'anvil', 'anchor', 'minecart', 'nest', 'shell', 'gold_pile', 'bones', 'campfire', 'tent'];
+const types = ['barrel', 'crate', 'coffin', 'urn', 'candles', 'anvil', 'anchor', 'minecart', 'nest', 'shell', 'gold_pile', 'bones', 'campfire', 'tent', 'statue'];
 drows.push(types.map((t) => T(t, () => pix(DP.dpropSprite(t, 0)))));
 drows.push(types.map((t) => T(t, () => pix(DP.dpropSprite(t, 2)))));
 drows.push([T('c0', () => pix(DP.chestSprite(false, false))), T('c1', () => pix(DP.chestSprite(true, false))), T('c2', () => pix(DP.chestSprite(false, true))), T('c3', () => pix(DP.chestSprite(true, true))),
@@ -125,7 +125,7 @@ for (const [id, th] of Object.entries(DUNGEON_THEMES)) {
     const t = DP.dungeonTiles({ ...th, name: id }, Tt, WP);
     const n = 4, room = new Pix(Tt * n, Tt * (n + 1) + WP);
     const y0 = Tt + WP;
-    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) room.blit(t.floor[(i * 3 + j * 5) % t.floor.length], i * Tt, y0 + j * Tt);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const set = (i + j) % 4 === 0 && t.floorDark ? t.floorDark : i === 3 && t.floorWorn ? t.floorWorn : t.floor; room.blit(set[(i * 3 + j * 5) % 6], i * Tt, y0 + j * Tt); }
     // a wall row on top: caps + faces
     for (let i = 0; i < n; i++) { room.blit(t.top, i * Tt, 0); room.blit(t.front, i * Tt, Tt); }
     // and one free-standing block in the room

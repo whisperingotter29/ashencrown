@@ -402,7 +402,7 @@ export const STYLE = {
   wood: { wall: ['#5a3628', '#77492f', '#4e3026'], roof: ['#2f5a58', '#7a2f4a', '#5e3a4a', '#8a4238'], trim: '#3f2622', cloth: ['#2f7070', '#c99a3a', '#a94a68', '#6a4a8a'], wallStone: '#6c6874' },
   stone: { wall: ['#77727a', '#6c6874', '#80787a'], roof: ['#3e4a5a', '#4a3a58', '#34405a'], trim: '#2f2c38', cloth: ['#243e7b', '#8a3434', '#6a4a8a'], wallStone: '#6c6874' },
   camp: { wall: ['#94705a', '#a8805e', '#7a5a4a'], roof: ['#6a4a3a', '#7a5a48'], trim: '#3f2622', cloth: ['#2f7070', '#8a3434', '#c99a3a'], wallStone: '#7a5a4a' },
-  port: { wall: ['#8a7a72', '#7a6a66', '#968478'], roof: ['#7a2f4a', '#3e4a5a', '#8a4238'], trim: '#2f2c38', cloth: ['#e2c494', '#2f7070', '#8a3434'], wallStone: '#7a6a66' },
+  port: { wall: ['#5e7a78', '#646a86', '#8a6a5e'], roof: ['#7a2f4a', '#3e4a5a', '#8a4238'], trim: '#2f2c38', cloth: ['#e2c494', '#2f7070', '#8a3434'], wallStone: '#7a6a66' },
 };
 const PLASTER = ['#d6c2a2', '#ccb698', '#dccab0'];
 

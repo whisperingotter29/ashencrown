@@ -210,6 +210,40 @@ export function dpropSprite(type, seed = 0) {
         p.rect(ap(2), by, W - ap(4), 1, c[0]);
         return done(p, null);
       }
+      case 'statue': {
+        // a carved effigy lying on its plinth: worn stone in the mid ramp, only the top edges
+        // catch a cream highlight, so it never outshines the heroes
+        const W = ap(26), H = ap(17), p = mk(W, H), ST = R5('#8a7e7c'), PL = R5('#6e5a66');
+        const flip = seed % 2 ? -1 : 1, cx = W / 2, yb = H - 1;
+        // plinth: lit top lip, front face in two bands, a carved panel line
+        const px0 = ap(2), pw = W - ap(4), ptop = yb - ap(6);
+        p.rect(px0, ptop, pw, ap(2), PL[3]); p.rect(px0, ptop, pw, 1, PL[4]);
+        p.rect(px0, ptop + ap(2), pw, ap(4), PL[2]); p.rect(px0, yb - 1, pw, 2, PL[1]);
+        p.rect(px0 + ap(2), ptop + ap(3), pw - ap(4), 1, PL[1]); p.rect(px0 + ap(2), ptop + ap(3) + 1, pw - ap(4), 1, PL[3]);
+        p.rect(px0, ptop, 1, ap(6), PL[3]); p.rect(px0 + pw - 1, ptop, 1, ap(6), PL[1]);
+        // the figure: body, folded hands, head on a cushion (mirrored by seed)
+        const by = ptop - ap(1.5);
+        for (let y = Math.floor(by - ap(3)); y <= by + ap(1); y++) for (let x = Math.floor(cx - ap(7)); x <= cx + ap(10); x++) {
+          const nx = (x + 0.5 - (cx + ap(1.5))) / ap(8.5), ny = (y + 0.5 - (by - ap(1))) / ap(2.6);
+          if (nx * nx * nx * nx + ny * ny > 1) continue;
+          const l = -0.3 * nx - 0.9 * ny;
+          p.set(flip > 0 ? x : W - 1 - x, y, ST[l > 0.55 ? 3 : l > -0.2 ? 2 : 1]);
+        }
+        const hx = flip > 0 ? cx - ap(8) : cx + ap(8), hy = by - ap(1.2);
+        p.rect(Math.round(hx - ap(2)), Math.round(hy + 1), ap(4), ap(2), PL[3]);
+        p.disc(hx, hy, ap(2.2), ST[2]); p.disc(hx - 0.6, hy - 0.6, ap(1.4), ST[3]); p.set(Math.round(hx) - 1, Math.round(hy) - ap(2), ST[4]);
+        const fx = flip > 0 ? cx + ap(9) : W - 1 - (cx + ap(9));
+        for (const dx of [0, -2]) { p.rect(Math.round(fx + dx * flip), Math.round(by - ap(3.4)), 2, ap(2), ST[2]); p.set(Math.round(fx + dx * flip), Math.round(by - ap(3.4)), ST[3]); }
+        const hx2 = cx + flip * ap(1);
+        p.rect(Math.round(hx2) - 2, Math.round(by - ap(2.6)), 4, 2, ST[3]); p.rect(Math.round(hx2) - 2, Math.round(by - ap(2.6)) + 2, 4, 1, ST[1]);
+        // cream only on the very top edge of the figure and plinth
+        for (let x = 0; x < W; x++) for (let y = 0; y < H; y++) if (p.a(x, y)) { if (y < by && p.get(x, y)[0] === ST[3][0]) p.set(x, y, CREAM); break; }
+        // a crack and a moss clump
+        for (let k = 0, x = Math.round(cx + flip * ap(3)), y = Math.round(by - ap(2)); k < ap(3); k++) { if (p.a(x, y)) p.set(x, y, ST[0]); y++; if (k % 2) x += flip; }
+        const M = P.moss;
+        p.set(px0 + 2, yb - 2, M[2]); p.set(px0 + 3, yb - 2, M[3]); p.set(px0 + 2, yb - 3, M[3]);
+        return done(p, null);
+      }
       default: return null;
     }
   });
@@ -384,6 +418,22 @@ export function dungeonTiles(theme, T, WPX) {
       if (cave && v === 4) { let x = T * 0.6, y = T * 0.2; for (let k = 0; k < 10; k++) { const nx = x + (hash2(k, v, 1) - 0.5) * ap(4), ny = y + ap(2); p.line(x, y, nx, ny, FR[0]); x = nx; y = ny; } }
       floor.push(p);
     }
+    // Value structure across the room: every variant also comes in a darker set (whole slabs a
+    // step down, laid in big clusters by the dungeon) and a worn set (a large, stepped, lighter
+    // patch where feet have polished the stone and softened the joints).
+    const key = (c) => c[0] * 65536 + c[1] * 256 + c[2];
+    const remap = (src, pairs, fallback, mask) => {
+      const m = new Map(pairs.map(([a, b]) => [key(a), b])), q = src.clone();
+      for (let y = 0; y < T; y++) for (let x = 0; x < T; x++) {
+        if (mask && !mask(x, y)) continue;
+        const c = src.get(x, y);
+        q.set(x, y, m.get(key(c)) || fallback(c));
+      }
+      return q;
+    };
+    const lo2 = mixc(FR[0], FR[1], 0.5);
+    const floorDark = floor.map((p) => remap(p, [[FR[0], FR[0]], [FR[1], lo2], [fMid, lo2], [FR[2], FR[1]], [fWorn, fMid], [FR[3], FR[2]], [FR[4], fWorn]], (c) => dark(c, 0.8)));
+    const floorWorn = floor.map((p, v) => remap(p, [[FR[0], FR[1]], [FR[1], fMid], [fMid, FR[2]], [FR[2], fWorn], [fWorn, FR[3]]], (c) => c, (x, y) => pvn(x, y, 61 + v, ap(10), T) > 0.52));
     const WR = R5(theme.wall), wMid = mixc(WR[2], WR[3], 0.5);
     // wall top cap (seen from above): the lit face
     const top = new Pix(T, T);
@@ -461,6 +511,6 @@ export function dungeonTiles(theme, T, WPX) {
         front.set(x, y, shadowed(c, y));
       }
     }
-    return { floor, top, front };
+    return { floor, floorDark, floorWorn, top, front };
   });
 }
