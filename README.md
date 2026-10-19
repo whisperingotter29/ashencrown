@@ -7,6 +7,8 @@ Top-down pixel-art action RPG that runs in the browser.
 - `npm run build:single` builds one self-contained page in `dist-single/`
 - Online co-op for up to four players (Esc › Co-op): see `docs/COOP.md`. `npm run signal` runs
   your own signalling server if you don't want the public one
+- Every monster is a hand-built, folklore-based design: see `docs/BESTIARY.md`.
+  `node tools/monster-sheet.mjs <outDir> [region|design|enemy]` renders review sheets
 - `desktop/` is the downloadable app (Windows, macOS, Linux / Steam Deck) and the Steam setup:
   see `desktop/README.md`
 

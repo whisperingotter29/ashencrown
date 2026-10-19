@@ -9,6 +9,7 @@
     "preview": "vite preview --port 4173",
     "check": "node tools/check-sites.mjs",
     "sheets": "node tools/sprite-sheet.mjs sheets",
+    "monsters": "node tools/monster-sheet.mjs sheets/monsters",
     "build:single": "vite build -c vite.single.config.js && node tools/artifact-page.mjs",
     "signal": "peerjs --port 9000 --path /"
   },
