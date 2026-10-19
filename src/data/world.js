@@ -3,14 +3,27 @@
 
 export const WORLD_HALF = 1200;
 
+// Biome palettes (see docs/ART_STYLE.md). Ground ramps run deep -> shadow -> base -> light -> top
+// highlight and sit low and muted; the terrain worker paints big flat clusters from them: an
+// `earth` base (dirt, clay, sand, snow) with `cover` patches (grass, moss, scrub), small `flora`
+// clumps, `stone` on steep ground and cliffs, `road` and town `plaza`. Shadows lean plum-violet,
+// highlights cream. `fog` is the biome's own muted haze tone; `shadowTint` tints cast shadows.
 export const BIOMES = {
   wastes: {
     id: 'wastes', name: 'The Crimson Wastes', short: 'Crimson Wastes',
     blurb: 'Red dunes over buried colossi. The glass storms sing at dusk.',
     baseLevel: 20,
-    palette: { low: '#a8442a', mid: '#cf7444', high: '#e3a066', rock: '#5c2a1e', alt: '#8f3524', dust: '#d98a4e' },
-    fog: '#d89a7c', fogNight: '#2a1420', hemiSky: '#ffc49a', hemiGround: '#5a2a2a',
-    sun: '#ffcf96', shadowTint: '#6a4a90', grade: { sat: 1.12, warm: 0.12, lift: [0.04, 0.0, 0.03] },
+    palette: {
+      low: '#78403a', mid: '#8e5242', high: '#bc7c66', rock: '#783c34', alt: '#5e2e2e', dust: '#a2644e',
+      earth: ['#5a2a2c', '#78403a', '#8e5242', '#a2644e', '#bc7c66'],   // clay and salmon
+      cover: ['#3a1a22', '#4c2228', '#5e2e2e', '#723a36', '#8a4e44'],   // maroon scrub
+      flora: ['#4a1a30', '#8a4238', '#bc7c70', '#d9a08a', '#ecc6a8'],
+      stone: ['#3a1a22', '#5a2a2a', '#783c34', '#94544a', '#b07060'],
+      road: ['#5e3430', '#7a4a3e', '#966450', '#aa765e', '#c48e74'],
+      plaza: ['#4e2e2c', '#7e5848', '#9a705a', '#ae8268', '#c8a084'],
+    },
+    fog: '#8a5a50', fogNight: '#1e1022', hemiSky: '#ffc49a', hemiGround: '#5a2a2a',
+    sun: '#ffd8b0', shadowTint: '#4a2244', grade: { sat: 1.12, warm: 0.12, lift: [0.04, 0.0, 0.03] },
     particles: 'embers', music: 'wastes',
     weather: [['clear', 5], ['haze', 3], ['sandstorm', 2], ['glassstorm', 1], ['emberfall', 1.5]],
   },
@@ -18,9 +31,17 @@ export const BIOMES = {
     id: 'gilded', name: 'The Gilded Ruins', short: 'Gilded Ruins',
     blurb: 'Marble bones of Aurelion, an empire that thought the sun would never set.',
     baseLevel: 26,
-    palette: { low: '#7a7a42', mid: '#a29256', high: '#c4b896', rock: '#8a8068', alt: '#5f6a38', dust: '#d0c094' },
-    fog: '#dcc8a0', fogNight: '#1c1a2c', hemiSky: '#f0dcb8', hemiGround: '#4e4632',
-    sun: '#ffe2ac', shadowTint: '#5a5a90', grade: { sat: 1.0, warm: 0.08, lift: [0.03, 0.02, 0.0] },
+    palette: {
+      low: '#665038', mid: '#7c6644', high: '#ac9468', rock: '#766a56', alt: '#4a5234', dust: '#907852',
+      earth: ['#4a382c', '#665038', '#7c6644', '#907852', '#ac9468'],   // ochre
+      cover: ['#262c22', '#363e2a', '#4a5234', '#5e6640', '#787e54'],   // olive
+      flora: ['#4a2e2a', '#9a6424', '#c99a3a', '#cc949e', '#e8c35a'],
+      stone: ['#3a302c', '#564a40', '#766a56', '#968a70', '#b8ac8e'],   // ochre-cream stone
+      road: ['#56483a', '#766650', '#928264', '#a69676', '#c0b290'],
+      plaza: ['#4a4038', '#786e5e', '#948a74', '#a89e86', '#c2b89e'],
+    },
+    fog: '#8a7e66', fogNight: '#1a1428', hemiSky: '#f0dcb8', hemiGround: '#4e4632',
+    sun: '#ffe6b8', shadowTint: '#3e2a52', grade: { sat: 1.0, warm: 0.08, lift: [0.03, 0.02, 0.0] },
     particles: 'pollen', music: 'gilded',
     weather: [['clear', 6], ['cloudy', 3], ['rain', 2], ['thunderstorm', 1], ['haze', 1]],
   },
@@ -28,9 +49,17 @@ export const BIOMES = {
     id: 'verdant', name: 'The Verdant Reach', short: 'Verdant Reach',
     blurb: 'Forests older than names. Fungal groves breathe light at night.',
     baseLevel: 16,
-    palette: { low: '#2c4a26', mid: '#3e6a32', high: '#6a8a3e', rock: '#4a4636', alt: '#5a3d6b', dust: '#7da04a' },
-    fog: '#8fae86', fogNight: '#101c22', hemiSky: '#cfe8b0', hemiGround: '#2a3018',
-    sun: '#fff0c0', shadowTint: '#203048', grade: { sat: 1.08, warm: -0.02, lift: [0.0, 0.03, 0.02] },
+    palette: {
+      low: '#2f3d3b', mid: '#3c4e47', high: '#5f7660', rock: '#4e4b53', alt: '#8a58a3', dust: '#7a5340',
+      earth: ['#5a3029', '#6d4a42', '#7a5340', '#875e42', '#a8705a'],   // rust earth
+      cover: ['#232e32', '#2f3d3b', '#3c4e47', '#4b6152', '#5f7660'],   // teal grass
+      flora: ['#3e1c2c', '#674952', '#8a58a3', '#a96a7c', '#cc949e'],   // lavender and rose
+      stone: ['#2a2632', '#3c3844', '#4e4b53', '#66626a', '#827d82'],
+      road: ['#5c3a2e', '#745040', '#8c6650', '#9e765c', '#b48e74'],
+      plaza: ['#3a2e36', '#584a4e', '#6c5e5e', '#80726c', '#9a8c82'],
+    },
+    fog: '#5e5a62', fogNight: '#141026', hemiSky: '#cfe8b0', hemiGround: '#2a3018',
+    sun: '#fff0c8', shadowTint: '#2a1a40', grade: { sat: 1.08, warm: -0.02, lift: [0.0, 0.03, 0.02] },
     particles: 'fireflies', music: 'verdant',
     weather: [['clear', 4], ['cloudy', 3], ['rain', 3], ['fog', 2], ['sporebloom', 1.5]],
   },
@@ -38,9 +67,18 @@ export const BIOMES = {
     id: 'frost', name: 'The Frostbite Spine', short: 'Frostbite Spine',
     blurb: 'Storm-lit highlands and frozen citadels on the roof of the world.',
     baseLevel: 45,
-    palette: { low: '#6b7466', mid: '#8a96a0', high: '#e8eef5', rock: '#4c5664', alt: '#a8c8e0', dust: '#c8d4e0' },
-    fog: '#a8b8cc', fogNight: '#0c1426', hemiSky: '#c8d8f0', hemiGround: '#3a4250',
-    sun: '#e6eeff', shadowTint: '#283860', grade: { sat: 0.88, warm: -0.12, lift: [0.0, 0.02, 0.06] },
+    palette: {
+      low: '#444e5e', mid: '#9a9ec2', high: '#d2d2e8', rock: '#3e4658', alt: '#6a4a8a', dust: '#b2b4d4',
+      earth: ['#262c3a', '#343c4c', '#444e5e', '#545e70', '#6a7486'],   // frozen slate earth
+      snow: ['#5c6088', '#7a7ea6', '#9a9ec2', '#b2b4d4', '#d2d2e8'],    // lavender-blue snow
+      cover: ['#1c2830', '#26363c', '#324646', '#3e5654', '#506a66'],   // tundra grass
+      flora: ['#2e1f45', '#4a3266', '#6a4a8a', '#8a6aa8', '#a8d0ec'],
+      stone: ['#1e2230', '#2c3242', '#3e4658', '#525c70', '#6c7690'],   // slate
+      road: ['#2e3040', '#404454', '#525868', '#646a7c', '#7e8496'],
+      plaza: ['#2e3040', '#4a4e60', '#5e6274', '#707688', '#8a90a2'],
+    },
+    fog: '#7c80a2', fogNight: '#12142c', hemiSky: '#c8d8f0', hemiGround: '#3a4250',
+    sun: '#eae8ff', shadowTint: '#2a2a5a', grade: { sat: 0.88, warm: -0.12, lift: [0.0, 0.02, 0.06] },
     particles: 'snow', music: 'frost',
     weather: [['clear', 3], ['cloudy', 2], ['snow', 4], ['blizzard', 2], ['thunderstorm', 1.5], ['aurora', 1]],
   },
@@ -48,9 +86,17 @@ export const BIOMES = {
     id: 'coast', name: 'The Drowned Coast', short: 'Drowned Coast',
     blurb: 'Sunken temples, pirate coves, and bells ringing under the tide.',
     baseLevel: 24,
-    palette: { low: '#b8a47a', mid: '#6a8a5a', high: '#7f9468', rock: '#3a3d40', alt: '#c98a7a', dust: '#d8c8a0' },
-    fog: '#9ab8bc', fogNight: '#0c1a26', hemiSky: '#bfe0e8', hemiGround: '#3a4a40',
-    sun: '#fff2d8', shadowTint: '#203a50', grade: { sat: 1.02, warm: -0.05, lift: [0.0, 0.02, 0.04] },
+    palette: {
+      low: '#7a604c', mid: '#957858', high: '#c2a47a', rock: '#363a42', alt: '#32544c', dust: '#a88a64',
+      earth: ['#5e4640', '#7a604c', '#957858', '#a88a64', '#c2a47a'],   // sand
+      cover: ['#22343a', '#2c4846', '#385c52', '#486e5e', '#628a70'],   // teal dune grass
+      flora: ['#4a1a30', '#8a4a5a', '#b06a7a', '#cc949e', '#efdab4'],   // sea pinks
+      stone: ['#1a1c24', '#262a32', '#363a42', '#4a4e56', '#64666c'],   // basalt
+      road: ['#5a4a3e', '#7a6650', '#94805e', '#a8926c', '#c0aa84'],
+      plaza: ['#3e3a3c', '#666060', '#7e7670', '#948a80', '#aea292'],
+    },
+    fog: '#5e7476', fogNight: '#0e1428', hemiSky: '#bfe0e8', hemiGround: '#3a4a40',
+    sun: '#fff0dc', shadowTint: '#22284a', grade: { sat: 1.02, warm: -0.05, lift: [0.0, 0.02, 0.04] },
     particles: 'spray', music: 'coast',
     weather: [['clear', 4], ['cloudy', 3], ['fog', 3], ['rain', 2], ['thunderstorm', 1.5]],
   },
@@ -58,9 +104,17 @@ export const BIOMES = {
     id: 'maw', name: 'The Maw', short: 'The Maw',
     blurb: 'A wound in the world. The Hollow Deep breathes up from below.',
     baseLevel: 30,
-    palette: { low: '#3a3240', mid: '#4a4448', high: '#6a5a6a', rock: '#2a2230', alt: '#5a3d7a', dust: '#7a6a8a' },
-    fog: '#6a5a7a', fogNight: '#100a1a', hemiSky: '#b0a0d0', hemiGround: '#2a1a30',
-    sun: '#e0c8ff', shadowTint: '#301848', grade: { sat: 0.9, warm: -0.05, lift: [0.03, 0.0, 0.06] },
+    palette: {
+      low: '#2c1e34', mid: '#3a2842', high: '#5e4466', rock: '#322838', alt: '#30204a', dust: '#4a3452',
+      earth: ['#1e1424', '#2c1e34', '#3a2842', '#4a3452', '#5e4466'],   // plum ash
+      cover: ['#160e22', '#22163a', '#30204a', '#3e2a5a', '#52386e'],   // violet void-moss
+      flora: ['#2f0d48', '#691fc4', '#a026ef', '#c860f0', '#f5afd6'],   // aether
+      stone: ['#160f1a', '#221a28', '#322838', '#44384a', '#5a4c60'],
+      road: ['#2a2230', '#3a3040', '#4a3e50', '#5a4e60', '#6e6274'],
+      plaza: ['#2a2230', '#40364a', '#524658', '#645868', '#786c7c'],
+    },
+    fog: '#4a3452', fogNight: '#120a1e', hemiSky: '#b0a0d0', hemiGround: '#2a1a30',
+    sun: '#e8d0ff', shadowTint: '#2a1040', grade: { sat: 0.9, warm: -0.05, lift: [0.03, 0.0, 0.06] },
     particles: 'voidmotes', music: 'maw',
     weather: [['clear', 3], ['haze', 2], ['voidstorm', 1.5], ['emberfall', 1]],
   },
@@ -68,8 +122,16 @@ export const BIOMES = {
     id: 'deep', name: 'The Hollow Deep', short: 'Hollow Deep',
     blurb: 'Lantern-lit kingdoms beneath the world, where the old crown fell.',
     baseLevel: 60,
-    palette: { low: '#2a2630', mid: '#3a3442', high: '#4c4458', rock: '#1c1a22', alt: '#2f5a6a', dust: '#5a4a6a' },
-    fog: '#0e0c16', fogNight: '#0e0c16', hemiSky: '#4a5a8a', hemiGround: '#1a1020',
+    palette: {
+      low: '#2a2434', mid: '#383044', high: '#584c66', rock: '#261e2e', alt: '#1c3434', dust: '#463c54',
+      earth: ['#1e1a28', '#2a2434', '#383044', '#463c54', '#584c66'],   // cavern floor
+      cover: ['#0e1a1c', '#142628', '#1c3434', '#264442', '#365a54'],   // glow-moss
+      flora: ['#1a3a40', '#2f7070', '#4a9488', '#a026ef', '#7cbca8'],
+      stone: ['#100c14', '#1a1420', '#261e2e', '#342a3e', '#463a50'],
+      road: ['#241c2a', '#30283a', '#3e3448', '#4c4056', '#5e5068'],
+      plaza: ['#241c2a', '#383040', '#463c50', '#54485e', '#685c72'],
+    },
+    fog: '#0e0c18', fogNight: '#0e0c18', hemiSky: '#4a5a8a', hemiGround: '#1a1020',
     sun: '#6a7ab0', shadowTint: '#100818', grade: { sat: 1.05, warm: -0.04, lift: [0.01, 0.0, 0.03] },
     particles: 'deepmotes', music: 'deep',
     weather: [['clear', 1]],

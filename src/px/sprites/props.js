@@ -5,7 +5,13 @@
 // multiplied by ART, so a prop covers the same patch of world as it always did, while 1-px
 // details (outlines, glints, needles, leaf tips, cracks) stay 1 px and the extra pixels go into
 // leaf clusters, bark fissures, rock facets and petals.
+//
+// Colours follow docs/ART_STYLE.md: teal or olive canopies in chunky 3-tone leaf clusters with
+// plum-tinted shadows, mauve / plum-brown bark with maroon roots, rose / lavender / mauve flora,
+// stone with violet shadows. Ground detail (grass tufts, flowers, ferns, moss) is not outlined;
+// standalone props you walk around get a soft ink outline (INK_SOFT).
 import { Pix, C, ART, shade, light, dark, mixc, alpha, srand, hash2 } from '../pix.js';
+import { INK_SOFT } from '../palette.js';
 
 const A = ART;
 const cache = new Map();
@@ -19,13 +25,23 @@ export function propSprite(id, variant = 0, scale = 1) {
     const fn = GEN[id] || GEN.rock;
     s = fn(srand(hashKey(id) * 31 + variant * 977 + bucket), sz * A, variant);
     // one free pixel on every side for the selective outline, then crop the empty margins
-    const done = new Map();
-    s.frames = s.frames.map((f) => { if (!done.has(f)) { const q = padPix(f, 1, 1, 1, 1); q.outlineSel(); done.set(f, q.trim(0)); } return done.get(f); });
+    const done = new Map(), mode = OUTLINE_MODE[id] || 'ink';
+    s.frames = s.frames.map((f) => {
+      if (!done.has(f)) {
+        const q = padPix(f, 1, 1, 1, 1);
+        if (mode === 'ink') q.outlineSel(INK_SOFT, 0.18, 0.05);
+        else if (mode === 'deep') q.outlineSel(INK_SOFT, 0.85, 0.6);   // darkest step of its own colours
+        done.set(f, q.trim(0));
+      }
+      return done.get(f);
+    });
     if (s.emis) s.emis = s.emis.trim(0);
     cache.set(key, s);
   }
   return s;
 }
+// ground detail is not ink-outlined: 'none' = no outline, 'deep' = its own darkest step
+const OUTLINE_MODE = { dune_grass: 'none', grass_gold: 'none', grass_green: 'none', tundra_grass: 'none', sea_grass: 'none', flowers: 'none', fern: 'none', glow_moss: 'none', coral: 'deep', mushroom_small: 'deep', driftwood: 'deep', bush: 'deep' };
 const hashKey = (s) => { let h = 7; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return Math.abs(h); };
 
 // ------------------------------------------------------------------ shared helpers (other modules)
@@ -66,18 +82,21 @@ export function vn(x, y, cell, seed) {
 const lvl = (l, t = [0.68, 0.24, -0.2, -0.62]) => (l > t[0] ? 4 : l > t[1] ? 3 : l > t[2] ? 2 : l > t[3] ? 1 : 0);
 
 // palettes
-const BARK = pal('#24181a', '#3a2820', '#563c2a', '#76563a', '#987650');
-const BARK_GREY = pal('#2e2a2c', '#4a4440', '#6a6258', '#8e8474', '#b0a690');
-const BONE = pal('#5a4c44', '#9a8a78', '#cfc2aa', '#e8dcc4', '#fff6e4');
-const MARBLE = pal('#6e6658', '#a69c86', '#cfc4aa', '#e6dcc4', '#fbf4e2');
+const BARK = pal('#2a1420', '#3e2432', '#55323d', '#674952', '#7b576f');       // mauve / plum-brown
+const ROOTS = pal('#1e0c18', '#2e1420', '#3e1c2c', '#55323d', '#674952');      // dark maroon roots
+const BARK_GREY = pal('#2a2430', '#463c46', '#62565c', '#7e7076', '#9a8c8a');
+const BONE = pal('#4a3440', '#8a6e6e', '#c4ae94', '#e2cfa8', '#f3e1b5');
+const MARBLE = pal('#5a4a48', '#8e806c', '#b4a68a', '#d2c4a2', '#efdab4');     // ochre-cream stone
 const FOLIAGE = {
-  oak: pal('#16302a', '#22492e', '#326a32', '#4e8e38', '#86b84c'),
-  oakBig: pal('#132a28', '#1e422c', '#2c602f', '#468436', '#78ac48'),
-  olive: pal('#33433a', '#4e6048', '#6e8260', '#93a67a', '#c2cea0'),
-  cypress: pal('#14281f', '#1e3e2a', '#2c5532', '#43733c', '#6a9850'),
-  pine: pal('#0f2526', '#183a33', '#24533e', '#36704a', '#5a905c'),
-  bush: pal('#183626', '#24522c', '#367230', '#56963a', '#90c452'),
-  palm: pal('#163a26', '#225a2a', '#3a7e30', '#60a43a', '#a2d05a'),
+  // teal canopies (verdant, coast), olive ones (gilded), slate-teal pines (frost); the deepest step
+  // leans plum-navy so leaf shadows read violet, not black-green
+  oak: pal('#1e2032', '#283c44', '#365650', '#4a705c', '#6e9070'),
+  oakBig: pal('#1c1c30', '#26363f', '#33504c', '#466a58', '#68886a'),
+  olive: pal('#262432', '#3a4034', '#525a3c', '#6c744a', '#929a64'),
+  cypress: pal('#1c1c2c', '#283430', '#34483a', '#466046', '#647e54'),
+  pine: pal('#161a2c', '#1f2c38', '#2a3e42', '#38524e', '#506c60'),
+  bush: pal('#1e1e30', '#2c3c42', '#3c544a', '#506e58', '#70906a'),
+  palm: pal('#1a2030', '#24403a', '#345a44', '#48744c', '#6a9060'),
 };
 
 function mk(w, h, oy) { const p = new Pix(Math.max(3, Math.round(w)), Math.max(3, Math.round(h))); p.ox = Math.floor(p.w / 2); p.oy = oy ?? p.h - 2; return p; }
@@ -87,12 +106,12 @@ function padPix(p, l, t, r, b) {
   return q;
 }
 function emisFor(p) { const e = new Pix(p.w, p.h); e.ox = p.ox; e.oy = p.oy; return e; }
-// soft baked contact shadow (alpha 70: casts no outline and no directional shadow)
+// flat baked contact shadow in the SHADOW tint (alpha under 100: casts no outline and no directional shadow)
 function shadowOval(p, cx, cy, rx, ry) {
   rx = Math.max(2, rx); ry = Math.max(1, ry);
   for (let y = Math.floor(-ry); y <= Math.ceil(ry); y++) for (let x = Math.floor(-rx); x <= Math.ceil(rx); x++) {
     const X = Math.round(cx + x), Y = Math.round(cy + y);
-    if ((x * x) / (rx * rx) + (y * y) / (ry * ry) <= 1 && !p.a(X, Y)) p.set(X, Y, [10, 6, 12, 70]);
+    if ((x * x) / (rx * rx) + (y * y) / (ry * ry) <= 1 && !p.a(X, Y)) p.set(X, Y, [20, 12, 30, 96]);
   }
 }
 
@@ -162,7 +181,7 @@ export function trunk(p, cx, yb, yt, w0, w1, R, rnd, o = {}) {
   // roots spreading at the foot
   for (let k = 0; k < (o.roots ?? 2); k++) for (const sd of [-1, 1]) {
     const L = (2 + rnd() * 2.5) * A * (w0 / (4 * A));
-    limb(p, cx + sd * w0 * 0.35, yb - 1 - k, cx + sd * (w0 * 0.5 + L), yb + 0.5, Math.max(1.5, w0 * 0.35), 1, R);
+    limb(p, cx + sd * w0 * 0.35, yb - 1 - k, cx + sd * (w0 * 0.5 + L), yb + 0.5, Math.max(1.5, w0 * 0.35), 1, o.rootR || R);
   }
 }
 // leafy crown: many small lit clumps inside a set of ellipses, back to front, each with its own
@@ -196,10 +215,11 @@ export function crown(p, parts, R, rnd, o = {}) {
       // scalloped puff outline: small leaf lumps around the rim
       const edge = 1 + 0.16 * Math.sin(Math.atan2(ny, nx) * lobes + ph) + (hash2(x, y, seed) - 0.5) * edgeN;
       if (d2 > edge * edge) continue;
-      // leafy band borders: the thresholds wander in small clusters
-      let l = gl * 0.5 + (-0.55 * nx - 0.8 * ny) * 0.62 + bias + (vn(x, y, 1.6 * A, seed) - 0.5) * 0.34;
+      // leafy band borders wander in chunky 4-8 px clusters; three main tones (shadow, base, light),
+      // the deepest only in the crease under each puff, the top step only for glints
+      let l = gl * 0.5 + (-0.55 * nx - 0.8 * ny) * 0.62 + bias + (vn(x, y, 3.2 * A, seed) - 0.5) * 0.26;
       if (d2 > 0.5 * edge * edge && ny > 0.15) l -= 0.42;                   // crease under the puff
-      p.set(x, y, R[lvl(l)]);
+      p.set(x, y, R[lvl(l, [1.2, 0.26, -0.24, -0.66])]);
     }
   }
   // leaf glints on the sunny side: a lit pixel pair on the upper-left rim of a puff
@@ -336,32 +356,34 @@ function crystal(p, em, x, yb, h, w, R, lean, glowC) {
 // ------------------------------------------------------------------ generators
 const GEN = {
   // ---- grasses
-  dune_grass: (r, s) => { const p = mk(16 * A, 3 * A + 11 * s); blades(p, p.w / 2, p.h - 2, 11, 9.5 * s, ramp5('#c8a060'), r, { lean: 0.9, dir: 0.25, spread: 3.4 * A }); return { frames: sway(p) }; },
-  grass_gold: (r, s) => { const p = mk(16 * A, 3 * A + 10 * s); blades(p, p.w / 2, p.h - 2, 12, 8.5 * s, ramp5('#c8b060'), r, { lean: 0.7 }); return { frames: sway(p) }; },
-  grass_green: (r, s) => { const p = mk(16 * A, 3 * A + 9 * s); blades(p, p.w / 2, p.h - 2, 12, 7.5 * s, pal('#1e4a26', '#2e6a2c', '#4a8e34', '#6eb040', '#a4d45a'), r, { lean: 0.65 }); return { frames: sway(p) }; },
-  tundra_grass: (r, s) => { const p = mk(16 * A, 3 * A + 8 * s); blades(p, p.w / 2, p.h - 2, 10, 6.5 * s, ramp5('#8a9070'), r, { lean: 0.6 }); for (let i = 0; i < 4; i++) p.over(Math.round(p.w / 2 + (r() - 0.5) * 6 * A), Math.round(p.h - 3 - r() * 4 * s), '#eef4f8'); return { frames: sway(p) }; },
-  sea_grass: (r, s) => { const p = mk(18 * A, 3 * A + 11 * s); blades(p, p.w / 2, p.h - 2, 11, 9.5 * s, ramp5('#5a9a70'), r, { lean: 1 }); return { frames: sway(p) }; },
+  dune_grass: (r, s) => { const p = mk(16 * A, 3 * A + 11 * s); blades(p, p.w / 2, p.h - 2, 11, 9.5 * s, pal('#4a2a26', '#6e4436', '#8e5e46', '#a87858', '#c49470'), r, { lean: 0.9, dir: 0.25, spread: 3.4 * A }); return { frames: sway(p) }; },
+  grass_gold: (r, s) => { const p = mk(16 * A, 3 * A + 10 * s); blades(p, p.w / 2, p.h - 2, 12, 8.5 * s, pal('#3a3424', '#5a5232', '#7a7040', '#968a52', '#b8a868'), r, { lean: 0.7 }); return { frames: sway(p) }; },
+  grass_green: (r, s) => { const p = mk(16 * A, 3 * A + 9 * s); blades(p, p.w / 2, p.h - 2, 12, 7.5 * s, pal('#1e2630', '#2c3c3e', '#3c544a', '#4f6c58', '#6e8a68'), r, { lean: 0.65 }); return { frames: sway(p) }; },
+  tundra_grass: (r, s) => { const p = mk(16 * A, 3 * A + 8 * s); blades(p, p.w / 2, p.h - 2, 10, 6.5 * s, pal('#1c2830', '#2c3e42', '#3e5452', '#546c66', '#7a8e88'), r, { lean: 0.6 }); for (let i = 0; i < 4; i++) p.over(Math.round(p.w / 2 + (r() - 0.5) * 6 * A), Math.round(p.h - 3 - r() * 4 * s), '#c4c4de'); return { frames: sway(p) }; },
+  sea_grass: (r, s) => { const p = mk(18 * A, 3 * A + 11 * s); blades(p, p.w / 2, p.h - 2, 11, 9.5 * s, pal('#1c3030', '#2a4844', '#3c6256', '#527c66', '#72987a'), r, { lean: 1 }); return { frames: sway(p) }; },
   flowers: (r, s, v) => {
     const p = mk(16 * A, 4 * A + 7 * s), cx = p.w / 2, yb = p.h - 2;
-    blades(p, cx, yb, 9, 6 * s, pal('#22401e', '#34582a', '#4e7a34', '#6e9a3e', '#9cbe5a'), r, { lean: 0.6 });
-    const kinds = [['#e04040', '#ff8a70', '#8a1a20'], ['#f4f0e0', '#ffffff', '#a8a090'], ['#e8a030', '#ffd070', '#9a5a18'], ['#c050c0', '#f0a0f0', '#6a2070'], ['#6a80f0', '#b0c4ff', '#30307a']];
+    blades(p, cx, yb, 9, 6 * s, pal('#1e2630', '#2c3c3e', '#3c544a', '#4f6c58', '#6e8a68'), r, { lean: 0.6 });
+    // rose, lavender, cream, deep rose, gold: [base, lit, shade]
+    const kinds = [['#cc6a86', '#e48fb0', '#7a2f4a'], ['#8a58a3', '#a87cc0', '#4a3266'], ['#efdab4', '#fff4dc', '#996f76'], ['#a96a7c', '#cc949e', '#55323d'], ['#c99a3a', '#e8c35a', '#6a3e1c']];
     const pick = [kinds[v % 5], kinds[(v + 2) % 5]];
     const n = 4 + Math.floor(r() * 3);
     for (let i = 0; i < n; i++) {
       const [base, hi, lo] = pick[i % 2].map((h) => C(h));
       const x = Math.round(cx + (r() - 0.5) * 9 * A), y = Math.round(yb - (3 + r() * 4) * s);
-      limb(p, x, yb - 1, x, y + 1, 1, 1, pal('#22401e', '#34582a', '#4e7a34', '#6e9a3e'));
+      limb(p, x, yb - 1, x, y + 1, 1, 1, pal('#1e2630', '#2c3c3e', '#3c544a', '#4f6c58'));
       if (r() < 0.65) {
         // five-pixel blossom: lit petals up-left, shaded petals down-right, warm centre
-        p.set(x, y - 1, hi); p.set(x - 1, y, hi); p.set(x + 1, y, base); p.set(x, y + 1, lo); p.set(x, y, '#f8e070');
+        p.set(x, y - 1, hi); p.set(x - 1, y, hi); p.set(x + 1, y, base); p.set(x, y + 1, lo); p.set(x, y, '#f3e1b5');
         if (s > 1.4) { p.set(x - 1, y - 1, base); p.set(x + 1, y + 1, lo); p.set(x + 1, y - 1, base); p.set(x - 1, y + 1, base); }
       } else { p.set(x, y, hi); p.set(x + 1, y, base); p.set(x, y + 1, lo); p.set(x + 1, y + 1, lo); }
     }
     return { frames: sway(p, [-1, 0, 1, 0]) };
   },
-  fern: (r, s) => {
+  fern: (r, s, v) => {
     const p = mk(26 * s, 17 * s), cx = p.w / 2, yb = p.h - 2;
-    const R = pal('#173a22', '#24542a', '#3a7832', '#5a9a3a', '#8cc254');
+    // lavender, rose or mauve fronds (the forest's accent flora), now and then a teal one
+    const R = [pal('#2e1f45', '#4a3266', '#6a4a8a', '#8a58a3', '#a87cc0'), pal('#4a1a30', '#7a2f4a', '#a94a68', '#cc6a86', '#e48fb0'), pal('#2a1420', '#55323d', '#7b576f', '#a96a7c', '#cc949e'), pal('#1e2630', '#2c3c3e', '#3c544a', '#4f6c58', '#6e8a68')][v % 4];
     const fronds = [];
     for (let i = 0; i < 7; i++) fronds.push({ a: Math.PI * 1.1 + ((i + 0.5) / 7) * Math.PI * 0.8 + (r() - 0.5) * 0.15, L: (8 + r() * 2.5) * s, back: i % 2 === 0 });
     fronds.sort((a, b) => b.back - a.back || Math.abs(Math.cos(b.a)) - Math.abs(Math.cos(a.a)));
@@ -392,7 +414,7 @@ const GEN = {
     if (v % 2) for (let i = 0; i < 7; i++) {   // berries or blossoms
       const x = Math.round(cx + (r() - 0.5) * 13 * s), y = Math.round(yb - 3 * s - r() * 7 * s);
       if (p.a(x, y) < 200) continue;
-      const c = v === 1 ? pal('#8a1a2a', '#d8384a', '#ff8a8a') : pal('#c8a8b8', '#f4eef0', '#ffffff');
+      const c = v === 1 ? pal('#7a2f4a', '#cc6a86', '#f4bccf') : pal('#4a3266', '#a87cc0', '#efdab4');
       p.set(x, y, c[1]); p.set(x + 1, y, c[0]); p.set(x, y - 1, c[2]);
     }
     return { frames: sway(p, [0, 0, 1, 0]) };
@@ -402,7 +424,7 @@ const GEN = {
   oak: (r, s) => {
     const p = mk(38 * s, 46 * s), cx = p.w / 2, base = p.h - 2;
     shadowOval(p, cx, base, 9 * s, 2.5 * s);
-    trunk(p, cx, base, base - 21 * s, 4.4 * s, 2.8 * s, BARK, r);
+    trunk(p, cx, base, base - 21 * s, 4.4 * s, 2.8 * s, BARK, r, { rootR: ROOTS });
     limb(p, cx + 0.5 * s, base - 13 * s, cx + 5.5 * s, base - 19 * s, 1.8 * s, 1 * s, BARK);
     limb(p, cx - 0.5 * s, base - 15 * s, cx - 5 * s, base - 21 * s, 1.6 * s, 0.9 * s, BARK);
     const j = () => (r() - 0.5) * 2 * s;
@@ -412,7 +434,7 @@ const GEN = {
   oak_big: (r, s) => {
     const p = mk(54 * s, 66 * s), cx = p.w / 2, base = p.h - 2;
     shadowOval(p, cx, base, 14 * s, 3.5 * s);
-    trunk(p, cx, base, base - 30 * s, 7.5 * s, 4.6 * s, BARK, r, { roots: 3, flare: 3.5 * s });
+    trunk(p, cx, base, base - 30 * s, 7.5 * s, 4.6 * s, BARK, r, { roots: 3, flare: 3.5 * s, rootR: ROOTS });
     limb(p, cx - 1 * s, base - 18 * s, cx - 10 * s, base - 29 * s, 3 * s, 1.4 * s, BARK, { grain: true, seed: 3 });
     limb(p, cx + 1 * s, base - 20 * s, cx + 11 * s, base - 31 * s, 3 * s, 1.4 * s, BARK, { grain: true, seed: 7 });
     limb(p, cx, base - 26 * s, cx + 2 * s, base - 36 * s, 2.6 * s, 1.4 * s, BARK);
@@ -430,7 +452,7 @@ const GEN = {
     limb(p, cx + 2.5 * s, base - 9 * s, cx - 3 * s, base - 15 * s, 2.2 * s, 1.2 * s, B);
     limb(p, cx + 2 * s, base - 9 * s, cx + 6 * s, base - 14 * s, 1.6 * s, 1 * s, B);
     crown(p, [[cx, base - 19 * s, 10.5 * s, 6.5 * s], [cx - 6 * s, base - 16.5 * s, 5 * s, 3.6 * s], [cx + 6.5 * s, base - 17 * s, 5 * s, 3.6 * s]], FOLIAGE.olive, r, { clump: 2.5 * s, aspect: 0.75, edge: 0.3, lobes: 8 });
-    for (let i = 0; i < 5; i++) { const x = Math.round(cx + (r() - 0.5) * 14 * s), y = Math.round(base - 15 * s - r() * 6 * s); if (p.a(x, y) > 200) { p.set(x, y, '#3a2a40'); p.set(x, y - 1, '#6a5a78'); } }
+    for (let i = 0; i < 5; i++) { const x = Math.round(cx + (r() - 0.5) * 14 * s), y = Math.round(base - 15 * s - r() * 6 * s); if (p.a(x, y) > 200) { p.set(x, y, '#3a2440'); p.set(x, y - 1, '#7b576f'); } }
     return { frames: sway(p, [0, 0, 1, 0]) };
   },
   cypress: (r, s) => {
@@ -454,7 +476,7 @@ const GEN = {
   dead_tree: (r, s) => {
     const p = mk(36 * s, 42 * s), cx = p.w / 2, base = p.h - 2;
     shadowOval(p, cx, base, 6 * s, 1.5 * s);
-    const B = pal('#3a3230', '#5e544a', '#8a7a68', '#a89880', '#c8b8a0');
+    const B = pal('#2e2228', '#4e3e44', '#6e5c5e', '#8e7a76', '#ae9a8e');      // bleached mauve-grey
     trunk(p, cx, base, base - 22 * s, 4 * s, 2.2 * s, B, r, { roots: 2, flare: 1.6 * s });
     const br = (x0, y0, a, L, w, d) => {
       const x1 = x0 + Math.cos(a) * L, y1 = y0 + Math.sin(a) * L;
@@ -467,7 +489,7 @@ const GEN = {
   dead_pine: (r, s) => {
     const p = mk(24 * s, 45 * s), cx = p.w / 2, base = p.h - 2;
     shadowOval(p, cx, base, 5 * s, 1.5 * s);
-    const B = pal('#2a2224', '#3e3432', '#5a4a40', '#76624e', '#968066');
+    const B = pal('#221a26', '#382a36', '#52404a', '#6c5658', '#8a7470');
     limb(p, cx, base, cx, base - 38 * s, 3.6 * s, 1, B, { grain: true, seed: 4 });
     for (let i = 0; i < 8; i++) {
       const y = base - (9 + i * 3.9) * s, L0 = (8.5 - i * 0.95) * s;
@@ -478,17 +500,17 @@ const GEN = {
         limb(p, cx, y, ex, ey, Math.max(1.2, 0.9 * s / A * 1.6), 1, B);
         // a short twig and a ridge of snow along the upper side
         if (L > 3 * A) limb(p, cx + sd * L * 0.6, y + L * droop * 0.6, cx + sd * L * 0.8, y + L * droop * 0.6 - 1.4 * A, 1, 1, B);
-        for (let k = 0.45; k <= 1.001; k += 1 / Math.max(2, L)) p.set(cx + sd * L * k, y + L * droop * k - 1, k > 0.8 ? '#ffffff' : '#dfe8f2');
+        for (let k = 0.45; k <= 1.001; k += 1 / Math.max(2, L)) p.set(cx + sd * L * k, y + L * droop * k - 1, k > 0.8 ? '#d2d2e8' : '#b2b4d4');
       }
     }
-    p.set(cx, base - 38 * s - 1, '#e8eef5');
+    p.set(cx, base - 38 * s - 1, '#d2d2e8');
     return { frames: [p] };
   },
   palm: (r, s) => {
     const p = mk(46 * s, 54 * s), cx = p.w / 2 - 4 * s, base = p.h - 2;
     shadowOval(p, cx + 6 * s, base, 8 * s, 2 * s);
     // ringed, leaning trunk
-    const R = pal('#3a2618', '#5a4028', '#8a6a48', '#a88a62', '#c8aa80');
+    const R = pal('#2e1e22', '#4a3232', '#6a4c42', '#8a6852', '#a8866a');
     let x = cx, y = base;
     const n = Math.round(34 * s / A * 1.0) * A;
     const pts = [];
@@ -521,14 +543,14 @@ const GEN = {
       }
     }
     // coconuts
-    for (const [ox, oy] of [[-1.5, 1.5], [1.2, 1.8], [0, 2.6]]) { const ccx = x + ox * A, ccy = y + oy * A; p.disc(ccx, ccy, 1.4 * A, '#4a3020'); p.set(Math.round(ccx - 0.6 * A), Math.round(ccy - 0.6 * A), '#8a6a40'); }
+    for (const [ox, oy] of [[-1.5, 1.5], [1.2, 1.8], [0, 2.6]]) { const ccx = x + ox * A, ccy = y + oy * A; p.disc(ccx, ccy, 1.4 * A, '#3e2432'); p.set(Math.round(ccx - 0.6 * A), Math.round(ccy - 0.6 * A), '#875e42'); }
     return { frames: sway(p, [0, 0, 1, 0]) };
   },
 
   // ---- rocks
   sandstone_rock: (r, s) => {
     const p = mk(34 * s, 27 * s), cx = p.w / 2, base = p.h - 3;
-    const R = pal('#5a2a24', '#8a4232', '#b0583c', '#cc7650', '#e89a6a');
+    const R = pal('#3e1c22', '#662b2c', '#8a4238', '#a8604e', '#c48270');
     boulder(p, cx - 1 * s, base - 7 * s, 13 * s, 8 * s, R, r, { bump: 0.1, flatTop: true, facets: 6 });
     boulder(p, cx + 4 * s, base - 13 * s, 7.5 * s, 5 * s, R, r, { bump: 0.08, flatTop: true, facets: 4, flatBottom: 0.3 });
     // strata: wind-cut layers every ~4 px, a dark seam with a lit lip above it
@@ -542,22 +564,22 @@ const GEN = {
     }
     return { frames: [p] };
   },
-  mossy_rock: (r, s) => { const p = rockGen(r, s, '#6a6a5e'); capTop(p, pal('#1e3a1a', '#2e5422', '#4a7a2a', '#6a9e34', '#9cc84a'), r, 0.8, { drip: true }); return { frames: [p] }; },
-  snow_rock: (r, s) => { const p = rockGen(r, s, '#5a6474'); capTop(p, pal('#8a9ab0', '#b8c6d8', '#dfe8f2', '#f4f8fc', '#ffffff'), r, 0.7); return { frames: [p] }; },
+  mossy_rock: (r, s) => { const p = rockGen(r, s, '#66626a'); capTop(p, pal('#1e2632', '#2a3c3c', '#3c5446', '#56704e', '#7a9060'), r, 0.8, { drip: true }); return { frames: [p] }; },
+  snow_rock: (r, s) => { const p = rockGen(r, s, '#525c70'); capTop(p, pal('#5c6088', '#7a7ea6', '#9a9ec2', '#b2b4d4', '#d2d2e8'), r, 0.7); return { frames: [p] }; },
   ash_rock: (r, s) => {
-    const p = rockGen(r, s, '#3a3438');
+    const p = rockGen(r, s, '#3a2c40');
     const em = emisFor(p);
-    for (let i = 0; i < 4; i++) {   // glowing fissures
+    for (let i = 0; i < 4; i++) {   // aether seeping through fissures
       let x = Math.round(p.w * (0.25 + r() * 0.5)), y = Math.round(p.h * (0.3 + r() * 0.3));
-      for (let k = 0; k < 3 * A; k++) { if (p.a(x, y) > 200) { p.set(x, y, '#ff7a30'); em.set(x, y, '#ff7a30'); } y++; x += r() < 0.4 ? 1 : 0; }
+      for (let k = 0; k < 3 * A; k++) { if (p.a(x, y) > 200) { const c = k === 1 ? '#f5afd6' : '#c860f0'; p.set(x, y, c); em.set(x, y, c); } y++; x += r() < 0.4 ? 1 : 0; }
     }
     return { frames: [p], emis: em };
   },
-  deep_rock: (r, s) => ({ frames: [rockGen(r, s, '#2e2a38')] }),
+  deep_rock: (r, s) => ({ frames: [rockGen(r, s, '#3a3046')] }),
   coast_rock: (r, s) => {
     // a knot of basalt columns: hexagonal lit tops, three-tone shafts, a wet weedy foot
     const p = mk(28 * s, 31 * s), base = p.h - 3;
-    const R = pal('#1a1e22', '#2a3036', '#3c444c', '#56606a', '#7a868e');
+    const R = pal('#1a1a26', '#282a36', '#3a3c48', '#52545e', '#706e76');
     const cw = Math.max(4, Math.round(3.8 * s / A * A)), cols = [];
     const n = Math.max(3, Math.floor((p.w - 4 * A) / cw));
     for (const row of [0, 1]) for (let i = 0; i < n - row; i++) {
@@ -579,13 +601,13 @@ const GEN = {
         if (j < inset || j >= c.w - inset) continue;
         p.set(x0 + j, top - th + 1 + k, k === th - 1 ? R[1] : k === 0 ? R[4] : j < c.w / 2 ? R[4] : R[3]);
       }
-      for (let j = 0; j < c.w; j++) if (hash2(x0 + j, y1, 3) < 0.55) { const yy = y1 - Math.round(hash2(j, y1, 4) * 2 * A); p.set(x0 + j, yy, hash2(j, 1, x0) < 0.5 ? '#2a5a3a' : '#4a7a4a'); if (hash2(j, 2, x0) < 0.3) p.set(x0 + j, yy - 1, '#d8d0c0'); }
+      for (let j = 0; j < c.w; j++) if (hash2(x0 + j, y1, 3) < 0.55) { const yy = y1 - Math.round(hash2(j, y1, 4) * 2 * A); p.set(x0 + j, yy, hash2(j, 1, x0) < 0.5 ? '#2a4844' : '#3c6256'); if (hash2(j, 2, x0) < 0.3) p.set(x0 + j, yy - 1, '#efdab4'); }
     }
     return { frames: [p] };
   },
   stalagmite: (r, s) => {
     const p = mk(18 * s, 35 * s), cx = p.w / 2, base = p.h - 2;
-    const R = pal('#2a2422', '#3e3632', '#5a5048', '#7a6e62', '#9a8e80');
+    const R = pal('#1e1826', '#302838', '#463c4c', '#5e5262', '#7a6c78');
     const spike = (x, h, w) => {
       for (let k = 0; k < h; k++) {
         const t = k / h, ww = Math.max(0.6, w * (1 - t) * (1 + 0.08 * Math.sin(k * 0.9 / A)));
@@ -606,7 +628,7 @@ const GEN = {
   },
   red_pillar: (r, s) => {
     const p = mk(30 * s, 57 * s), cx = p.w / 2, base = p.h - 2;
-    const R = pal('#4e2620', '#7a3e2e', '#b0603e', '#c87a50', '#e09a68');
+    const R = pal('#3e1c22', '#662b2c', '#8a4238', '#a8604e', '#c48270');
     const h = 48 * s, seed = Math.floor(r() * 99);
     for (let k = 0; k < h; k++) {
       const t = k / h;
@@ -622,22 +644,22 @@ const GEN = {
       }
     }
     // cap rock
-    const C2 = pal('#3a1e1a', '#5a2e24', '#8a4430', '#a85a40', '#c47a58');
+    const C2 = pal('#2e1420', '#4e2228', '#723632', '#8e4c42', '#a8665a');
     boulder(p, cx, base - h - 1 * s, 10.5 * s, 4 * s, C2, r, { bump: 0.08, flatTop: true, facets: 5, flatBottom: 0.2 });
     return { frames: [p] };
   },
 
   // ---- crystals
-  glass_shard: (r, s) => crystals(r, s, '#3e0c1a', '#ff2848'),
-  ice_crystal: (r, s) => crystals(r, s, '#7ab0d8', '#c8f0ff'),
-  void_crystal: (r, s) => crystals(r, s, '#3a2060', '#b070ff'),
-  crystal_blue: (r, s) => crystals(r, s, '#1e4a72', '#60d0ff'),
+  glass_shard: (r, s) => crystals(r, s, '#3e0c1a', '#ff3a5a'),
+  ice_crystal: (r, s) => crystals(r, s, '#5a7ab0', '#a8d0ec'),
+  void_crystal: (r, s) => crystals(r, s, '#4a1664', '#c860f0'),
+  crystal_blue: (r, s) => crystals(r, s, '#1f4a64', '#7cd8c8'),
 
   // ---- ruins
   column: (r, s) => {
     const p = mk(18 * s, 63 * s), cx = p.w / 2, base = p.h - 2;
     columnPix(p, cx, base, 54 * s, 4.8 * s, MARBLE, false, r);
-    capTop(p, pal('#3a4a2a', '#56683a', '#7a8a4a', '#9aac5a', '#c0cc7a'), r, 0.35);
+    capTop(p, pal('#262c26', '#363e2e', '#4a5234', '#5e6640', '#787e54'), r, 0.35);
     return { frames: [p] };
   },
   column_broken: (r, s) => {
@@ -656,7 +678,7 @@ const GEN = {
     p.ellipse(x0, base - rr + 0.5, 1.6 * A, rr, MARBLE[3]);
     p.ring(x0, base - rr + 0.5, rr * 0.6, MARBLE[2]);
     crack(p, x0 + len * 0.5, base - rr * 1.6, 3 * A, MARBLE[1], r);
-    capTop(p, pal('#3a4a2a', '#56683a', '#7a8a4a', '#9aac5a', '#c0cc7a'), r, 0.45, { drip: true });
+    capTop(p, pal('#262c26', '#363e2e', '#4a5234', '#5e6640', '#787e54'), r, 0.45, { drip: true });
     return { frames: [p] };
   },
   marble_block: (r, s) => {
@@ -677,7 +699,7 @@ const GEN = {
     };
     box(2 * A, base - 12 * s, 20 * s, 12 * s);
     box(10 * s, base - 20 * s, 12 * s, 8 * s);
-    capTop(p, pal('#3a4a2a', '#56683a', '#7a8a4a', '#9aac5a', '#c0cc7a'), r, 0.4, { drip: true });
+    capTop(p, pal('#262c26', '#363e2e', '#4a5234', '#5e6640', '#787e54'), r, 0.4, { drip: true });
     return { frames: [p] };
   },
   statue_frag: (r, s) => {
@@ -704,7 +726,7 @@ const GEN = {
     p.line(cx + 13 * s, base - 13 * s, cx + 13 * s, base - 9 * s, R[0]);
     p.line(cx + 11 * s, base - 13 * s, cx + 11 * s, base - 10 * s, R[3]);
     // laurel wreath
-    const G = pal('#6a4a18', '#a87a28', '#d8a840', '#f0cc60', '#fff0a0');
+    const G = pal('#6a3e1c', '#9a6424', '#c99a3a', '#e8c35a', '#f6e39a');
     for (let i = 0; i < 7; i++) {
       const yy = base - (3.5 + i * 2.9) * s, xx = cx - 12.5 * s + Math.sin(i * 0.9) * 0.6 * s;
       for (const sd of [-1, 1]) {
@@ -715,7 +737,7 @@ const GEN = {
       p.set(Math.round(xx), Math.round(yy), G[0]);
     }
     for (let k = 0; k < 3; k++) crack(p, cx + (r() - 0.2) * 14 * s, base - 18 * s + r() * 8 * s, Math.round(5 * A), R[1], r);
-    capTop(p, pal('#4a5a32', '#6a7a42', '#8a9a5a', '#a8b46a', '#c8d088'), r, 0.3);
+    capTop(p, pal('#262c26', '#363e2e', '#4a5234', '#5e6640', '#787e54'), r, 0.3);
     return { frames: [p] };
   },
   rib_bones: (r, s) => {
@@ -742,9 +764,9 @@ const GEN = {
     // skull lying at the end of the spine
     const sx = p.w - 8 * s, sy = base - 4 * s;
     boulder(p, sx, sy, 7 * s, 5 * s, BONE, r, { bump: 0.05, facets: 3, lobes: 3 });
-    p.ellipse(sx + 2 * s, sy - 1 * s, 1.8 * s, 1.5 * s, '#2a1a18');
-    p.set(Math.round(sx + 2 * s - 1), Math.round(sy - 1 * s - 1), '#4a3428');
-    p.ellipse(sx - 3 * s, sy + 1 * s, 1.2 * s, 0.8 * s, '#3a2a20');
+    p.ellipse(sx + 2 * s, sy - 1 * s, 1.8 * s, 1.5 * s, '#231a2c');
+    p.set(Math.round(sx + 2 * s - 1), Math.round(sy - 1 * s - 1), '#3e2432');
+    p.ellipse(sx - 3 * s, sy + 1 * s, 1.2 * s, 0.8 * s, '#2e1c2c');
     for (let k = 0; k < 4; k++) p.set(Math.round(sx + (k - 1.5) * 1.6 * A), Math.round(sy + 4 * s), k % 2 ? BONE[1] : BONE[3]);
     return { frames: [p] };
   },
@@ -779,19 +801,19 @@ const GEN = {
     }
     // cut end with growth rings
     const ex = x1 - 1;
-    p.ellipse(ex, cy, 2 * A, rr, '#c8a478');
-    for (let k = 1; k < 3; k++) p.ring(ex, cy, rr * k / 3, '#9a7650');
-    p.set(ex, Math.round(cy), '#6a4a30');
+    p.ellipse(ex, cy, 2 * A, rr, '#cc949e');
+    for (let k = 1; k < 3; k++) p.ring(ex, cy, rr * k / 3, '#996f76');
+    p.set(ex, Math.round(cy), '#55323d');
     // broken end
     for (let y = Math.round(-rr); y < Math.round(rr); y++) if (hash2(y, 0, seed) < 0.5) p.clear(x0, Math.round(cy + y));
-    capTop(p, pal('#1e3a1a', '#2e5422', '#4a7a2a', '#6a9e34', '#9cc84a'), r, 0.7, { drip: true });
+    capTop(p, pal('#1e2632', '#2a3c3c', '#3c5446', '#56704e', '#7a9060'), r, 0.7, { drip: true });
     // a couple of shelf fungi
-    for (let k = 0; k < 2; k++) { const fx = Math.round(x0 + (0.3 + k * 0.35) * (x1 - x0)), fy = Math.round(cy + rr * 0.3); p.rect(fx, fy, Math.round(2.2 * A), 1, '#e0c890'); p.rect(fx, fy + 1, Math.round(2.2 * A), 1, '#a08050'); }
+    for (let k = 0; k < 2; k++) { const fx = Math.round(x0 + (0.3 + k * 0.35) * (x1 - x0)), fy = Math.round(cy + rr * 0.3); p.rect(fx, fy, Math.round(2.2 * A), 1, '#efdab4'); p.rect(fx, fy + 1, Math.round(2.2 * A), 1, '#996f76'); }
     return { frames: [p] };
   },
   driftwood: (r, s) => {
     const p = mk(36 * s, 15 * s), base = p.h - 3;
-    const R = pal('#5a5248', '#8a7e6e', '#b8a890', '#d4c6ae', '#eee2cc');
+    const R = pal('#4a3a42', '#7a6a6c', '#a8948c', '#c8b4a2', '#e2cfb4');
     limb(p, 4 * A, base - 3 * A, p.w - 6 * A, base - 4 * A, 5 * s, 3 * s, R, { grain: true, seed: 5 });
     limb(p, p.w * 0.55, base - 5 * A, p.w * 0.7, base - 10 * s, 2 * s / A * 1.4, 1, R);
     limb(p, p.w * 0.3, base - 4 * A, p.w * 0.22, base - 7 * s, 1.6, 1, R);
@@ -802,20 +824,20 @@ const GEN = {
   ashthorn: (r, s) => {
     const p = mk(40 * s, 29 * s), cx = p.w / 2, base = p.h - 2;
     const em = emisFor(p);
-    const R = pal('#120c0e', '#22161a', '#3a2622', '#54382e', '#6e4a3a');
+    const R = pal('#140f1c', '#24141e', '#3e1c2c', '#55323d', '#674952');
     for (let i = 0; i < 9; i++) {
       const a = -Math.PI * (0.1 + r() * 0.8), L = (8 + r() * 10) * s;
       const ex = cx + Math.cos(a) * L, ey = base + Math.sin(a) * L;
       limb(p, cx, base, ex, ey, 2.2 * A, 1, R);
       // thorns
       for (let k = 0.3; k < 0.9; k += 0.2) { const tx = cx + Math.cos(a) * L * k, ty = base + Math.sin(a) * L * k, sd = (k * 10) % 2 < 1 ? 1 : -1; p.set(tx - Math.sin(a) * sd * 1.5, ty + Math.cos(a) * sd * 1.5, R[1]); }
-      if (r() < 0.6) { const kx = cx + Math.cos(a) * L * 0.85, ky = base + Math.sin(a) * L * 0.85; em.set(kx, ky, '#ff8a30'); em.set(kx + 1, ky, '#ffc060'); em.set(kx, ky - 1, '#ff6a20'); p.set(kx, ky, '#ff8a30'); p.set(kx + 1, ky, '#ffc060'); }
+      if (r() < 0.6) { const kx = cx + Math.cos(a) * L * 0.85, ky = base + Math.sin(a) * L * 0.85; em.set(kx, ky, '#ec7a2a'); em.set(kx + 1, ky, '#f8b848'); em.set(kx, ky - 1, '#c2401c'); p.set(kx, ky, '#ec7a2a'); p.set(kx + 1, ky, '#f8b848'); }
     }
     return { frames: [p], emis: em };
   },
   coral: (r, s) => {
     const p = mk(32 * s, 27 * s), cx = p.w / 2, base = p.h - 2;
-    const cols = ['#e07a6a', '#f0a050', '#c05a8a'];
+    const cols = ['#cc6a86', '#d9765a', '#a96a7c'];
     const br = (x, y, a, L, c, d) => {
       const x1 = x + Math.cos(a) * L, y1 = y + Math.sin(a) * L, R = ramp5(c);
       limb(p, x, y, x1, y1, 3 * A, 2 * A, R);
@@ -824,13 +846,13 @@ const GEN = {
     };
     for (const i of [0, 2, 1]) br(cx + (i - 1) * 4 * A, base, -Math.PI / 2 + (i - 1) * 0.4, 8 * s, cols[i], 2);
     // polyp dots
-    for (let k = 0; k < 10; k++) { const x = Math.round(cx + (r() - 0.5) * 18 * s), y = Math.round(base - r() * 16 * s); if (p.a(x, y) > 200) p.set(x, y, '#fff0e0'); }
+    for (let k = 0; k < 10; k++) { const x = Math.round(cx + (r() - 0.5) * 18 * s), y = Math.round(base - r() * 16 * s); if (p.a(x, y) > 200) p.set(x, y, '#f3e1b5'); }
     return { frames: sway(p, [0, 0, 1, 0]) };
   },
   mushroom_giant: (r, s) => {
     const p = mk(40 * s, 51 * s), cx = p.w / 2, base = p.h - 2;
     shadowOval(p, cx, base, 8 * s, 2 * s);
-    const stem = pal('#7a7068', '#b0a698', '#d8d0c0', '#ece6d8', '#fffaf0');
+    const stem = pal('#55323d', '#8a6e6e', '#c4ae94', '#e2cfa8', '#f3e1b5');
     trunk(p, cx, base, base - 27 * s, 6.5 * s, 5 * s, stem, r, { roots: 0, knot: false, flare: 2.5 * s });
     const em = emisFor(p);
     const capY = base - 28 * s;
@@ -840,10 +862,10 @@ const GEN = {
     for (let x = Math.round(-15 * s); x <= Math.round(15 * s); x++) for (let k = 0; k < Math.round(2.4 * A); k++) {
       const y = Math.round(capY + 1 + k + Math.abs(x) * 0.04);
       const gill = (x + 100) % 2 === 0;
-      p.set(cx + x, y, gill ? '#3a1a4a' : '#7a3a9a');
-      if (!gill) em.set(cx + x, y, alpha('#c070ff', 200));
+      p.set(cx + x, y, gill ? '#2f0d48' : '#691fc4');
+      if (!gill) em.set(cx + x, y, alpha('#a026ef', 200));
     }
-    const R = pal('#2a0e3a', '#45185e', '#6a2a8a', '#8a44aa', '#b070cc');
+    const R = pal('#2e1f45', '#4a3266', '#6a4a8a', '#8a58a3', '#a87cc0');
     for (let y = Math.round(capY - 13 * s); y <= capY + 1; y++) for (let x = Math.round(cx - 18 * s); x <= cx + 18 * s; x++) {
       const nx = (x + 0.5 - cx) / (17 * s), ny = (y + 0.5 - (capY + 1)) / (12 * s);
       if (ny > 0 || nx * nx + ny * ny > 1 + (hash2(Math.round(Math.atan2(ny, nx) * 9), 0, 5) - 0.5) * 0.06) continue;
@@ -857,20 +879,20 @@ const GEN = {
       const x = cx + Math.cos(a) * 15 * s * d, y = capY + 1 + Math.sin(a) * 10.5 * s * d;
       if (p.a(x, y) < 200) continue;
       const rr = (0.8 + r() * 0.9) * A;
-      p.ellipse(x, y, rr, rr * 0.8, '#e8b8f8');
-      p.set(Math.round(x - rr * 0.4), Math.round(y - rr * 0.4), '#ffffff');
-      em.ellipse(x, y, rr, rr * 0.8, '#f0b0ff');
+      p.ellipse(x, y, rr, rr * 0.8, '#f5afd6');
+      p.set(Math.round(x - rr * 0.4), Math.round(y - rr * 0.4), '#fff4fb');
+      em.ellipse(x, y, rr, rr * 0.8, '#f5afd6');
     }
     return { frames: [p], emis: em };
   },
   mushroom_small: (r, s, v) => {
     const p = mk(22 * A, 16 * A), base = p.h - 2;
-    const stem = pal('#8a8072', '#bab09e', '#e0d8c8', '#f0eadc', '#ffffff');
+    const stem = pal('#55323d', '#8a6e6e', '#c4ae94', '#e2cfa8', '#f3e1b5');
     const order = [0, 2, 1];
     for (const i of order) {
       const x = Math.round(4.5 * A + i * 5 * A + r() * 1.5 * A), h = Math.round((3 + r() * 4) * A * (i === 1 ? 1.1 : 0.85));
       const red = i === 1 ? v % 2 === 0 : v % 2 === 1;
-      const cap = red ? pal('#5a1410', '#8a2218', '#c04030', '#e0604a', '#ff9a80') : pal('#4a2a18', '#6a4026', '#a06040', '#c0845a', '#e0b080');
+      const cap = red ? pal('#4a1420', '#7a2f4a', '#a94a68', '#cc6a86', '#e48fb0') : pal('#2a1420', '#55323d', '#7b576f', '#996f76', '#cc949e');
       const sw = Math.max(2, Math.round(1.6 * A));
       for (let k = 0; k < h; k++) for (let j = 0; j < sw; j++) p.set(x + j, base - k, stem[j === 0 ? 3 : j === sw - 1 ? 1 : 2]);
       const cw = 2.8 * A * (i === 1 ? 1.1 : 0.9), ch = 2 * A, cy = base - h;
@@ -881,7 +903,7 @@ const GEN = {
         if (ny > -0.25) l -= 0.5;
         p.set(xx, y, cap[lvl(l, [0.62, 0.2, -0.2, -0.6])]);
       }
-      if (red) { p.set(x - 1, Math.round(cy - ch * 0.5), '#fff0e0'); p.set(x + sw + 1, Math.round(cy - ch * 0.2), '#fff0e0'); p.set(x + 1, Math.round(cy - ch), '#fff0e0'); }
+      if (red) { p.set(x - 1, Math.round(cy - ch * 0.5), '#f3e1b5'); p.set(x + sw + 1, Math.round(cy - ch * 0.2), '#f3e1b5'); p.set(x + 1, Math.round(cy - ch), '#f3e1b5'); }
     }
     return { frames: [p] };
   },
@@ -912,7 +934,7 @@ const GEN = {
     }
     return { frames: [p], emis: em };
   },
-  rock: (r, s) => ({ frames: [rockGen(r, s, '#6a6460')] }),
+  rock: (r, s) => ({ frames: [rockGen(r, s, '#66626a')] }),
 };
 
 function pine(r, s, snow) {
@@ -921,7 +943,7 @@ function pine(r, s, snow) {
   trunk(p, cx, base, base - 11 * s, 3 * s, 2.2 * s, BARK, r, { roots: 1, knot: false, flare: 1.5 * s });
   const R = FOLIAGE.pine, seed = Math.floor(r() * 999);
   const tiers = 6;
-  const SN = pal('#6a7c9a', '#9aaac4', '#ccd8e8', '#eaf2fa', '#ffffff');
+  const SN = pal('#5c6088', '#7e82aa', '#a2a4c8', '#c0c0dc', '#dcdaee');
   const T = new Int8Array(p.w * p.h).fill(-1), Lb = new Float32Array(p.w * p.h);
   const tooth = Math.max(3, Math.round(2.6 * A));
   for (let i = 0; i < tiers; i++) {

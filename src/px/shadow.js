@@ -2,11 +2,13 @@
 // away from the sun: a pixel h px above the sprite's pivot lands at (x + h*lx, pivot + h*lz). The
 // sun swings from the east (shadows lean left) to the west (shadows lean right) and the shadows
 // stretch at dawn and dusk; at night, indoors and underground the cast shadows fade out and only
-// the soft contact blobs under the feet remain.
+// the contact ellipses under the feet remain.
 //
-// Silhouettes are baked once per sprite frame and sun angle (cached on the Pix), with a solid core
-// and a dithered penumbra toward the far tip. All cast shadows go into one opaque layer that is
-// tinted and composited once, so overlapping shadows never double-darken.
+// Following docs/ART_STYLE.md the shadows are flat: silhouettes are baked once per sprite frame and
+// sun angle (cached on the Pix) as one solid shape, with only the far tip's rim broken up, and are
+// tinted plum-violet (the biome's shadowTint) rather than black. All cast shadows go into one opaque
+// layer that is tinted and composited once, so overlapping shadows never double-darken. Contact
+// shadows are flat ellipses in the palette SHADOW tint.
 //
 // Drawables opt in with castShadow(sctx); the renderer calls drawCastShadows() in its shadow stage,
 // before any sprite is drawn, so shadows never cover sprites.
@@ -14,6 +16,7 @@ import { Pix, ART, bayer } from './pix.js';
 import { view } from './view.js';
 import { atmo, sunElevation } from '../world/atmosphere.js';
 import { BIOMES } from '../data/world.js';
+import { SHADOW } from './palette.js';
 
 const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
 const smooth = (a, b, v) => { const t = clamp((v - a) / (b - a), 0, 1); return t * t * (3 - 2 * t); };
@@ -24,7 +27,7 @@ export const sun = {
   a: 0.45,               // cast shadow opacity (0 = no cast shadows)
   cast: true,            // false at night / indoors: contact blobs only
   key: '',               // bake key for the quantised direction
-  color: 'rgb(22,16,40)',
+  color: 'rgb(42,26,64)',
   frame: 0,
 };
 
@@ -47,13 +50,14 @@ export function updateSun() {
   sun.lx = lx; sun.lz = lz;
   sun.key = lx + ',' + lz;
   const weather = 1 - 0.65 * (atmo.overcast || 0) - 0.5 * (atmo.storm || 0);
-  sun.a = 0.46 * day * clamp(weather, 0.15, 1);
+  sun.a = 0.48 * day * clamp(weather, 0.15, 1);
   sun.cast = sun.a > 0.03;
   const tint = BIOMES[atmo.biome]?.shadowTint;
   if (tint !== sun._tint) {
     sun._tint = tint;
-    let r = 22, g = 16, b = 40;
-    if (tint) { const n = parseInt(tint.slice(1), 16); r = Math.round(((n >> 16) & 255) * 0.28); g = Math.round(((n >> 8) & 255) * 0.24); b = Math.round((n & 255) * 0.32); }
+    // plum-violet: the biome tint itself, nudged toward violet so no shadow goes neutral black
+    let r = 42, g = 26, b = 64;
+    if (tint) { const n = parseInt(tint.slice(1), 16); r = Math.round(((n >> 16) & 255) * 0.72 + 4); g = Math.round(((n >> 8) & 255) * 0.62); b = Math.round((n & 255) * 0.78 + 8); }
     sun.color = `rgb(${r},${g},${b})`;
   }
 }
@@ -98,15 +102,15 @@ function bake(p, lx, lz, cap, thr) {
     sd[i * 4 + 3] = 255;
   }
   const ax = x0, ay = y0;
-  // penumbra: solid near the base, dithered toward the far tip, and a checkered rim
+  // flat shadow: solid throughout, only the rim of the far tip is broken into a checker
   const out = new Uint8ClampedArray(sd.length);
-  const soft0 = hmax * 0.55;
+  const soft0 = hmax * 0.6;
   for (let Y = 0; Y < S.h; Y++) for (let X = 0; X < sw; X++) {
     const i = Y * sw + X;
     if (!sd[i * 4 + 3]) continue;
     const edge = X === 0 || X === sw - 1 || Y === 0 || Y === S.h - 1 || !sd[(i - 1) * 4 + 3] || !sd[(i + 1) * 4 + 3] || !sd[(i - sw) * 4 + 3] || !sd[(i + sw) * 4 + 3];
     const far = hv[i] > soft0 ? (hv[i] - soft0) / Math.max(1, hmax - soft0) : 0;
-    const keep = edge && far > 0 ? 0.5 - far * 0.2 : 1 - far * 0.6;
+    const keep = edge && far > 0.35 ? 0.5 : 1;
     if (keep < 1 && bayer(X + ax, Y + ay) >= keep) continue;
     out[i * 4 + 3] = 255;
   }
@@ -173,8 +177,9 @@ export function drawCastShadows(ctx, list) {
 }
 
 // ------------------------------------------------------------------ contact blobs
-// soft dithered ellipse under the feet; bigger and softer when there is no sun to cast from
+// flat ellipse under the feet in the palette SHADOW tint (no soft gradient)
 const blobs = new Map();
+const SHADOW_RGBA = (() => { const m = SHADOW.match(/[\d.]+/g).map(Number); return [m[0], m[1], m[2], Math.round(m[3] * 255)]; })();
 export function contactBlob(ctx, x, y, rx, ry, a = 1) {
   rx = Math.max(2, Math.round(rx)); ry = Math.max(1, Math.round(ry));
   const key = rx * 100 + ry;
@@ -184,9 +189,7 @@ export function contactBlob(ctx, x, y, rx, ry, a = 1) {
     for (let j = -ry; j <= ry; j++) for (let i = -rx; i <= rx; i++) {
       const d = (i * i) / ((rx + 0.5) * (rx + 0.5)) + (j * j) / ((ry + 0.5) * (ry + 0.5));
       if (d > 1) continue;
-      // three bands: dark core, mid, dithered rim
-      const al = d < 0.35 ? 120 : d < 0.7 ? 84 : (bayer(i + rx, j + ry) < 0.5 ? 60 : 0);
-      if (al) p.set(i + rx, j + ry, [14, 8, 20, al]);
+      p.set(i + rx, j + ry, SHADOW_RGBA);
     }
     blobs.set(key, p);
   }
