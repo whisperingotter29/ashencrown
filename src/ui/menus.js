@@ -86,7 +86,7 @@ function cellHtml(it, o = {}) {
 function cellCls(it, o = {}) { return 'cell slotf' + (it ? ' rf-' + it.rarity : ' empty') + (o.sel ? ' sel' : '') + (o.dim ? ' dim' : '') + (o.cls ? ' ' + o.cls : ''); }
 
 const SLOT_GHOST = { helm: 'helm', chest: 'chest', gloves: 'gloves', legs: 'legs', boots: 'boots', amulet: 'amulet', ring1: 'ring', ring2: 'ring', offhand: 'shield' };
-const ghostIcon = (slot) => simpleIcon(SLOT_GHOST[slot] || 'gem', '#8a7a64');
+const ghostIcon = (slot) => simpleIcon(SLOT_GHOST[slot] || 'gem', '#66626a');
 
 // pixel portrait of the player (their actual in-game sprite, armour included), trimmed to the
 // figure and scaled by a whole number of UI pixels. k = the largest sprite pixel size in UI units;
@@ -153,7 +153,7 @@ function buildBag(body, c) {
     }, (p) => (p.from === 'bag' || p.from === 'equip') && fitsSlot(p.item, slot));
     grid.appendChild(s);
   });
-  const hero = el('div', 'hero', `<div class="hero-bg">${heroPortrait()}</div><div class="hero-stats"><span title="Armor">${img(simpleIcon('shield', '#c8c0b0'), 'mini')}${G.player?.derived.armor ?? 0}</span><span>${img(simpleIcon('sword', '#d8d0c8'), 'mini')}${Math.round(G.player?.derived.weaponDmg ?? 0)}</span></div>`);
+  const hero = el('div', 'hero', `<div class="hero-bg">${heroPortrait()}</div><div class="hero-stats"><span title="Armor">${img(simpleIcon('shield', '#c4bdb6'), 'mini')}${G.player?.derived.armor ?? 0}</span><span>${img(simpleIcon('sword', '#e2e6e0'), 'mini')}${Math.round(G.player?.derived.weaponDmg ?? 0)}</span></div>`);
   hero.style.gridArea = 'hero';
   grid.appendChild(hero);
   doll.appendChild(grid);
@@ -240,13 +240,13 @@ function buildBag(body, c) {
   const mats = Object.entries(c.materials);
   for (const [id, n] of mats) {
     const m = MATERIALS_LIST[id];
-    const b = el('div', 'bchip mat', `${img(simpleIcon('gem', m?.color || '#a0a0a0'), 'mini')}<b>${n}</b>`);
+    const b = el('div', 'bchip mat', `${img(simpleIcon('gem', m?.color || '#a29c9c'), 'mini')}<b>${n}</b>`);
     b.dataset.key = 'm-' + id;
     bindTip(b, () => `<div class="tip-s"><b>${esc(m?.name || id)}</b><span>Crafting material. Blacksmiths and enchanters use it.</span></div>`, { pos: 'top' });
     cons.appendChild(b);
   }
   belt.appendChild(cons);
-  belt.appendChild(el('div', 'gold-pill', `${img(simpleIcon('gem', '#f0c040'), 'mini')}<b>${c.gold}</b><span>gold</span>`));
+  belt.appendChild(el('div', 'gold-pill', `${img(simpleIcon('gem', '#e8c35a'), 'mini')}<b>${c.gold}</b><span>gold</span>`));
   mid.appendChild(belt);
   wrap.appendChild(mid);
 
@@ -292,7 +292,7 @@ function sortBag(c) {
 // ----------------------------------------------------------------- attributes
 const STAT_NAMES = { str: 'Strength', dex: 'Dexterity', int: 'Intellect', vit: 'Vitality', wil: 'Willpower' };
 const STAT_TIPS = { str: 'Melee damage with swords, maces, greatswords and halberds.', dex: 'Bow, dagger and spear damage, critical chance and stamina.', int: 'Spell power, mana, staff and wand damage.', vit: 'Maximum health and a little armor.', wil: 'Mana regeneration and resistances.' };
-const STAT_ICON = { str: ['sword', '#e06040'], dex: ['bow', '#70c060'], int: ['staff', '#70a0ff'], vit: ['chest', '#e0a060'], wil: ['amulet', '#c080ff'] };
+const STAT_ICON = { str: ['sword', '#ec7a2a'], dex: ['bow', '#90ac5c'], int: ['staff', '#5a8fc8'], vit: ['chest', '#d9765a'], wil: ['amulet', '#c860f0'] };
 function buildAttributes(body, c) {
   const p = G.player, d = p.derived, race = RACE_BY_ID[c.race], cls = CLASS_BY_ID[c.cls];
   const wrap = el('div', 'attr');
@@ -434,7 +434,7 @@ export function openSkills() {
   const cls = CLASS_BY_ID[c.cls];
   const p = G.player;
   const rv = p?.resource || 0, rmax = p?.resourceMax || cls.resource.max;
-  side.appendChild(el('div', 'sig f-sheet', `<div class="sec-h"><span>Signature</span>${kc('X')}</div><div class="sig-row"><div class="cell slotf big rf-legendary">${img(skillIcon({ id: 'sig_' + cls.id, type: 'sig', color: '#a8641c' }), 'ic')}</div><div><b>${esc(cls.signature.name)}</b><span>${esc(cls.signature.desc)}</span></div></div><div class="res"><span>${esc(cls.resource.name)}</span><div class="res-bar"><i style="width:${Math.min(100, (rv / rmax) * 100).toFixed(1)}%;background:${cls.resource.color}"></i></div><b>${Math.floor(rv)}/${rmax}</b></div><div class="dim small">${esc(cls.mechanic)}</div>`));
+  side.appendChild(el('div', 'sig f-sheet', `<div class="sec-h"><span>Signature</span>${kc('X')}</div><div class="sig-row"><div class="cell slotf big rf-legendary">${img(skillIcon({ id: 'sig_' + cls.id, type: 'sig', color: '#9a6424' }), 'ic')}</div><div><b>${esc(cls.signature.name)}</b><span>${esc(cls.signature.desc)}</span></div></div><div class="res"><span>${esc(cls.resource.name)}</span><div class="res-bar"><i style="width:${Math.min(100, (rv / rmax) * 100).toFixed(1)}%;background:${cls.resource.color}"></i></div><b>${Math.floor(rv)}/${rmax}</b></div><div class="dim small">${esc(cls.mechanic)}</div>`));
   const pas = el('div', 'passives f-sheet scroll');
   pas.appendChild(el('div', 'sec-h', '<span>Passives</span><span class="sec-sub">always active</span>'));
   const passives = c.skills.map((id) => SKILLS[id]).filter((s) => s && s.type === 'passive');
@@ -626,7 +626,7 @@ export function openMap(realmOverride) {
   mapView.draw?.();
 }
 
-const MK_COL = { town: '#ffe2a0', waystone: '#8ad0ff', dungeon: '#ff7050', shrine: '#70f0c0', quest: '#ffd040' };
+const MK_COL = { town: '#f3e1b5', waystone: '#a8d0ec', dungeon: '#d9765a', shrine: '#7cbca8', quest: '#e8c35a' };
 function initMapView(view) {
   view._init = true;
   const cv = document.createElement('canvas');
@@ -648,24 +648,24 @@ function initMapView(view) {
   function marker(g, kind, sx, sy, o = {}) {
     const p = u(), col = o.col || MK_COL[kind];
     const px = (x, y, w, h, c) => { g.fillStyle = c; g.fillRect(sx + x * p, sy + y * p, w * p, h * p); };
-    if (kind === 'town') { px(-4, -3, 8, 7, '#000'); px(-3, -2, 6, 5, col); px(-3, -2, 6, 1, '#fff6d8'); px(-1, 0, 2, 3, '#6a4020'); px(-5, -4, 10, 1, '#000'); px(-4, -5, 8, 1, '#000'); px(-3, -6, 6, 1, '#000'); px(-4, -4, 8, 1, '#c8502a'); px(-3, -5, 6, 1, '#e0683a'); }
-    else if (kind === 'waystone') { px(-2, -5, 4, 10, '#000'); px(-3, -3, 6, 6, '#000'); px(-1, -4, 2, 8, col); px(-2, -2, 4, 4, col); px(-1, -3, 1, 2, '#ffffff'); if (o.dim) px(-1, -1, 2, 2, '#3a5a78'); }
-    else if (kind === 'dungeon') { px(-4, -4, 8, 8, '#000'); px(-3, -3, 6, 6, col); px(-2, -1, 1, 1, '#000'); px(1, -1, 1, 1, '#000'); px(-1, 1, 2, 1, '#000'); px(-3, -3, 6, 1, '#ffb090'); }
-    else if (kind === 'shrine') { px(-2, -2, 4, 4, '#000'); px(-1, -1, 2, 2, col); }
-    else if (kind === 'quest') { px(-1, -6, 3, 9, '#000'); px(0, -5, 1, 5, col); px(-1, 4, 3, 3, '#000'); px(0, 5, 1, 1, col); }
+    if (kind === 'town') { px(-4, -3, 8, 7, '#140f1c'); px(-3, -2, 6, 5, col); px(-3, -2, 6, 1, '#fff4dc'); px(-1, 0, 2, 3, '#5a3628'); px(-5, -4, 10, 1, '#140f1c'); px(-4, -5, 8, 1, '#140f1c'); px(-3, -6, 6, 1, '#140f1c'); px(-4, -4, 8, 1, '#c2401c'); px(-3, -5, 6, 1, '#e0683a'); }
+    else if (kind === 'waystone') { px(-2, -5, 4, 10, '#140f1c'); px(-3, -3, 6, 6, '#140f1c'); px(-1, -4, 2, 8, col); px(-2, -2, 4, 4, col); px(-1, -3, 1, 2, '#fff4dc'); if (o.dim) px(-1, -1, 2, 2, '#3e4a5a'); }
+    else if (kind === 'dungeon') { px(-4, -4, 8, 8, '#140f1c'); px(-3, -3, 6, 6, col); px(-2, -1, 1, 1, '#140f1c'); px(1, -1, 1, 1, '#140f1c'); px(-1, 1, 2, 1, '#140f1c'); px(-3, -3, 6, 1, '#ecc6a8'); }
+    else if (kind === 'shrine') { px(-2, -2, 4, 4, '#140f1c'); px(-1, -1, 2, 2, col); }
+    else if (kind === 'quest') { px(-1, -6, 3, 9, '#140f1c'); px(0, -5, 1, 5, col); px(-1, 4, 3, 3, '#140f1c'); px(0, 5, 1, 1, col); }
   }
-  // parchment under and around the map, cached per size
+  // dusky plum chart under and around the map, cached per size
   let paper = null;
   function parchment(W, H) {
     if (paper && paper.width === W && paper.height === H) return paper;
     paper = document.createElement('canvas'); paper.width = W; paper.height = H;
     const pg = paper.getContext('2d');
     const grd = pg.createRadialGradient(W / 2, H / 2, Math.min(W, H) * 0.2, W / 2, H / 2, Math.max(W, H) * 0.75);
-    grd.addColorStop(0, '#e9d3a2'); grd.addColorStop(0.7, '#d4b67c'); grd.addColorStop(1, '#a8834a');
+    grd.addColorStop(0, '#2e2040'); grd.addColorStop(0.7, '#231830'); grd.addColorStop(1, '#140f1c');
     pg.fillStyle = grd; pg.fillRect(0, 0, W, H);
-    const img = pg.getImageData(0, 0, W, H), d = img.data;
-    for (let i = 0; i < d.length; i += 4) { const n = (Math.random() - 0.5) * 18 + (((i >> 2) % W) % 7 === 0 ? -3 : 0); d[i] += n; d[i + 1] += n; d[i + 2] += n * 0.8; }
-    pg.putImageData(img, 0, 0);
+    // faint star specks, like the night skies behind the references' menus
+    pg.fillStyle = 'rgba(243,225,181,0.18)';
+    for (let i = 0; i < (W * H) / 900; i++) { const x = Math.floor(Math.random() * W), y = Math.floor(Math.random() * H); pg.fillRect(x, y, 2, 2); }
     return paper;
   }
   // region names, placed at the middle of each biome's seeds
@@ -677,17 +677,17 @@ function initMapView(view) {
   function compass(g, cx, cy, r) {
     g.save(); g.translate(cx, cy);
     g.globalAlpha = 0.85;
-    g.strokeStyle = '#3a2412'; g.lineWidth = Math.max(1, r / 24);
+    g.strokeStyle = '#c99a3a'; g.lineWidth = Math.max(1, r / 24);
     g.beginPath(); g.arc(0, 0, r * 0.62, 0, Math.PI * 2); g.stroke();
     g.beginPath(); g.arc(0, 0, r * 0.7, 0, Math.PI * 2); g.stroke();
     for (let i = 0; i < 8; i++) {
       const a = (i / 8) * Math.PI * 2, L = i % 2 ? r * 0.5 : r, w = i % 2 ? r * 0.09 : r * 0.14;
       g.save(); g.rotate(a);
-      g.beginPath(); g.moveTo(0, -L); g.lineTo(w, 0); g.lineTo(0, 0); g.closePath(); g.fillStyle = i === 0 ? '#9a2a14' : '#3a2412'; g.fill();
-      g.beginPath(); g.moveTo(0, -L); g.lineTo(-w, 0); g.lineTo(0, 0); g.closePath(); g.fillStyle = i === 0 ? '#d8603a' : '#e8d0a0'; g.fill(); g.stroke();
+      g.beginPath(); g.moveTo(0, -L); g.lineTo(w, 0); g.lineTo(0, 0); g.closePath(); g.fillStyle = i === 0 ? '#a026ef' : '#9a6424'; g.fill();
+      g.beginPath(); g.moveTo(0, -L); g.lineTo(-w, 0); g.lineTo(0, 0); g.closePath(); g.fillStyle = i === 0 ? '#c860f0' : '#f3e1b5'; g.fill(); g.stroke();
       g.restore();
     }
-    g.fillStyle = '#3a2412'; g.font = `${Math.round(r * 0.42)}px 'Jersey 10'`; g.textAlign = 'center'; g.fillText('N', 0, -r * 1.08);
+    g.fillStyle = '#e8c35a'; g.font = `${Math.round(r * 0.42)}px 'Jersey 10'`; g.textAlign = 'center'; g.fillText('N', 0, -r * 1.08);
     g.restore();
   }
   function draw() {
@@ -698,17 +698,17 @@ function initMapView(view) {
     const g = cv.getContext('2d');
     g.imageSmoothingEnabled = false;
     g.drawImage(parchment(cv.width, cv.height), 0, 0);
-    if (!m.ready) { g.fillStyle = '#e8c47a'; g.font = "18.6667px 'Jersey 10'"; g.fillText('The cartographers are still painting...', 30, 40); return; }
+    if (!m.ready) { g.fillStyle = '#e8c35a'; g.font = "18.6667px 'Jersey 10'"; g.fillText('The cartographers are still painting...', 30, 40); return; }
     const [x0, y0] = toScreen(-m.half, -m.half);
     const s = scale();
     const mw = Math.round(m.half * 2 * s);
     // drop shadow and inked double border, then the map itself
-    g.fillStyle = 'rgba(60,36,16,0.35)'; g.fillRect(x0 + 6, y0 + 8, mw, mw);
+    g.fillStyle = 'rgba(9,4,16,0.55)'; g.fillRect(x0 + 6, y0 + 8, mw, mw);
     g.drawImage(m.canvas, x0, y0, mw, mw);
-    g.strokeStyle = '#3a2412'; g.lineWidth = 3; g.strokeRect(x0 - 1.5, y0 - 1.5, mw + 3, mw + 3);
+    g.strokeStyle = '#c99a3a'; g.lineWidth = 3; g.strokeRect(x0 - 1.5, y0 - 1.5, mw + 3, mw + 3);
     g.lineWidth = 1; g.strokeRect(x0 - 7.5, y0 - 7.5, mw + 15, mw + 15);
     // faint survey grid
-    g.strokeStyle = 'rgba(40,24,10,0.16)'; g.lineWidth = 1;
+    g.strokeStyle = 'rgba(20,15,28,0.18)'; g.lineWidth = 1;
     g.beginPath();
     for (let i = 1; i < 8; i++) { const t = Math.round(x0 + (mw * i) / 8) + 0.5, v = Math.round(y0 + (mw * i) / 8) + 0.5; g.moveTo(t, y0); g.lineTo(t, y0 + mw); g.moveTo(x0, v); g.lineTo(x0 + mw, v); }
     g.stroke();
@@ -721,8 +721,8 @@ function initMapView(view) {
         const hw = g.measureText(txt).width / 2 + 6;
         let [sx, sy] = toScreen(L.x, L.z);
         sx = Math.max(x0 + hw, Math.min(x0 + mw - hw, sx)); sy = Math.max(y0 + 20, Math.min(y0 + mw - 20, sy));
-        g.fillStyle = 'rgba(30,16,6,0.55)'; g.fillText(txt, sx + 2, sy + 2);
-        g.fillStyle = 'rgba(255,240,205,0.62)'; g.fillText(txt, sx, sy);
+        g.fillStyle = 'rgba(20,15,28,0.6)'; g.fillText(txt, sx + 2, sy + 2);
+        g.fillStyle = 'rgba(243,225,181,0.7)'; g.fillText(txt, sx, sy);
       }
     }
     hot.length = 0;
@@ -732,18 +732,18 @@ function initMapView(view) {
     for (const sh of SHRINES) {
       if (sh.realm !== mapView.realm) continue;
       const [sx, sy] = toScreen(sh.x, sh.z);
-      marker(g, 'shrine', sx, sy, { col: c.shrinesUsed.includes(sh.id) ? '#6a6a60' : MK_COL.shrine });
+      marker(g, 'shrine', sx, sy, { col: c.shrinesUsed.includes(sh.id) ? '#66626a' : MK_COL.shrine });
       hot.push({ x: sx, y: sy, r: 4 * u(), html: `<div class="tip-s"><b>${esc(sh.name)}</b><span>${sh.cond ? 'Awakens: ' + esc(sh.cond) : 'Shrine'}${c.shrinesUsed.includes(sh.id) ? ' · blessed' : ''}</span></div>` });
     }
     for (const d of dests) {
       const [sx, sy] = toScreen(d.mx, d.mz);
-      marker(g, d.kind, sx, sy, { col: d.kind === 'dungeon' ? (d.cleared ? '#9a9080' : d.shard ? '#ff70ff' : MK_COL.dungeon) : undefined, dim: d.kind === 'waystone' && !d.sub.includes('attuned') });
+      marker(g, d.kind, sx, sy, { col: d.kind === 'dungeon' ? (d.cleared ? '#827d82' : d.shard ? '#c860f0' : MK_COL.dungeon) : undefined, dim: d.kind === 'waystone' && !d.sub.includes('attuned') });
       hot.push({ x: sx, y: sy, r: 6 * u(), dest: d, html: `<div class="tip-s"><b>${esc(d.name)}</b><span>${esc(d.sub)}</span><span class="dim">Click to select · double-click to travel</span></div>` });
     }
     for (const q of trackedObjectiveMarkers()) {
       if (q.realm !== mapView.realm) continue;
       const [sx, sy] = toScreen(q.x, q.z);
-      marker(g, 'quest', sx, sy, { col: q.tracked ? MK_COL.quest : '#b09050' });
+      marker(g, 'quest', sx, sy, { col: q.tracked ? MK_COL.quest : '#c99a3a' });
       hot.push({ x: sx, y: sy, r: 6 * u(), html: `<div class="tip-s"><b>${esc(questDef(q.quest)?.name || 'Quest')}</b><span>${esc(q.text)}</span></div>` });
     }
     // town labels
@@ -754,14 +754,14 @@ function initMapView(view) {
       if (d.kind !== 'town' && !(big && d.id === mapView.sel)) continue;
       const [sx, sy] = toScreen(d.mx, d.mz);
       const ty = sy - 8 * u();
-      g.fillStyle = '#000'; for (const [ox, oy] of [[-2, 0], [2, 0], [0, -2], [0, 2]]) g.fillText(d.name, sx + ox, ty + oy);
-      g.fillStyle = d.id === mapView.sel ? '#ffe08a' : '#fff0d0'; g.fillText(d.name, sx, ty);
+      g.fillStyle = '#140f1c'; for (const [ox, oy] of [[-2, 0], [2, 0], [0, -2], [0, 2]]) g.fillText(d.name, sx + ox, ty + oy);
+      g.fillStyle = d.id === mapView.sel ? '#f6e39a' : '#f3e1b5'; g.fillText(d.name, sx, ty);
     }
     // selection ring
     if (selD) {
       const [sx, sy] = toScreen(selD.mx, selD.mz);
       const p = u(), r = 9 + (Math.floor(performance.now() / 250) % 2);
-      g.fillStyle = '#ffe08a';
+      g.fillStyle = '#f6e39a';
       for (let a = 0; a < 16; a++) { const an = (a / 16) * Math.PI * 2; if (a % 2) continue; g.fillRect(Math.round(sx + Math.cos(an) * r * p) - p, Math.round(sy + Math.sin(an) * r * p) - p, p * 2, p * 2); }
     }
     // compass rose in the corner
@@ -774,7 +774,7 @@ function initMapView(view) {
       g.save(); g.translate(sx, sy); g.rotate(Math.PI - G.player.facing);
       const p = u();
       g.beginPath(); g.moveTo(0, -6 * p); g.lineTo(4 * p, 5 * p); g.lineTo(0, 2 * p); g.lineTo(-4 * p, 5 * p); g.closePath();
-      g.fillStyle = '#ffffff'; g.fill(); g.strokeStyle = '#000'; g.lineWidth = p; g.stroke(); g.restore();
+      g.fillStyle = '#fff4dc'; g.fill(); g.strokeStyle = '#140f1c'; g.lineWidth = p; g.stroke(); g.restore();
     }
   }
   mapView.draw = draw;
@@ -918,7 +918,7 @@ export function openControls() {
 // ===================================================================== DEATH
 export function showDeath(onRespawn) {
   const d = el('div', 'death', `<div class="t"></div><div class="death-sub">The dice are not finished with you.</div>`);
-  d.querySelector('.t').appendChild(pxTitle('You have fallen', window.innerWidth < 1100 ? 3 : 4, { bands: ['#ff9a80', '#e04030', '#a01810', '#5a0806'] }));
+  d.querySelector('.t').appendChild(pxTitle('You have fallen', window.innerWidth < 1100 ? 3 : 4, { bands: ['#ecc6a8', '#d9765a', '#b04a3e', '#4a1420'] }));
   const b = el('button', 'primary', 'Rise again');
   b.onclick = () => { d.remove(); onRespawn(); };
   d.appendChild(b);
