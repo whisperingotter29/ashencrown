@@ -89,6 +89,9 @@ close, but keep it in the same value and saturation band.
 - The post grade (`src/render/post.js`) lifts shadows toward plum and warms highlights. It
   boosts saturated accents and leaves muted tones dusty. There is no green or grey fog wash: fog
   and haze use the biome's own muted tone at low strength.
+- Effect colours come from `src/render/elements.js`. `pal(c)` and `palLight(c)` snap any hex to
+  the nearest palette swatch, so modules that pass their own colours stay on palette.
+  `RARITY_PAL` is the shared item-rarity table.
 
 ## UI
 
