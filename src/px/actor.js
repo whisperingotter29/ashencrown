@@ -14,7 +14,7 @@
 // death falls. Everything casts a directional shadow (see shadow.js).
 import { glowPx } from '../render/renderer.js';
 import { view } from './view.js';
-import { Pix, PPU, C, ART, ap } from './pix.js';
+import { Pix, PPU, C, ART, ap, OUTLINE } from './pix.js';
 import { humanSprites } from './sprites/human.js';
 import { creatureSprites } from './sprites/creatures.js';
 import { weaponSprite, shieldSprite, tomeSprite, ELEM_GLOW } from './sprites/weapons.js';
@@ -53,8 +53,8 @@ export function variant(p, kind) {
   let v;
   if (kind === 'flip') v = p.flipX();
   else if (kind === 'white') v = p.silhouette('#ffffff');
-  else if (kind === 'frozen') v = p.tinted('#a8e0ff', 0.7);
-  else if (kind === 'hurt') v = p.tinted('#ff6048', 0.5);
+  else if (kind === 'frozen') v = p.tinted('#a8d0ec', 0.7);
+  else if (kind === 'hurt') v = p.tinted('#e46a5a', 0.5);
   else if (kind === 'xray') {
     // outline only: shows the shape through walls without painting over the visible parts
     v = new Pix(p.w + 2, p.h + 2); v.ox = p.ox + 1; v.oy = p.oy + 1;
@@ -75,9 +75,9 @@ export function variant(p, kind) {
       v.set(x, y, [Math.round(p.d[i] * 0.35 + L[0] * 0.65), Math.round(p.d[i + 1] * 0.35 + L[1] * 0.65), Math.round(p.d[i + 2] * 0.35 + L[2] * 0.65), 255]);
     }
   }
-  else if (kind === 'stone') v = p.tinted('#8a8478', 0.9);
-  else if (kind === 'ghost') v = p.silhouette('#8fd0ff');
-  else if (kind === 'smear') v = p.silhouette('#fff6e0');
+  else if (kind === 'stone') v = p.tinted('#827d82', 0.9);
+  else if (kind === 'ghost') v = p.silhouette('#8cb8de');
+  else if (kind === 'smear') v = p.silhouette('#fff4dc');
   else if (kind.startsWith('smear:')) {
     // pale silhouette of the outer part of a blade (the bit that whips through the air)
     const [, col, from] = kind.split(':');
@@ -128,19 +128,21 @@ export function upscaleFor() { return 1; }
 // arm palettes per flash mode, as css strings (the arms are drawn with fillRect every frame)
 const css = (c) => `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`;
 function tintC(c, t, k) { const l = (c[0] * 0.3 + c[1] * 0.55 + c[2] * 0.15) / 255; return [c[0] + (t[0] * (0.4 + l) - c[0]) * k, c[1] + (t[1] * (0.4 + l) - c[1]) * k, c[2] + (t[2] * (0.4 + l) - c[2]) * k]; }
-const MODES = { white: null, frozen: [C('#a8e0ff'), 0.7], hurt: [C('#ff6048'), 0.5], stone: [C('#8a8478'), 0.9] };
+const MODES = { white: null, frozen: [C('#a8d0ec'), 0.7], hurt: [C('#e46a5a'), 0.5], stone: [C('#827d82'), 0.9] };
 function limbPal(pal, mode, aura) {
   const key = '_lp_' + (mode || '') + (aura || '');
   if (pal[key]) return pal[key];
   const f = (c) => {
     if (mode === 'white') return '#ffffff';
-    if (mode === 'ghost') return '#8fd0ff';
+    if (mode === 'ghost') return '#8cb8de';
     if (MODES[mode]) return css(tintC(c, MODES[mode][0], MODES[mode][1]));
     return css(c);
   };
+  // arms carry the same violet-black ink outline as the body, with only a hint of the sleeve in it
+  const ink = (c) => css([OUTLINE[0] * 0.88 + c[0] * 0.05, OUTLINE[1] * 0.88 + c[1] * 0.04, OUTLINE[2] * 0.88 + c[2] * 0.06]);
   const out = {
-    o: mode === 'white' ? '#ffffff' : mode === 'ghost' ? '#8fd0ff' : aura ? aura : css([pal.sleeve[0] * 0.3 + 6, pal.sleeve[1] * 0.28 + 4, pal.sleeve[2] * 0.32 + 8]),
-    ho: mode === 'white' ? '#ffffff' : aura ? aura : css([pal.hand[0] * 0.3 + 6, pal.hand[1] * 0.26 + 4, pal.hand[2] * 0.3 + 8]),
+    o: mode === 'white' ? '#ffffff' : mode === 'ghost' ? '#8cb8de' : aura ? aura : ink(pal.sleeve),
+    ho: mode === 'white' ? '#ffffff' : aura ? aura : ink(pal.hand),
     s: f(pal.sleeve), sl: f(pal.sleeveL), sd: f(pal.sleeveD), cf: f(pal.cuff), h: f(pal.hand), hl: f(pal.handL), hd: f(pal.handD), w: pal.w,
   };
   pal[key] = out;
@@ -310,7 +312,7 @@ export class Actor {
         x: e.pos.x + ox - dx * 0.15 + Math.cos(a) * 0.12 * big, y: gy + 0.05, z: e.pos.z + oz - dz * 0.15 + Math.sin(a) * 0.08 * big,
         vx: -dx * (0.8 + Math.random()) + Math.cos(a) * 0.7, vy: 0.9 + Math.random() * 0.7, vz: -dz * (0.8 + Math.random()) + Math.sin(a) * 0.4,
         life: 0.32 + Math.random() * 0.22, size: (0.24 + Math.random() * 0.12) * big, size1: 0.06,
-        color: '#d8ccb4', color2: '#a89c88', alpha: 0.75, additive: false, gravity: 2.5, drag: 4,
+        color: '#e2c494', color2: '#a8705a', alpha: 0.75, additive: false, gravity: 2.5, drag: 4,
       });
     }
   }
@@ -618,7 +620,7 @@ export class Actor {
       const tx = px + sx * k, ty = py + sy * k;
       this.body(ctx, this.tome, tx, ty, k, 0, sx < 0, { noAura: true });
       this._glows = this._glows || [];
-      this._glows.push([tx, ty - q(4) * k, '#ffd080', q(5) * k, 0.35]);
+      this._glows.push([tx, ty - q(4) * k, '#f6e39a', q(5) * k, 0.35]);
       if (lines) lines.push([tx - q(3) * k, gY, gH - sy * k + q(4) * k, tx + q(3) * k, gY, gH - sy * k + q(4) * k, q(2) * k]);
     };
     // weapon sprite + smear trail
@@ -639,7 +641,7 @@ export class Actor {
       if (P.smear && !this._xray) this.drawSmear(ctx, wspr, wx, wy, W.a, k, wpn);
       if (P.streak && !this._xray) {
         // thrust: pale speed copies trailing the blade
-        const sm = variant(wspr.pix, 'smear:' + (wpn.element && ELEM_GLOW[wpn.element] ? ELEM_GLOW[wpn.element] : '#fff6e0') + ':' + Math.round((wspr.len || ap(8)) * 0.3));
+        const sm = variant(wspr.pix, 'smear:' + (wpn.element && ELEM_GLOW[wpn.element] ? ELEM_GLOW[wpn.element] : '#fff4dc') + ':' + Math.round((wspr.len || ap(8)) * 0.3));
         for (let i = 2; i >= 1; i--) { ctx.globalAlpha = this.alpha * (i === 1 ? 0.7 : 0.35); blit(ctx, sm, wx - Math.round(Math.cos(W.a) * q(3) * i * k), wy - Math.round(Math.sin(W.a) * q(3) * i * k), k, rr, fl); }
         ctx.globalAlpha = this.alpha;
       }
@@ -710,7 +712,7 @@ export class Actor {
     const tr = this.trail;
     if (!tr.length) return;
     if (Math.abs(angDiff(tr[0].a, a)) < 0.15) return;
-    const col = wpn.element && ELEM_GLOW[wpn.element] ? ELEM_GLOW[wpn.element] : '#fff6e0';
+    const col = wpn.element && ELEM_GLOW[wpn.element] ? ELEM_GLOW[wpn.element] : '#fff4dc';
     // only the outer part of the blade smears, so it reads as a crescent near the tip, not a fan
     const from = Math.max(3, Math.round((wspr.len || ap(8)) * 0.6));
     const sm = variant(wspr.pix, 'smear:' + col + ':' + from);

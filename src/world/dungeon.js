@@ -14,11 +14,14 @@ import { clearCombat } from '../systems/combat.js';
 import { addShake } from './cameraRig.js';
 import { scene, addObject, removeObject } from '../px/scene.js';
 import { view } from '../px/view.js';
-import { PPU, ART, ap, C, bayer } from '../px/pix.js';
+import { PPU, ART, ap, C, bayer, hash2 } from '../px/pix.js';
 import { dungeonTiles, dpropSprite, chestSprite, torchSprite, bulbSprite } from '../px/sprites/dprops.js';
 import { propSprite } from '../px/sprites/props.js';
-import { bannerSprite, brazierSprite } from '../px/sprites/buildings.js';
+import { bannerSprite, brazierSprite, flamePalette } from '../px/sprites/buildings.js';
+import { RAMPS, INK } from '../px/palette.js';
 const OX = 20000, OZ = 20000;
+// palette picks (docs/ART_STYLE.md): ink void past the walls, plum contact shadows
+const VOID = '#0c0812', SHADOW_FILL = 'rgba(20,12,30,0.42)', WALL_SHADOW = 'rgba(26,12,34,0.5)', WALL_SHADOW2 = 'rgba(26,12,34,0.26)';
 const WALL_H = 4.6;
 
 export function dungeonDef(id) { return DUNGEONS.find((d) => d.id === id); }
@@ -146,7 +149,7 @@ function carveMaze(g, W, N, rng) {
 // dungeon props -> sprites (world scatter sprites where they exist, dungeon dressing otherwise)
 const PROP_MAP = { glass_crystal: 'glass_shard', ice_crystal: 'ice_crystal', mushroom: 'mushroom_giant', void_crystal: 'void_crystal', rock: 'deep_rock', coral: 'coral', kelp: 'sea_grass', root: 'fallen_log', giant_bone: 'rib_bones', statue: 'statue_frag', pillar: 'column' };
 function dpropFor(type, rng) {
-  if (type === 'banner') { const c = rng.pick(['#8a2a1a', '#3a4a6a', '#5a3a7a']); return { frames: [bannerSprite(c, 3.6, 0), bannerSprite(c, 3.6, 1)] }; }
+  if (type === 'banner') { const c = rng.pick([RAMPS.red[3], RAMPS.slate[2], RAMPS.lavender[2]]); return { frames: [bannerSprite(c, 3.6, 0), bannerSprite(c, 3.6, 1)] }; }
   if (type === 'brazier') { const b = brazierSprite(1); return { spr: b, fire: -b.fireAt[1] }; }
   const own = dpropSprite(type, rng.int(0, 3));
   if (own) return { spr: own, fire: own.fireAt ? -own.fireAt[1] : 0 };
@@ -178,7 +181,7 @@ export function enterDungeon(def, returnPos) {
   buildGeometry(d);
   populate(d, rng);
   atmo.indoor = true;
-  atmo.indoorCfg = { fog: theme.fog, ambient: '#c8b4a4', light: theme.light };
+  atmo.indoorCfg = { fog: theme.fog, ambient: theme.ambient || '#c8b4a4', light: theme.light };
   const ent = lay.entrance;
   const ex = OX + (ent.cx + 0.5) * tile, ez = OZ + (ent.cy + 0.5) * tile;
   G.player.pos.set(ex, 0, ez);
@@ -223,6 +226,13 @@ function drawFloor(d, ctx) {
     ctx.drawImage(cv, Math.round(ox + ci * CH * T), Math.round(oy + cj * CH * T));
   }
 }
+// smooth value noise over tile coordinates (cells of 3 tiles), for floor clusters
+function tileNoise(ti, tj, s) {
+  const fx = ti / 3, fy = tj / 3, ix = Math.floor(fx), iy = Math.floor(fy);
+  let tx = fx - ix, ty = fy - iy; tx = tx * tx * (3 - 2 * tx); ty = ty * ty * (3 - 2 * ty);
+  const a = hash2(ix, iy, s), b = hash2(ix + 1, iy, s), c = hash2(ix, iy + 1, s), e = hash2(ix + 1, iy + 1, s);
+  return a + (b - a) * tx + (c - a) * ty + (a - b - c + e) * tx * ty;
+}
 function bakeFloorChunk(d, ci, cj, CH, T) {
   const cv = document.createElement('canvas');
   cv.width = cv.height = CH * T;
@@ -231,9 +241,20 @@ function bakeFloorChunk(d, ci, cj, CH, T) {
   for (let j = 0; j < CH; j++) for (let i = 0; i < CH; i++) {
     const ti = ci * CH + i, tj = cj * CH + j;
     if (ti >= d.w || tj >= d.h) continue;
-    if (d.grid[tj * d.w + ti] === 1 && !d.maze) { g.fillStyle = '#060408'; g.fillRect(i * T, j * T, T, T); continue; }
+    if (d.grid[tj * d.w + ti] === 1 && !d.maze) { g.fillStyle = VOID; g.fillRect(i * T, j * T, T, T); continue; }
     const h = ((ti * 73856093) ^ (tj * 19349663)) >>> 0;
-    g.drawImage(tiles.floor[h % 11 < 7 ? h % 3 : 3 + (h % 3)].canvas(), i * T, j * T);
+    // big clusters of darker slabs and worn patches give the room its value structure
+    const n = tileNoise(ti, tj, d.def.id.length);
+    const set = n < 0.36 && tiles.floorDark ? tiles.floorDark : n > 0.7 && tiles.floorWorn ? tiles.floorWorn : tiles.floor;
+    g.drawImage(set[h % 11 < 7 ? h % 3 : 3 + (h % 3)].canvas(), i * T, j * T);
+    // flat plum shadow bands where a wall stands to the north or west (the maze's walls move, so
+    // its floor stays unshaded)
+    if (!d.maze) {
+      const wall = (x, y) => x < 0 || y < 0 || x >= d.w || y >= d.h || d.grid[y * d.w + x] === 1;
+      const n = wall(ti, tj - 1), wv = wall(ti - 1, tj), s1 = ap(3), s2 = ap(2);
+      if (n) { g.fillStyle = WALL_SHADOW; g.fillRect(i * T, j * T, T, s1); g.fillStyle = WALL_SHADOW2; g.fillRect(i * T, j * T + s1, T, s2); }
+      if (wv) { g.fillStyle = WALL_SHADOW; g.fillRect(i * T, j * T + (n ? s1 : 0), s2, T - (n ? s1 : 0)); g.fillStyle = WALL_SHADOW2; g.fillRect(i * T + s2, j * T + (n ? s1 + s2 : 0), s2, T - (n ? s1 + s2 : 0)); }
+    }
   }
   return cv;
 }
@@ -329,8 +350,8 @@ function drawWallRow(d, ctx, j, row) {
     // top cap sits a wall-height above its tile; the face shows only toward open floor
     ctx.drawImage(topCv, x, yBase - T - wp);
     if (southOpen) { ctx.drawImage(frontCv, 0, WALL_PX - wp, T, wp, x, yBase - wp, T, wp); }
-    // dark rim where the cap meets an open neighbour (reads as depth)
-    ctx.fillStyle = 'rgba(8,4,10,0.55)';
+    // ink rim where the cap meets an open neighbour (the wall silhouette's outline)
+    ctx.fillStyle = INK;
     if (i > 0 && grid[j * w + i - 1] !== 1) ctx.fillRect(x, yBase - T - wp, 1, T);
     if (i < w - 1 && grid[j * w + i + 1] !== 1) ctx.fillRect(x + T - 1, yBase - T - wp, 1, T);
     if (j > 0 && grid[(j - 1) * w + i] !== 1) ctx.fillRect(x, yBase - T - wp, T, 1);
@@ -345,15 +366,16 @@ function spriteObj(x, z, spr, frames) {
     cur() { if (!frames) return spr; const n = frames.length; return frames[((Math.floor(now() * 2.5 + x) % n) + n) % n]; },
     shadow(ctx) {
       const w = Math.max(ap(3), Math.round(first.pix.w * 0.3)), k = Math.max(1, Math.round(w * 0.2)), px = Math.round(x * PPU - view.x0), py = Math.round(z * PPU - view.y0);
-      ctx.fillStyle = 'rgba(8,4,10,0.35)'; ctx.fillRect(px - w + k, py - 2, w * 2 + 1 - k * 2, 1); ctx.fillRect(px - w, py - 1, w * 2 + 1, 3); ctx.fillRect(px - w + k, py + 2, w * 2 + 1 - k * 2, 1);
+      ctx.fillStyle = SHADOW_FILL; ctx.fillRect(px - w + k, py - 2, w * 2 + 1 - k * 2, 1); ctx.fillRect(px - w, py - 1, w * 2 + 1, 3); ctx.fillRect(px - w + k, py + 2, w * 2 + 1 - k * 2, 1);
     },
     draw(ctx) { const s = this.cur(); ctx.drawImage(s.pix.canvas(), Math.round(x * PPU - view.x0) - s.pix.ox, Math.round(z * PPU - view.y0) - s.pix.oy); },
     emissive(ctx) { const s = this.cur(); if (s.emis) ctx.drawImage(s.emis.canvas(), Math.round(x * PPU - view.x0) - s.emis.ox, Math.round(z * PPU - view.y0) - s.emis.oy); },
   };
 }
-// a crisp flickering flame (emissive pixels) with a soft glow; sizes in design pixels x ART
+// a crisp flickering flame (emissive pixels) with a soft glow; sizes in design pixels x ART.
+// Stepped bands: deep edge, body, hot inner band, pale core (ember ramp for warm colours).
 function flameObj(x, z, h, big, color) {
-  const c = C(color), edge = `rgb(${c[0]},${Math.round(c[1] * 0.6)},${Math.round(c[2] * 0.4)})`;
+  const [edge, body, hot, core] = flamePalette(color);
   const s = big * ART;
   return {
     sortZ: z + 0.02, draw() {},
@@ -364,7 +386,7 @@ function flameObj(x, z, h, big, color) {
       for (let k = 0; k < hgt; k++) {
         const w = Math.max(0, Math.round((1 - k / hgt) * 2.4 * s));
         const sway = Math.round(Math.sin(t * 0.7 + k * 0.6) * (k / hgt) * 1.3 * ART);
-        for (let i = -w; i <= w; i++) { ctx.fillStyle = Math.abs(i) < w * 0.45 && k < hgt * 0.6 ? '#fff0b0' : Math.abs(i) === w ? edge : color; ctx.fillRect(px + i + sway, py - k, 1, 1); }
+        for (let i = -w; i <= w; i++) { const a = Math.abs(i); ctx.fillStyle = a === w ? edge : a < w * 0.4 && k < hgt * 0.45 ? core : a < w * 0.7 && k < hgt * 0.7 ? hot : body; ctx.fillRect(px + i + sway, py - k, 1, 1); }
       }
     },
     glow(ctx) { glowPx(ctx, x * PPU - view.x0, z * PPU - view.y0 - h * PPU - 3 * s, color, 10 * s, 0.45); },
@@ -412,7 +434,7 @@ function exitPortal(d, x, z, color) {
         const a = (k / 44) * Math.PI * 2 + t * 2.2, r = R + Math.sin(t * 3 + k) * ap(1.2);
         const sx = Math.round(px + Math.cos(a) * r), sy = Math.round(py + Math.sin(a) * r * 1.15);
         ctx.fillStyle = dim; ctx.fillRect(Math.round(px + Math.cos(a - 0.12) * r), Math.round(py + Math.sin(a - 0.12) * r * 1.15), 1, 1);
-        ctx.fillStyle = k % 3 ? body : '#ffffff'; ctx.fillRect(sx, sy, 2, 2);
+        ctx.fillStyle = k % 3 ? body : RAMPS.aether[6]; ctx.fillRect(sx, sy, 2, 2);
       }
       // dithered breathing core
       const a = 0.35 + Math.sin(t * 3) * 0.15;
@@ -504,10 +526,10 @@ export function placeChest(d, x, z, o) {
   const chest = { x, z, opened: false, ...o };
   addObj(d, {
     sortZ: z, hidden: false,
-    shadow(ctx) { const px = Math.round(x * PPU - view.x0), py = Math.round(z * PPU - view.y0), w = ap(7); ctx.fillStyle = 'rgba(8,4,10,0.35)'; ctx.fillRect(px - w, py - 1, w * 2 + 1, 3); ctx.fillRect(px - w + 2, py + 2, w * 2 - 3, 1); },
+    shadow(ctx) { const px = Math.round(x * PPU - view.x0), py = Math.round(z * PPU - view.y0), w = ap(7); ctx.fillStyle = SHADOW_FILL; ctx.fillRect(px - w, py - 1, w * 2 + 1, 3); ctx.fillRect(px - w + 2, py + 2, w * 2 - 3, 1); },
     draw(ctx) { const s = chestSprite(chest.opened, !!o.boss); ctx.drawImage(s.pix.canvas(), Math.round(x * PPU - view.x0) - s.pix.ox, Math.round(z * PPU - view.y0) - s.pix.oy); },
     emissive(ctx) { const s = chestSprite(chest.opened, !!o.boss); if (s.emis) ctx.drawImage(s.emis.canvas(), Math.round(x * PPU - view.x0) - s.emis.ox, Math.round(z * PPU - view.y0) - s.emis.oy); },
-    glow(ctx) { if (o.boss || !chest.opened) glowPx(ctx, x * PPU - view.x0, z * PPU - view.y0 - ap(8), o.boss ? '#ffd060' : '#ffc080', o.boss ? ap(14) : ap(8), chest.opened ? 0.2 : 0.3 + Math.sin(now() * 3) * 0.1); },
+    glow(ctx) { if (o.boss || !chest.opened) glowPx(ctx, x * PPU - view.x0, z * PPU - view.y0 - ap(8), o.boss ? RAMPS.aether[4] : RAMPS.gold[4], o.boss ? ap(14) : ap(8), chest.opened ? 0.2 : 0.3 + Math.sin(now() * 3) * 0.1); },
   });
   d.chests.push(chest);
   G.interactables.push({ site: 'dungeon', kind: 'chest', x, z, r: 2.2, label: o.boss ? 'Open the boss hoard' : 'Open chest', data: chest });
@@ -521,7 +543,7 @@ function onBossDead(d, b) {
   setTimeout(() => {
     if (G.dungeon !== d) return;
     placeChest(d, p.x + 2, p.z + 2, { level: d.def.level + 2, boss: true, rarityBoost: 1.5, shard: d.def.shard, final: d.def.final });
-    exitPortal(d, p.x - 3, p.z - 3, '#ffe0a0');
+    exitPortal(d, p.x - 3, p.z - 3, RAMPS.gold[5]);
     G.interactables.push({ site: 'dungeon', kind: 'exit', x: p.x - 3, z: p.z - 3, r: 2.5, label: `Leave ${d.def.name}` });
   }, 1800);
   bus.emit('dungeonCleared', { def: d.def, boss: b });
@@ -541,7 +563,7 @@ export function updateDungeon(dt) {
     const dd = (L.x - p.pos.x) ** 2 + (L.z - p.pos.z) ** 2;
     if (dd < 40 * 40) requestLight(L.x, L.y, L.z, L.color, (L.strong ? 22 : L.weak ? 14 : 38) * (0.85 + Math.sin(G.time * 11 + L.x) * 0.15), L.strong ? 14 : 18);
   }
-  for (const f of d.fires) if (Math.random() < dt * 8 && (f.x - p.pos.x) ** 2 + (f.z - p.pos.z) ** 2 < 900) particle({ x: f.x, y: f.y, z: f.z, vx: (Math.random() - 0.5) * 0.4, vy: 1.5, vz: (Math.random() - 0.5) * 0.4, life: 0.5, size: 0.35, size1: 0.05, color: '#ffd080', color2: d.theme.light, gravity: 1 });
+  for (const f of d.fires) if (Math.random() < dt * 8 && (f.x - p.pos.x) ** 2 + (f.z - p.pos.z) ** 2 < 900) particle({ x: f.x, y: f.y, z: f.z, vx: (Math.random() - 0.5) * 0.4, vy: 1.5, vz: (Math.random() - 0.5) * 0.4, life: 0.5, size: 0.35, size1: 0.05, color: flamePalette(d.theme.light)[2], color2: d.theme.light, gravity: 1 });
   if (Math.random() < dt * 12) particle({ x: p.pos.x + (Math.random() - 0.5) * 30, y: Math.random() * 4, z: p.pos.z + (Math.random() - 0.5) * 30, vx: (Math.random() - 0.5) * 0.3, vy: 0.1, vz: (Math.random() - 0.5) * 0.3, life: 4, size: 0.12, color: d.theme.accent, intensity: 1.2, drag: 0 });
   // living labyrinth: the walls move
   if (d.maze) {
@@ -572,7 +594,7 @@ export function updateDungeon(dt) {
       if (W_.anim[k] !== W_.target[k]) { W_.anim[k] += Math.sign(W_.target[k] - W_.anim[k]) * Math.min(Math.abs(W_.target[k] - W_.anim[k]), dt * 0.8); changed = true; }
     }
     if (changed) {
-      if (Math.random() < dt * 20) burst(p.pos.x + rand(-12, 12), 0.2, p.pos.z + rand(-12, 12), { count: 4, speed: 2, color: '#8a7a60', additive: false, life: 0.8, size: 0.6, gravity: 1 });
+      if (Math.random() < dt * 20) burst(p.pos.x + rand(-12, 12), 0.2, p.pos.z + rand(-12, 12), { count: 4, speed: 2, color: '#6a5a4e', additive: false, life: 0.8, size: 0.6, gravity: 1 });
     }
   }
 }

@@ -262,7 +262,7 @@ export function openShop(npc, role) {
     det.innerHTML = `<div class="detail-empty"><b>${role === 'tome' ? 'Browse the shelves' : 'What catches your eye?'}</b><span>Click a ware to inspect it, or an item in your bag to see what it fetches. Double-click to buy or sell at once.</span></div>`;
   }
   mid.appendChild(det);
-  mid.appendChild(el('div', 'gold-pill shop-gold', `<img class="mini" src="${simpleIcon('gem', '#f0c040')}" draggable="false"><b>${c.gold}</b><span>gold</span>`));
+  mid.appendChild(el('div', 'gold-pill shop-gold', `<img class="mini" src="${simpleIcon('gem', '#e8c35a')}" draggable="false"><b>${c.gold}</b><span>gold</span>`));
   wrap.appendChild(mid);
   // ------------------------------------------------ your bag
   const right = el('div', 'shop-side');

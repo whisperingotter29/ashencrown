@@ -6,10 +6,12 @@
 // unit; it now runs at 16, matching the reference look (a hero is ~40 px from hood tip to boot).
 // ART converts a size in the old design pixels to today's pixels: generators that still think in
 // design pixels use ap(n) for geometry and keep 1-px details (outlines, eyes, glints) at 1 px.
+import { shiftLight, shiftDark } from './palette.js';
+
 export const PPU = 16;
 export const ART = PPU / 10;
 export const ap = (v) => Math.round(v * ART);
-export const OUTLINE = [22, 16, 24, 255];
+export const OUTLINE = [20, 15, 28, 255]; // palette INK: violet-black, never pure black
 
 // ------------------------------------------------------------------ colours
 const cache = new Map();
@@ -29,11 +31,13 @@ export function C(hex, a = 255) {
 export const shade = (c, k) => { c = C(c); return [Math.min(255, Math.round(c[0] * k)), Math.min(255, Math.round(c[1] * k)), Math.min(255, Math.round(c[2] * k)), c[3]]; };
 export const mixc = (a, b, t) => { a = C(a); b = C(b); return [Math.round(a[0] + (b[0] - a[0]) * t), Math.round(a[1] + (b[1] - a[1]) * t), Math.round(a[2] + (b[2] - a[2]) * t), Math.round(a[3] + (b[3] - a[3]) * t)]; };
 export const alpha = (c, a) => { c = C(c); return [c[0], c[1], c[2], a]; };
-// highlight that also shifts slightly warm, shadow that shifts cool (classic pixel-art ramps)
-export const light = (c, k = 1.25) => { c = C(c); return [Math.min(255, Math.round(c[0] * k + 14)), Math.min(255, Math.round(c[1] * k + 10)), Math.min(255, Math.round(c[2] * k + 4)), c[3]]; };
-export const dark = (c, k = 0.68) => { c = C(c); return [Math.round(c[0] * k), Math.round(c[1] * k + 2), Math.round(c[2] * k + 8), c[3]]; };
+// hue-shifted ramps (see palette.js): highlights lean toward warm cream, shadows toward plum-violet
+export const light = (c, k = 1.25) => shiftLight(C(c), k);
+export const dark = (c, k = 0.68) => shiftDark(C(c), k);
 export const toHex = (c) => '#' + c.slice(0, 3).map((v) => v.toString(16).padStart(2, '0')).join('');
 export const css = (c, a) => { c = C(c); return `rgba(${c[0]},${c[1]},${c[2]},${a ?? c[3] / 255})`; };
+
+export { RAMPS, INK, CREAM, rampAt } from './palette.js';
 
 // deterministic hash noise for pixel texture
 export function hash2(x, y, s = 0) {
@@ -165,7 +169,7 @@ export class Pix {
   // selective outline ("sel-out"): the outline takes a deep shade of the colour it borders, a touch
   // warmer and lighter on the lit top-left side, near-black on the shadow side, so silhouettes stay
   // readable without the flat sticker look of a pure black line
-  outlineSel(base = OUTLINE, litMix = 0.42, darkMix = 0.16) {
+  outlineSel(base = OUTLINE, litMix = 0.24, darkMix = 0.08) {
     const w = this.w, h = this.h, src = new Uint8ClampedArray(this.d);
     const A = (x, y) => (x < 0 || y < 0 || x >= w || y >= h ? 0 : src[(y * w + x) * 4 + 3]);
     const at = (x, y) => { const i = (y * w + x) * 4; return [src[i], src[i + 1], src[i + 2], 255]; };
@@ -179,7 +183,7 @@ export class Pix {
       else if (A(x - 1, y) > 100) nb = at(x - 1, y);
       else if (A(x, y - 1) > 100) nb = at(x, y - 1);
       if (!nb) continue;
-      const deep = [nb[0] * 0.38, nb[1] * 0.36, nb[2] * 0.42 + 6, 255];
+      const deep = [nb[0] * 0.36 + 6, nb[1] * 0.3, nb[2] * 0.44 + 12, 255];
       this.set(x, y, mixc(base, deep, lit ? litMix : darkMix));
     }
     return this;

@@ -1,6 +1,8 @@
-// Day/night cycle, biome-tinted light, fog and lightning for the pixel renderer. The scene's
-// ambient colour multiplies everything (dark blue nights, warm golden hours); point lights from
-// torches, spells and lanterns punch through it. Dungeons and the Deep override the outdoors.
+// Day/night cycle, biome-tinted light, haze and lightning for the pixel renderer. The scene's
+// ambient colour multiplies everything (plum-indigo nights, rose-gold dusks); point lights from
+// torches, spells and lanterns punch through it in warm ember. Dungeons and the Deep override the
+// outdoors. Haze is subtle and takes the biome's own muted tone (docs/ART_STYLE.md): there is no
+// grey or green wash over the world.
 import { R } from '../render/renderer.js';
 import { BIOMES } from '../data/world.js';
 import { clamp, lerp, smoothstep } from '../core/math.js';
@@ -46,7 +48,7 @@ export function clockString() {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
 }
 
-const NIGHT = [0.3, 0.34, 0.56], GOLD = [1.0, 0.8, 0.62], GREY = [0.78, 0.8, 0.84];
+const NIGHT = [0.36, 0.3, 0.56], GOLD = [1.0, 0.8, 0.66], DUSK = [0.86, 0.66, 0.78], GREY = [0.82, 0.78, 0.86];
 export function updateAtmosphere(dt, focus, camDist, weather) {
   if (!atmo.freezeTime) {
     atmo.timeOfDay += dt / DAY_LENGTH;
@@ -67,28 +69,31 @@ export function updateAtmosphere(dt, focus, camDist, weather) {
   const ov = weather.overcast || 0, st = weather.storm || 0;
   atmo.overcast = ov; atmo.storm = st;
 
-  // daylight: near-white, gently tinted by the biome sun; warm at golden hour; deep blue at night
+  // daylight: near-white, gently tinted by the biome sun; rose-gold at golden hour, sliding into
+  // plum as the sun sets; plum-indigo at night
   let amb = mixv([1, 1, 1], mixv([1, 1, 1], P.sun, 0.18), 1);
   amb = mixv(amb, GOLD, golden * 0.7);
+  amb = mixv(amb, DUSK, golden * smoothstep(0.12, -0.1, elev) * 0.6);
   amb = mixv(amb, GREY, ov * 0.55 * day);
   amb = mixv(amb, NIGHT, night);
   const dim = lerp(1, 0.72, st) * lerp(1, 0.9, ov);
   R.ambient = amb.map((v) => clamp(v * dim, 0, 1));
   R.lightBoost = lerp(1, 1.25, night);
 
-  // fog: weather fog and storms veil the view in the biome's fog colour
+  // haze: weather fog and storms veil the view lightly in the biome's own muted tone (the drifting
+  // dithered fog banks in weather.js carry the rest of the effect)
   let fog = mixv(P.fog, P.fogNight, night);
   if (weather.fogTint) fog = mixv(fog, rgb(typeof weather.fogTint === 'string' ? weather.fogTint : '#' + weather.fogTint.getHexString?.()), weather.fogTintAmt || 0);
   R.fog.color = fog.map((v) => Math.round(v * 255));
-  R.fog.amount = clamp((weather.fog || 0) * 0.42 + st * 0.12 + (atmo.fogBoost || 0), 0, 0.7);
+  R.fog.amount = clamp((weather.fog || 0) * 0.12 + st * 0.05 + (atmo.fogBoost || 0), 0, 0.26);
   R.vignette = 0.5 + night * 0.15;
 }
 
 function applyIndoor() {
   const cfg = atmo.indoorCfg || { fog: '#0a0808', ambient: '#403040', light: '#ffa050' };
   if (cfg.deep) {
-    R.ambient = [0.48, 0.52, 0.7];
-    R.fog.amount = 0.08; R.fog.color = [20, 24, 40];
+    R.ambient = [0.54, 0.48, 0.72];
+    R.fog.amount = 0.06; R.fog.color = [26, 16, 40];
   } else {
     const a = rgb(cfg.ambient || '#c8b4a4');
     R.ambient = a.map((v) => v * 0.3 + 0.05);

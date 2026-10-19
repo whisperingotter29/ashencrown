@@ -8,7 +8,13 @@
 // world sizes go through PPU, design-pixel geometry through ap(), and 1-px details (mortar joints,
 // glints, nail heads, outlines) stay 1 px. Texture periods (bricks, planks, roof tiles) are sized
 // in today's pixels so they keep their world size.
-import { Pix, C, PPU, ART, ap, light, dark, shade, mixc, hash2, srand, bayer } from '../pix.js';
+//
+// Style (docs/ART_STYLE.md): every material is a short hue-shifted ramp from src/px/palette.js
+// (shadows lean plum, highlights lean cream), shaded in 3-4 flat bands lit from the upper left.
+// Texture comes only from clusters (brick and stone courses, plank seams, tile rows, stains);
+// there is no per-pixel speckle and no dithering on sprites. Silhouettes get the ink outline.
+import { Pix, C, PPU, ART, ap, light, dark, mixc, hash2, srand } from '../pix.js';
+import { RAMPS, INK, INK_SOFT, CREAM, CREAM_HI } from '../palette.js';
 import { ramp } from './props.js';
 import { weaponSprite } from './weapons.js';
 
@@ -21,7 +27,39 @@ export function done(p, e, extra = {}) {
   if (e) for (let i = 3; i < e.d.length; i += 4) if (e.d[i]) { any = true; break; }
   return { pix: p, emis: any ? e : null, ...extra };
 }
-const WIN = C('#ffc070');
+// palette shorthands
+const P = RAMPS;
+const pc = (ramp, i) => C(P[ramp][i]);
+// A 5-step hue-shifted material ramp around one base colour: [deep, shadow, base, light, top].
+// Cached: generators call this per fill, never per pixel.
+const r5cache = new Map();
+export function R5(base) {
+  const key = typeof base === 'string' ? base : base.join(',');
+  let r = r5cache.get(key);
+  if (!r) { const c = C(base); r = [dark(c, 0.52), dark(c, 0.74), c, light(c, 1.13), light(c, 1.28)]; r5cache.set(key, r); }
+  return r;
+}
+const ri = (i) => (i < 0 ? 0 : i > 4 ? 4 : i);
+// warm lamplight (emissive layer) and the dark plum glass seen by day
+const WIN = C(P.ember[4]), WIN_HOT = C(P.ember[5]), WIN_EDGE = C(P.ember[3]);
+const GLASS = [C(INK), C('#2a1838'), C('#3c2a4e'), C('#5a4672')];
+// snow on roofs and ledges: lavender-blue with slate shadows
+const SNOW = [C('#6e7a9a'), C('#a4aed0'), C('#d4dcee'), C('#eef1f8')];
+const IRON = R5('#3a3440'), GOLD = P.gold.map((c) => C(c)), WOOD = P.wood.map((c) => C(c));
+// Stepped flame colours as CSS strings [edge, body, hot, core] for the live flames drawn by the
+// structures and dungeon code: warm colours burn in the ember ramp, any other colour (aether,
+// frost, fae) in its own hue-shifted ramp. Cached per colour.
+const flameCache = new Map();
+export function flamePalette(color) {
+  let f = flameCache.get(color);
+  if (!f) {
+    const c = C(color), warm = c[0] > c[2] + 40 && c[0] > 180 && c[1] > c[2] && c[0] >= c[1];
+    const R = warm ? [P.ember[2], P.ember[3], P.ember[4], P.ember[5]].map((h) => C(h)) : (() => { const r = R5(c); return [r[1], r[2], r[3], r[4]]; })();
+    f = R.map((v) => `rgb(${v[0]},${v[1]},${v[2]})`);
+    flameCache.set(color, f);
+  }
+  return f;
+}
 
 // texture periods in today's pixels (same world size as the original design)
 const BR = ap(3), BW = ap(6);       // brick course / brick length
@@ -52,7 +90,8 @@ function vor(x, y, cell, s) {
   V.edge = Math.sqrt(d2) - Math.sqrt(d1);
   return V;
 }
-export const shadeAt = (p, x, y, k) => { const c = p.get(x | 0, y | 0); if (c && c[3]) p.set(x, y, shade(c, k)); };
+// darken (k < 1, hue leaning plum) or lighten (k > 1, leaning cream) one existing pixel
+export const shadeAt = (p, x, y, k) => { const c = p.get(x | 0, y | 0); if (c && c[3]) p.set(x, y, k < 1 ? dark(c, k) : light(c, k)); };
 // rounded-top opening (doors, arched windows): is column i, row ly (from the top) inside?
 function archIn(i, ly, w) { const r = w / 2, dy = Math.max(0, r - ly); return Math.abs(i + 0.5 - r) <= Math.sqrt(Math.max(0, r * r - dy * dy)) + 0.2; }
 
@@ -61,7 +100,7 @@ function archIn(i, ly, w) { const r = w / 2, dy = Math.max(0, r - ly); return Ma
 // leaf clumps (hedges, bushes).
 export function stoneMass(p, cx, cy, rx, ry, base, seed = 1, o = {}) {
   const R = o.ramp || ramp(base);
-  const bump = o.bump ?? 0.16, lobes = o.lobes || 6, cell = o.facet || ap(4), tilt = o.tilt ?? 0.55;
+  const bump = o.bump ?? 0.16, lobes = o.lobes || 6, cell = o.facet || ap(4), tilt = o.tilt ?? 0.45;
   const ph = hash2(seed, 0, 1) * 6.283;
   const ex = 1 + bump * 1.1;
   for (let y = Math.floor(cy - ry * ex - 1); y <= Math.ceil(cy + ry * ex + 1); y++) for (let x = Math.floor(cx - rx * ex - 1); x <= Math.ceil(cx + rx * ex + 1); x++) {
@@ -96,139 +135,159 @@ export function stoneMass(p, cx, cy, rx, ry, base, seed = 1, o = {}) {
 }
 
 // ------------------------------------------------------------------ texture fills
+// Masonry / timber / plaster fill. Every pixel takes one step of the material's 5-step ramp:
+// joints in the shadow steps, faces on the base, a 1-px lit lip on the top-left of each unit, and
+// a few whole units a step darker or lighter (cluster variation, never per-pixel speckle).
 export function fillWall(p, x0, y0, w, h, base, kind, seed = 0) {
-  const c = C(base);
+  const R = R5(base), mid = mixc(R[1], R[2], 0.5), soft = mixc(R[1], R[2], 0.7);
   x0 = Math.round(x0); y0 = Math.round(y0); w = Math.round(w); h = Math.round(h);
+  const tone = (a, b, s) => { const t = hash2(a, b, s); return t < 0.2 ? 1 : t > 0.88 ? 3 : 2; };
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
     const lx = x - x0, ly = y - y0;
-    let col = c;
-    const n = hash2(x, y, seed);
+    let k = 2, col = null;
     if (kind === 'brick') {
       const row = Math.floor(ly / BR), off = row % 2 ? BW >> 1 : 0, rx = (lx + off) % BW, ry = ly % BR, bi = Math.floor((lx + off) / BW);
-      if (ry === BR - 1 || rx === 0) col = dark(c, 0.66);
+      if (ry === BR - 1) k = 0;
+      else if (rx === 0) k = 1;
       else {
-        col = shade(c, 0.9 + hash2(bi, row, seed + 7) * 0.16);
-        if (ry === 0) col = light(col, 1.06); else if (ry === BR - 2 || rx === BW - 1) col = shade(col, 0.9);
-        if (n < 0.05) col = shade(col, 0.84);
+        k = tone(bi, row, seed + 7);
+        if (ry === 0 && rx < BW - 1) k = ri(k + 1);
+        else if (rx === BW - 1 && k > 1) k--;
       }
     } else if (kind === 'block') {
       const row = Math.floor(ly / KR), off = Math.floor(hash2(row, 3, seed) * KW), rx = (lx + off) % KW, ry = ly % KR, bi = Math.floor((lx + off) / KW);
-      if (ry === KR - 1 || rx === 0) col = dark(c, 0.68);
+      if (ry === KR - 1) k = 0;
+      else if (rx === 0) k = 1;
       else {
-        col = shade(c, 0.9 + hash2(bi, row, seed + 7) * 0.14);
-        if (ry === 0 || rx === 1) col = light(col, 1.08);
-        else if (ry === KR - 2 || rx === KW - 1) col = dark(col, 0.86);
+        k = tone(bi, row, seed + 7);
+        if (ry === 0 || rx === 1) k = ri(k + 1);
+        else if (ry === KR - 2) k = ri(k - 1);
+        // chipped corners: small clusters a step down
         const chip = hash2(bi, row, seed + 9);
-        if (chip < 0.3 && ((ry === 0 && rx <= 2) || (ry === 1 && rx === 1))) col = dark(c, 0.76);
-        else if (chip > 0.8 && ry >= KR - 3 && rx >= KW - 2) col = dark(c, 0.76);
-        else if (n < 0.04) col = dark(col, 0.86);
-        else if (n > 0.975) col = light(col, 1.1);
+        if (chip < 0.28 && ((ry <= 1 && rx <= 3) || (ry === 2 && rx === 1))) k = 1;
+        else if (chip > 0.8 && ry >= KR - 3 && rx >= KW - 3) k = 1;
       }
     } else if (kind === 'plank') {
       const rx = lx % PW, bi = Math.floor(lx / PW);
       const jy = (ly + Math.floor(hash2(bi, 1, seed) * 23)) % ap(11);
-      if (rx === PW - 1) col = dark(c, 0.62);
+      if (rx === PW - 1) k = 0;
       else {
-        col = shade(c, 0.92 + hash2(bi, 2, seed) * 0.14);
-        if (rx === 0) col = light(col, 1.06);
-        if (hash2(x, Math.floor(ly / 3), seed + 1) < 0.14) col = shade(col, 0.88);
-        if (jy === 0) col = dark(c, 0.7);
-        else if (jy === 2 && (rx === 1 || rx === PW - 3)) col = dark(c, 0.5);
+        k = tone(bi, 2, seed) === 1 ? 1 : 2;
+        if (rx === 0) k = 3;
+        // grain: short dashes, a few pixels long, one step down
+        const gy = Math.floor(ly / ap(3));
+        if (rx >= 2 && rx === 2 + Math.floor(hash2(bi, gy, seed + 1) * (PW - 3)) && hash2(bi, gy, seed + 2) < 0.4) k = ri(k - 1);
+        if (jy === 0) k = 0;
+        else if (jy === 2 && (rx === 1 || rx === PW - 3)) k = 0;
       }
     } else if (kind === 'adobe') {
-      const v = vnoise(x, y, seed, ap(4));
-      col = v < 0.3 ? shade(c, 0.94) : v > 0.74 ? light(c, 1.04) : c;
-      if (n < 0.05) col = dark(col, 0.9); else if (n > 0.975) col = light(col, 1.1);
+      // a few big flat patches of sun-bleached and stained mud
+      const v = vnoise(x, y, seed, ap(8));
+      k = v > 0.8 ? 3 : 2;
+      if (v < 0.22) col = mid;
     } else if (kind === 'marble') {
       const row = Math.floor(ly / MC), ry = ly % MC, rx = (lx + (row % 2) * MC) % (MC * 2);
-      if (ry === MC - 1) col = dark(c, 0.86);
-      else if (rx === 0) col = dark(c, 0.92);
+      if (ry === MC - 1) k = 1;
+      else if (rx === 0) k = 1;
       else {
-        if (ry === 0) col = light(c, 1.04);
-        const v = vnoise(x + y * 0.6, y, seed + 2, ap(5));
-        if (Math.abs(v - 0.5) < 0.022) col = mixc(col, '#a8a090', 0.4);
-        else if (n > 0.975) col = mixc(col, '#a8a090', 0.22);
+        k = hash2(Math.floor((lx + (row % 2) * MC) / (MC * 2)), row, seed + 3) < 0.2 ? 3 : 2;
+        if (ry === 0) k = 3;
+        const v = vnoise(x + y * 0.6, y, seed + 2, ap(6));
+        if (Math.abs(v - 0.5) < 0.025) col = mid;
       }
     } else {
-      // plaster: soft patches and specks
-      if (vnoise(x, y, seed, ap(5)) < 0.26) col = shade(c, 0.95);
-      if (n < 0.05) col = dark(col, 0.92); else if (n > 0.98) col = light(col, 1.05);
+      // plaster: a few large soft stains in one in-between tone
+      if (vnoise(x, y, seed, ap(8)) < 0.2) col = soft;
     }
-    // vertical shading: lit left, shadowed right
-    if (lx === 0) col = light(col, 1.1); else if (lx === w - 1) col = dark(col, 0.8);
-    if (ly === h - 1) col = dark(col, 0.75);
+    if (!col) col = R[k];
+    // wall edges: lit left, shadowed right and along the foot
+    if (lx === 0) col = R[3]; else if (lx === w - 1) col = R[1];
+    if (ly === h - 1) col = R[1];
     p.set(x, y, col);
   }
 }
 // One pixel of a roof pattern. rb counts rows up from the bottom of the slope so every eave row is
 // a whole course; RR is the course height (foreshortened on the back slope).
-function roofPx(kind, col, x, lx, rb, RR, seed) {
+// One pixel of a roof pattern as a ramp index around the band index b. rb counts rows up from
+// the bottom of the slope so every eave row is a whole course; RR is the course height
+// (foreshortened on the back slope).
+function roofPx(kind, b, x, lx, rb, RR, seed) {
   if (kind === 'tile') {
     const TW = ap(4), row = Math.floor(rb / RR), ry = RR - 1 - (rb % RR), off = row % 2 ? TW >> 1 : 0, tx = (lx + off) % TW, ti = Math.floor((lx + off) / TW);
-    const tv = hash2(ti, row, seed + 11);
-    const k = tv < 0.12 ? shade(col, 0.9) : tv > 0.9 ? light(col, 1.05) : col;
-    if (ry === RR - 1) return tx === 0 || tx === TW - 1 ? dark(col, 0.52) : dark(col, 0.72);
-    if (tx === TW - 1) return dark(k, 0.78);
-    if (tx === 0) return light(k, 1.1);
-    if (tx === TW - 2) return shade(k, 0.92);
+    const tv = hash2(ti, row, seed + 11), k = tv < 0.12 ? b - 1 : tv > 0.95 ? b + 1 : b;
+    if (ry === RR - 1) return b - 2;                                  // shadow under the course above
+    if (ry === RR - 2 && (tx === TW - 1 || tx === 0)) return b - 1;  // rounded tile ends
+    if (tx === TW - 1) return b - 1;                                  // gap between tiles
+    if (ry === 0 && tx > 0 && tx < TW - 2) return k + 1;              // lit lip
     return k;
   }
   if (kind === 'slate') {
-    const SR = Math.max(2, RR - 1), SW = ap(5), row = Math.floor(rb / SR), ry = SR - 1 - (rb % SR), off = row % 2 ? SW >> 1 : 0, sx = (lx + off) % SW, si = Math.floor((lx + off) / SW);
-    let k = shade(col, 0.88 + hash2(si, row, seed + 13) * 0.18);
-    if (ry === SR - 1) return dark(col, 0.66);
-    if (sx === 0) return dark(col, 0.8);
-    if (ry === 0 && sx === 1) k = light(k, 1.1);
+    const SR = Math.max(2, RR - 1), SW = ap(5), row = Math.floor(rb / SR), ry = SR - 1 - (rb % SR), off = Math.floor(hash2(row, 5, seed) * SW), sx = (lx + off) % SW, si = Math.floor((lx + off) / SW);
+    const k = hash2(si, row, seed + 13) < 0.2 ? b - 1 : b;
+    if (ry === SR - 1) return b - 2;
+    if (sx === 0) return b - 1;
+    if (ry === 0) return k + 1;
     return k;
   }
   if (kind === 'thatch') {
     const LR = RR + 1, row = Math.floor(rb / LR), ry = LR - 1 - (rb % LR);
-    const s = hash2(x, row, seed);
-    if (ry >= LR - 1 - (s < 0.33 ? 1 : 0)) return dark(col, 0.66);
-    if (hash2(x, row * 7 + (ry >> 1), seed + 3) < 0.28) return dark(col, 0.84);
-    return s > 0.82 ? light(col, 1.08) : col;
+    const s = hash2(Math.floor(x / 2), row, seed);
+    if (ry >= LR - 1 - (s < 0.33 ? 1 : 0)) return b - 2;   // ragged layer edge
+    // straw: vertical strands two pixels wide
+    if (hash2(Math.floor(x / 2), row * 7, seed + 3) < 0.3 && ry > 0) return b - 1;
+    if (ry === 0 && s > 0.5) return b + 1;
+    return b;
   }
-  if (kind === 'cloth') return Math.floor(lx / ap(4)) % 2 ? mixc(col, '#f0e8d8', 0.35) : col;
-  return col;
+  if (kind === 'cloth') return Math.floor(lx / ap(4)) % 2 ? b + 1 : b;
+  return b;
 }
-// Roof of tile rows seen from the front: lighter toward the eave, darkest at the ridge.
-// ro.ridge (0..1) adds a foreshortened back slope above a ridge cap; ro.moss sprinkles moss.
+// Roof of tile rows seen from the front, in flat bands: a shadowed back slope and ridge cap, a
+// darker course under the ridge, then the lit main slope down to the eave. ro.ridge (0..1) adds
+// the foreshortened back slope; ro.moss grows moss clusters.
 export function fillRoof(p, x0, y0, w, h, base, kind = 'tile', seed = 0, snow = 0, ro = {}) {
-  const c = C(base);
+  const R = R5(base), M = P.moss.map((c) => C(c));
   x0 = Math.round(x0); y0 = Math.round(y0); w = Math.round(w); h = Math.round(h);
   const RB = ro.ridge ? Math.max(3, Math.round(h * ro.ridge)) : 0;
+  const upper = RB + Math.max(ap(3), Math.round((h - RB) * 0.18));
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
     const ly = y - y0, lx = x - x0;
-    let col;
-    if (ly < RB) col = roofPx(kind, mixc(dark(c, 0.5), dark(c, 0.66), ly / RB), x, lx, RB - 1 - ly, ap(2), seed + 1);
-    else col = roofPx(kind, mixc(dark(c, 0.8), light(c, 1.1), (ly - RB) / Math.max(1, h - RB - 1)), x, lx, h - 1 - ly, ap(3), seed);
-    if (ro.moss && ly > RB + 2 && vnoise(x, y, seed + 9, ap(4)) > 1 - ro.moss * 0.5 && hash2(x, y, 4) < 0.75) col = mixc(col, '#4a6a2a', 0.55);
-    if (lx === 0) col = light(col, 1.08); else if (lx === w - 1) col = dark(col, 0.82);
+    let k;
+    if (ly < RB) k = roofPx(kind, 1, x, lx, RB - 1 - ly, ap(2), seed + 1) - (ly < RB * 0.5 ? 1 : 0);
+    else k = roofPx(kind, ly < upper ? 1 : 2, x, lx, h - 1 - ly, ap(3), seed);
+    let col = R[ri(k)];
+    if (ro.moss && ly > RB + 2) {
+      const v = vnoise(x, y, seed + 9, ap(5));
+      if (v > 1 - ro.moss * 0.32) col = v > 1 - ro.moss * 0.1 ? M[3] : ri(k) <= 1 ? M[1] : M[2];
+    }
+    if (lx === 0) col = R[ri(k + 1)]; else if (lx >= w - 2) col = R[ri(Math.min(k, 2) - 1)];
     p.set(x, y, col);
   }
   // ridge cap (or the top edge) and the eave line
   for (let x = x0; x < x0 + w; x++) {
     const lx = x - x0;
     if (RB) {
-      p.set(x, y0 + RB - 1, dark(c, 0.46));
-      p.set(x, y0 + RB, lx % 5 === 4 ? dark(c, 0.62) : light(dark(c, 0.86), 1.14));
-      p.set(x, y0 + RB + 1, dark(c, 0.6));
+      p.set(x, y0 + RB - 1, R[0]);
+      p.set(x, y0 + RB, lx % ap(4) === ap(4) - 1 ? R[1] : R[4]);
+      p.set(x, y0 + RB + 1, R[1]);
     }
-    p.set(x, y0, dark(c, 0.5));
-    p.set(x, y0 + h - 1, dark(c, 0.6));
+    p.set(x, y0, R[0]);
+    p.set(x, y0 + h - 1, R[0]);
+    p.set(x, y0 + h - 2, R[1]);
   }
   if (snow) for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
     const t = (y - y0) / Math.max(1, h - 1);
-    const thr = snow + (vnoise(x, 0, seed + 3, ap(7)) - 0.5) * 0.2 + (hash2(x, 1, seed) - 0.5) * 0.04;
-    if (t >= thr) continue;
-    p.set(x, y, t > thr - 0.06 ? '#b8c4d8' : hash2(x, y, 5) < 0.05 ? '#ffffff' : mixc(C('#f0f4fa'), C('#d8e0ec'), t / Math.max(0.01, thr)));
+    // stepped drift edge: the threshold moves in 3-px runs, not per pixel
+    const thr = snow + (vnoise(Math.floor(x / 3) * 3, 0, seed + 3, ap(7)) - 0.5) * 0.22;
+    if (t >= thr) { if (t < thr + 0.05) shadeAt(p, x, y, 0.72); continue; }
+    p.set(x, y, t > thr - 0.05 ? SNOW[1] : y === y0 || (x - x0) === 0 ? SNOW[3] : t > thr * 0.55 ? SNOW[2] : SNOW[3]);
   }
 }
-// Window with a lit-top / shaded-bottom frame, a glass glint, mullions, optional shutters,
-// lattice (desert) and flower box. The warm lamplight lives on the emissive layer.
+// Window: a frame lit on the top-left, a deep plum pane with one cool glint by day, mullions,
+// optional shutters, lattice (desert) and flower box. Warm ember lamplight lives on the emissive
+// layer so it only shows at night.
 export function windowAt(p, e, x, y, w, h, frame, o = {}) {
   x = Math.round(x); y = Math.round(y); w = Math.round(w); h = Math.round(h);
-  const f = C(frame), fl = light(f, 1.12), fd = dark(f, 0.68);
+  const FR = R5(frame), f = FR[2], fl = FR[3], fd = FR[1];
   const inG = (i, j) => i >= 0 && j >= 0 && i < w && j < h && (!o.arch || archIn(i, j, w));
   // frame: everything around the glass, lit on the top-left, shaded on the bottom-right
   for (let j = -1; j <= h; j++) for (let i = -1; i <= w; i++) {
@@ -239,19 +298,21 @@ export function windowAt(p, e, x, y, w, h, frame, o = {}) {
     const tl = inG(i + 1, j) || inG(i, j + 1), br = inG(i - 1, j) || inG(i, j - 1);
     p.set(x + i, y + j, tl && !br ? fl : br && !tl ? fd : f);
   }
-  const lc = C(o.color || WIN);
+  const lc = o.color ? R5(o.color) : null;
   for (let j = 0; j < h; j++) for (let i = 0; i < w; i++) {
     if (!inG(i, j)) continue;
-    if (o.dark) { p.set(x + i, y + j, '#1a1418'); continue; }
+    if (o.dark) { p.set(x + i, y + j, GLASS[0]); continue; }
     if (o.lattice && (i + j) % 2 === 0 && j > 0) { p.set(x + i, y + j, o.lattice); continue; }
-    let g = C('#2a3442');
-    if (j === 0 || !inG(i, j - 1)) g = C('#1e2632');
-    else if (i >= 1 && j >= 1 && i + j === 2) g = C('#6a7a8c');
-    else if (i >= 1 && j >= 1 && i + j === 3) g = C('#46566a');
+    // pane: ink under the lintel, plum body, a short lavender glint on the upper left
+    let g = GLASS[1];
+    if (j === 0 || !inG(i, j - 1)) g = GLASS[0];
+    else if (i >= 1 && j >= 1 && i + j === 2) g = GLASS[3];
+    else if (i >= 1 && j >= 1 && i + j === 3) g = GLASS[2];
     p.set(x + i, y + j, g);
-    let k = lc;
-    if (j === 0) k = shade(lc, 0.82); else if (j === h - 1 || i === w - 1) k = shade(lc, 0.9);
-    if (i + j <= 1 + (j === 0 ? 0 : 1) && j > 0 && i <= 1) k = C('#fff0c0');
+    // night: hot core low in the pane, ember body, deeper ember under the lintel
+    let k = lc ? lc[2] : WIN;
+    if (j === 0) k = lc ? lc[1] : WIN_EDGE;
+    else if (j >= h - 2 && i >= 1 && i <= w - 2) k = lc ? lc[4] : WIN_HOT;
     e.set(x + i, y + j, k);
   }
   if (o.mullion && w >= 3 && !o.dark) {
@@ -260,46 +321,54 @@ export function windowAt(p, e, x, y, w, h, frame, o = {}) {
     for (let i = 0; i < w; i++) { p.set(x + i, my, i === 0 ? fl : f); e.clear(x + i, my); }
   }
   if (o.shutters) {
-    const s = C(o.shutters), SW = ap(2);
+    const S = R5(o.shutters), SW = ap(2);
     for (const sx of [x - 1 - SW, x + w + 1]) for (let j = -1; j <= h; j++) for (let i = 0; i < SW; i++) {
-      let col = (j + 1) % 2 ? s : dark(s, 0.78);
-      if (i === 0) col = light(col, 1.1); else if (i === SW - 1) col = dark(col, 0.82);
-      if (j === -1) col = light(s, 1.15);
-      p.set(sx + i, y + j, col);
+      // slats: two-pixel boards with a shadow line under each
+      let k = (j + 1) % 3 === 2 ? 1 : 2;
+      if (i === 0 && k === 2) k = 3; else if (i === SW - 1) k = 1;
+      if (j === -1) k = 3;
+      p.set(sx + i, y + j, S[k]);
     }
   }
-  // sill with a thin shadow under it
-  p.rect(x - 2, y + h + 1, w + 4, 1, o.snow ? C('#eef2f8') : light(f, 1.05));
-  for (let i = -1; i <= w; i++) shadeAt(p, x + i, y + h + 2, 0.76);
+  // sill with a plum shadow line under it
+  p.rect(x - 2, y + h + 1, w + 4, 1, o.snow ? SNOW[3] : FR[3]);
+  for (let i = -1; i <= w; i++) shadeAt(p, x + i, y + h + 2, 0.7);
   if (o.flowers) {
-    const fc = C(o.flowers);
-    p.rect(x - 1, y + h + 2, w + 2, ap(2), '#6a4628'); p.rect(x - 1, y + h + 2, w + 2, 1, '#8a6038');
-    for (let i = -1; i <= w; i++) p.set(x + i, y + h + 1, hash2(i, x, 3) < 0.5 ? (hash2(i, y, 4) < 0.5 ? fc : light(fc, 1.2)) : (i % 2 ? '#3a6a2a' : '#5a8a3a'));
+    const fc = R5(o.flowers), M = P.moss;
+    p.rect(x - 1, y + h + 2, w + 2, ap(2), WOOD[2]); p.rect(x - 1, y + h + 2, w + 2, 1, WOOD[3]);
+    // blooms in 2-px clumps over leaves
+    for (let i = -1; i <= w; i++) {
+      const cl = Math.floor((i + 1) / 2), bloom = hash2(cl, x, 3) < 0.55;
+      p.set(x + i, y + h + 1, bloom ? (hash2(cl, y, 4) < 0.5 ? fc[2] : fc[3]) : (cl % 2 ? M[2] : M[3]));
+      if (bloom && hash2(cl, y, 5) < 0.4) p.set(x + i, y + h, fc[(i & 1) ? 2 : 3]);
+    }
   }
 }
-// Plank door (or a dark doorway with o.dark): grain, iron straps, a ring handle and a frame that
-// follows the arch. o.fw: frame thickness, o.stones: alternating voussoir blocks.
+// Plank door (or a dark doorway with o.dark): wood-ramp boards, iron straps, a ring handle and a
+// frame that follows the arch. o.fw: frame thickness, o.stones: alternating voussoir blocks.
 export function doorAt(p, x, yb, w, h, wood, o = {}) {
   x = Math.round(x); yb = Math.round(yb); w = Math.round(w); h = Math.round(h);
-  const c = C(wood), fr = C(o.frame || dark(wood, 0.6));
+  const R = R5(wood), FR = R5(o.frame || dark(wood, 0.6));
   const top = yb - h + 1;
   const inD = (i, ly) => i >= 0 && i < w && ly >= 0 && ly < h && (!o.arch || archIn(i, ly, w));
   const pw = ap(2);
   for (let ly = 0; ly < h; ly++) for (let i = 0; i < w; i++) {
     if (!inD(i, ly)) continue;
     let col;
-    if (o.dark) col = ly < 2 || !inD(i, ly - 2) ? C('#16121a') : i === 0 ? C('#100c12') : C('#0a080c');
+    if (o.dark) col = ly < 2 || !inD(i, ly - 2) ? GLASS[1] : i === 0 ? C(INK_SOFT) : GLASS[0];
     else {
-      const seam = i % pw === pw - 1 && i < w - 1;
-      col = seam ? dark(c, 0.68) : i === 0 ? light(c, 1.12) : i === w - 1 ? dark(c, 0.8) : shade(c, 0.94 + hash2(Math.floor(i / pw), 3, 7) * 0.12);
-      if (!seam && hash2(x + i, Math.floor((top + ly) / 3), 5) < 0.1) col = shade(col, 0.88);
-      if (!inD(i, ly - 1) || !inD(i, ly - 2)) col = dark(col, 0.72);
+      const seam = i % pw === pw - 1 && i < w - 1, bi = Math.floor(i / pw);
+      let k = seam ? 0 : i === 0 ? 3 : i === w - 1 ? 1 : hash2(bi, 3, 7) < 0.3 ? 1 : 2;
+      // grain dashes along each board
+      if (!seam && k === 2 && i % pw === 0 && hash2(bi, Math.floor((top + ly) / ap(3)), 5) < 0.35) k = 1;
+      if (!inD(i, ly - 1) || !inD(i, ly - 2)) k = Math.max(0, k - 1);
+      col = R[k];
     }
     p.set(x + i, top + ly, col);
   }
   if (!o.dark && h >= ap(8)) for (const sy of [Math.round(h * 0.26), Math.round(h * 0.74)]) {
-    for (let i = 0; i < w - 1; i++) if (inD(i, sy)) p.set(x + i, top + sy, i % 3 === 1 ? '#6a6266' : '#2e282c');
-    if (inD(0, sy)) p.set(x - 1, top + sy, '#2e282c');
+    for (let i = 0; i < w - 1; i++) if (inD(i, sy)) p.set(x + i, top + sy, i % 3 === 1 ? IRON[3] : IRON[1]);
+    if (inD(0, sy)) p.set(x - 1, top + sy, IRON[0]);
   }
   // frame ring (dilated outline of the opening, open at the bottom)
   const fw = o.fw || 1;
@@ -313,107 +382,108 @@ export function doorAt(p, x, yb, w, h, wood, o = {}) {
     }
     for (const [i, ly, kk] of add) {
       ring.add(i + ',' + ly);
-      let col = fr;
-      if (o.stones) col = Math.floor((i + 64 + (top + ly)) / ap(3)) % 2 ? light(fr, 1.14) : fr;
-      if (kk === fw && (i < 0 || ly < 0) && (ly < 0 || i < w / 2)) col = light(col, 1.06);
-      if (o.stones && (i + top + ly) % ap(3) === 0) col = dark(fr, 0.72);
-      p.set(x + i, top + ly, col);
+      let fk = 2;
+      if (o.stones) fk = Math.floor((i + 64 + (top + ly)) / ap(3)) % 2 ? 3 : 2;
+      if (kk === fw && (i < 0 || ly < 0) && (ly < 0 || i < w / 2)) fk = Math.min(4, fk + 1);
+      if (o.stones && (i + top + ly) % ap(3) === 0) fk = 1;
+      p.set(x + i, top + ly, FR[fk]);
     }
   }
-  if (!o.dark) { const hx = x + w - 1 - ap(1), hy = yb - Math.floor(h / 2); p.set(hx, hy, '#e8c868'); p.set(hx, hy + 1, '#8a6a2a'); p.set(hx - 1, hy + 1, '#5a4420'); }
+  if (!o.dark) { const hx = x + w - 1 - ap(1), hy = yb - Math.floor(h / 2); p.set(hx, hy, GOLD[4]); p.set(hx, hy + 1, GOLD[2]); p.set(hx - 1, hy + 1, GOLD[1]); }
 }
 
 // ------------------------------------------------------------------ houses
+// Town styles, all from the master ramps: plaster and stone in cream / clay / stone / sand,
+// timber in wood, roofs in rose-maroon, slate, teal or plum tiles. wallStone: the town's curtain
+// walls and gate towers (a step darker than the houses so they sit back).
 export const STYLE = {
-  desert: { wall: ['#c89a6a', '#b8845a', '#d8aa78', '#a87048'], roof: ['#a86a42', '#8a5030'], trim: '#6a3a24', cloth: ['#a02a20', '#d8a040', '#2a4a7a', '#7a2a5a'] },
-  marble: { wall: ['#e8e0cc', '#d8cfb8', '#f0e8d8'], roof: ['#b8583a', '#a04a30', '#c86848'], trim: '#c8a050', cloth: ['#d8b040', '#a02020', '#f0e8d0'] },
-  wood: { wall: ['#7a5a3a', '#8a6a48', '#6a4a30'], roof: ['#4a5a30', '#5a4a30', '#3a4a2a', '#7a5a30'], trim: '#3a2a1a', cloth: ['#4a7a3a', '#a08040', '#6a3a7a'] },
-  stone: { wall: ['#7a7a80', '#6a6a72', '#8a8478'], roof: ['#3a4250', '#4a4a58', '#2a3240'], trim: '#3a3030', cloth: ['#3a5a8a', '#8a2a2a', '#5a3a7a'] },
-  camp: { wall: ['#8a7058', '#a08060', '#6a5a48'], roof: ['#6a5040', '#7a6048'], trim: '#3a2a1a', cloth: ['#3a5a8a', '#8a2a2a', '#c0a060'] },
-  port: { wall: ['#8a7a68', '#7a6a58', '#a09078'], roof: ['#5a3a2a', '#3a4a5a', '#6a3a2a'], trim: '#2a2a2a', cloth: ['#e0e0d0', '#2a5a7a', '#a03020'] },
+  desert: { wall: ['#c8a07e', '#bc9070', '#d0aa88', '#b08068'], roof: ['#a8705a', '#9c615b'], trim: '#662b2c', cloth: ['#a94a68', '#c99a3a', '#243e7b', '#2f7070'], wallStone: '#b08068' },
+  marble: { wall: ['#dccaa6', '#d2be9c', '#e2d2b2'], roof: ['#8e4a46', '#7e3c40', '#9a5a50'], trim: '#c99a3a', cloth: ['#c99a3a', '#8a3434', '#e2c494'], wallStone: '#b8aa94' },
+  wood: { wall: ['#5a3628', '#77492f', '#4e3026'], roof: ['#2f5a58', '#7a2f4a', '#5e3a4a', '#8a4238'], trim: '#3f2622', cloth: ['#2f7070', '#c99a3a', '#a94a68', '#6a4a8a'], wallStone: '#6c6874' },
+  stone: { wall: ['#77727a', '#6c6874', '#80787a'], roof: ['#3e4a5a', '#4a3a58', '#34405a'], trim: '#2f2c38', cloth: ['#243e7b', '#8a3434', '#6a4a8a'], wallStone: '#6c6874' },
+  camp: { wall: ['#94705a', '#a8805e', '#7a5a4a'], roof: ['#6a4a3a', '#7a5a48'], trim: '#3f2622', cloth: ['#2f7070', '#8a3434', '#c99a3a'], wallStone: '#7a5a4a' },
+  port: { wall: ['#5e7a78', '#646a86', '#8a6a5e'], roof: ['#7a2f4a', '#3e4a5a', '#8a4238'], trim: '#2f2c38', cloth: ['#e2c494', '#2f7070', '#8a3434'], wallStone: '#7a6a66' },
 };
+const PLASTER = ['#d6c2a2', '#ccb698', '#dccab0'];
 
 // a course of fitted foundation stones
 function foundation(p, x, y, w, h, base, seed) {
-  const c = C(base);
+  const R = R5(base);
   let sx = x, k = 0;
   while (sx < x + w) {
-    const sw = ap(3) + Math.floor(hash2(k, 1, seed) * ap(3)), tone = 0.86 + hash2(k, 2, seed) * 0.22;
+    const sw = ap(3) + Math.floor(hash2(k, 1, seed) * ap(3)), t = hash2(k, 2, seed), tk = t < 0.3 ? 1 : t > 0.8 ? 3 : 2;
     for (let i = 0; i < sw && sx + i < x + w; i++) for (let j = 0; j < h; j++) {
-      let col = shade(c, tone);
-      if (i === 0) col = dark(c, 0.62); else if (j === 0) col = light(col, 1.12); else if (j === h - 1) col = dark(col, 0.8);
-      p.set(sx + i, y + j, col);
+      let kk = tk;
+      if (i === 0) kk = 0; else if (j === 0) kk = Math.min(4, tk + 1); else if (j === h - 1) kk = 1;
+      p.set(sx + i, y + j, R[kk]);
     }
     sx += sw; k++;
   }
 }
 // overlapping horizontal weatherboards (port houses)
 function clapboard(p, x0, y0, w, h, base, seed) {
-  const c = C(base), BH = ap(3);
+  const R = R5(base), BH = ap(3);
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
     const lx = x - x0, ly = y - y0, row = Math.floor(ly / BH), ry = ly % BH, tv = hash2(row, 1, seed);
-    let col = shade(c, 0.9 + tv * 0.14);
-    if (ry === 0) col = dark(c, 0.62);
-    else if (ry === 1) col = shade(col, 0.86);
-    else if (ry === BH - 1) col = light(col, 1.06);
-    if (ry > 0 && hash2(x >> 2, y, seed) < 0.08) col = shade(col, 0.9);
-    if (ry > 0 && (lx + Math.floor(tv * 37)) % ap(24) === 0) col = dark(c, 0.7);
-    if (lx < 2) col = lx === 0 ? light(dark(c, 0.8), 1.1) : dark(c, 0.8);
-    else if (lx >= w - 2) col = dark(c, lx === w - 1 ? 0.66 : 0.78);
-    p.set(x, y, col);
+    let k = tv < 0.25 ? 1 : 2;
+    if (ry === 0) k = 0;                 // shadow under the board above
+    else if (ry === BH - 1) k = 3;       // lit lower lip
+    if (ry > 0 && (lx + Math.floor(tv * 37)) % ap(24) === 0) k = 0;   // butt joints
+    if (lx < 2) k = lx === 0 ? 3 : 1;
+    else if (lx >= w - 2) k = lx === w - 1 ? 0 : 1;
+    p.set(x, y, R[k]);
   }
 }
 // alternating long / short corner stones (stone houses)
 function quoins(p, x0, y0, w, h, base) {
-  const c = light(base, 1.14);
+  const R = R5(light(base, 1.12)), J = R5(base)[0];
   for (let y = y0, k = 0; y < y0 + h; y += KR, k++) {
     const qw = k % 2 ? ap(3) : ap(5), hh = Math.min(KR - 1, y0 + h - y);
     for (const [qx, side] of [[x0, 0], [x0 + w - qw, 1]]) {
       for (let j = 0; j < hh; j++) for (let i = 0; i < qw; i++) {
-        let col = c;
-        if (j === 0 || (side === 0 && i === 0)) col = light(c, 1.08);
-        else if (j === hh - 1 || (side === 1 && i === qw - 1) || (side === 0 && i === qw - 1)) col = dark(c, 0.84);
-        if (hash2(qx + i, y + j, 2) < 0.05) col = dark(col, 0.88);
-        p.set(qx + i, y + j, col);
+        let kk = 2;
+        if (j === 0 || (side === 0 && i === 0)) kk = 3;
+        else if (j === hh - 1 || i === qw - 1) kk = 1;
+        p.set(qx + i, y + j, R[kk]);
       }
-      if (y + hh < y0 + h) p.rect(qx, y + hh, qw, 1, dark(base, 0.62));
+      if (y + hh < y0 + h) p.rect(qx, y + hh, qw, 1, J);
     }
   }
 }
 function dormer(p, e, cx, y, roofC, trim, faceC) {
-  const ww = ap(4) + 1, wh = ap(4) + 1, x = cx - (ww >> 1), rc = C(roofC);
-  p.rect(x - 2, y - 2, ww + 4, wh + 4, faceC); p.rect(x - 2, y - 2, 1, wh + 4, light(faceC, 1.1)); p.rect(x + ww + 1, y - 2, 1, wh + 4, dark(faceC, 0.8));
+  const ww = ap(4) + 1, wh = ap(4) + 1, x = cx - (ww >> 1), RC = R5(roofC), FC = R5(faceC);
+  p.rect(x - 2, y - 2, ww + 4, wh + 4, FC[2]); p.rect(x - 2, y - 2, 1, wh + 4, FC[3]); p.rect(x + ww + 1, y - 2, 1, wh + 4, FC[1]);
   windowAt(p, e, x, y, ww, wh, trim, { mullion: true });
   const gh = ap(4), gy = y - 3;
   for (let j = 0; j <= gh; j++) {
     const hw = Math.round((j / gh) * ((ww >> 1) + 4));
-    for (let i = -hw; i <= hw; i++) p.set(cx + i, gy - gh + j, j === gh ? dark(rc, 0.6) : Math.abs(i) >= hw - 1 ? dark(rc, 0.7) : i < 0 ? light(rc, 1.05) : dark(rc, 0.84));
+    for (let i = -hw; i <= hw; i++) p.set(cx + i, gy - gh + j, j === gh ? RC[0] : Math.abs(i) >= hw - 1 ? RC[1] : i < 0 ? RC[3] : RC[2]);
   }
 }
 // small things stood against the front wall
 function clutter(p, x, yb, kind, seed) {
   if (kind === 'barrel') {
-    const w = ramp('#7a5232'), W = ap(6), H = ap(8);
+    const w = WOOD, W = ap(6), H = ap(8);
     for (let j = 0; j < H; j++) for (let i = 0; i < W; i++) {
-      const u = (i + 0.5) / W; let col = w[u < 0.3 ? 3 : u < 0.65 ? 2 : 1];
-      if (i % 3 === 2) col = dark(col, 0.86);
-      if (j === 2 || j === H - 3) col = '#3a3438';
+      const u = (i + 0.5) / W; let col = w[u < 0.3 ? 4 : u < 0.65 ? 3 : 2];
+      if (i % 3 === 2) col = w[u < 0.65 ? 2 : 1];
+      if (j === 2 || j === H - 3) col = u < 0.3 ? IRON[3] : IRON[1];
       p.set(x + i, yb - H + 1 + j, col);
     }
-    p.rect(x + 1, yb - H, W - 2, 1, w[0]); p.rect(x + 1, yb - H + 1, W - 2, 1, w[1]);
+    p.rect(x + 1, yb - H, W - 2, 1, w[1]); p.rect(x + 1, yb - H + 1, W - 2, 1, w[2]);
   } else if (kind === 'crate') {
-    const W = ap(7), H = ap(6), c = C('#8a6a40');
+    const W = ap(7), H = ap(6), c = P.wood[4];
     fillWall(p, x, yb - H + 1, W, H, c, 'plank', seed);
-    p.line(x + 1, yb - 1, x + W - 2, yb - H + 2, dark(c, 0.62));
-    p.rect(x, yb - H + 1, W, 1, light(c, 1.12));
+    p.line(x + 1, yb - 1, x + W - 2, yb - H + 2, WOOD[1]);
+    p.rect(x, yb - H + 1, W, 1, WOOD[5]);
   } else if (kind === 'logs') {
     for (let k = 0; k < 5; k++) {
       const lx = x + 2 + (k % 3) * ap(3) + (k >= 3 ? ap(1.5) : 0), ly = yb - 2 - (k >= 3 ? ap(3) : 0);
-      p.disc(lx + 0.5, ly + 0.5, ap(1.6), '#6a4a2c'); p.disc(lx + 0.5, ly + 0.5, ap(1.6) - 1, '#c8a070'); p.set(lx, ly, '#8a6440');
+      p.disc(lx + 0.5, ly + 0.5, ap(1.6), WOOD[2]); p.disc(lx + 0.5, ly + 0.5, ap(1.6) - 1, P.sand[3]); p.set(lx, ly, WOOD[4]);
     }
   } else if (kind === 'pots') {
     for (let k = 0; k < 2; k++) {
-      const R = ramp(k ? '#b8784a' : '#a86a42'), px = x + k * ap(5), r = ap(2.5) - k;
+      const R = R5(k ? P.clay[4] : P.clay[3]), px = x + k * ap(5), r = ap(2.5) - k;
       for (let j = -r; j <= r; j++) for (let i = -r; i <= r; i++) { if (i * i + j * j > r * r + 1) continue; const l = -i - j; p.set(px + r + i, yb - r + j, R[l > 2 ? 3 : l > -1 ? 2 : l > -3 ? 1 : 0]); }
       p.rect(px + r - 1, yb - 2 * r - 2, 3, 2, R[1]); p.rect(px + r - 2, yb - 2 * r - 3, 5, 1, R[3]);
     }
@@ -434,35 +504,35 @@ export function houseSprite(style, w, d, h, seed, o = {}) {
     const p = mk(W + ov * 2 + M * 2, Hh + RH + top), e = mk(p.w, p.h);
     const x0 = M + ov, yb = p.h - 1, wallTop = yb - Hh + 1, wH = Hh - FH;
     const wallC = pick(S.wall), roofC = pick(S.roof), trim = C(S.trim);
+    const WR = R5(wallC);
     const cx = x0 + Math.floor(W / 2);
     if (style === 'camp') return tent(p, e, S, r, W, Hh + RH, o.snow);
     if (style === 'mushroom') return mushroomHouse(p, e, r, W, Hh);
     // ---- foundation
     if (style === 'port') {
-      p.rect(x0, yb - FH + 1, W, FH, '#241c18');
-      for (let x = x0 + 1; x < x0 + W - 2; x += ap(8)) { p.rect(x, yb - FH + 1, ap(2), FH, '#5a4430'); p.set(x, yb - FH + 1, '#7a5e40'); }
-      p.rect(x0 + W - ap(2) - 1, yb - FH + 1, ap(2), FH, '#5a4430');
-    } else foundation(p, x0 - 1, yb - FH + 1, W + 2, FH, style === 'marble' ? '#c8c0a8' : style === 'desert' ? dark(wallC, 0.8) : '#5a5048', seed);
+      p.rect(x0, yb - FH + 1, W, FH, INK_SOFT);
+      for (let x = x0 + 1; x < x0 + W - 2; x += ap(8)) { p.rect(x, yb - FH + 1, ap(2), FH, WOOD[2]); p.set(x, yb - FH + 1, WOOD[4]); }
+      p.rect(x0 + W - ap(2) - 1, yb - FH + 1, ap(2), FH, WOOD[2]);
+    } else foundation(p, x0 - 1, yb - FH + 1, W + 2, FH, style === 'marble' ? '#b8aa94' : style === 'desert' ? WR[1] : P.stone[3], seed);
     // ---- front wall
     if (style === 'desert') {
       fillWall(p, x0, wallTop, W, wH, wallC, 'adobe', seed);
-      // splash-darkened base, hairline cracks and a patch of bare mud brick
-      for (let j = 0; j < ap(3); j++) for (let x = x0; x < x0 + W; x++) if (j > 0 || bayer(x, j) < 0.5) shadeAt(p, x, yb - FH - j, 0.9);
+      // splash-darkened base (a flat band), hairline cracks and a patch of bare mud brick
+      for (let j = 0; j < ap(3); j++) for (let x = x0 + 1; x < x0 + W - 1; x++) p.set(x, yb - FH - j, j === ap(3) - 1 && (x >> 2) % 3 === 0 ? WR[2] : WR[1]);
       for (let k = 0; k < 3; k++) {
-        let x = x0 + 3 + Math.floor(r() * (W - 6)), y = wallTop + ap(3) + Math.floor(r() * wH * 0.5);
-        for (let s = 0; s < ap(5); s++) { shadeAt(p, x, y, 0.72); y++; if (r() < 0.5) x += r() < 0.5 ? -1 : 1; }
+        let x = x0 + 3 + Math.floor(r() * (W - 6)), y = wallTop + ap(4) + Math.floor(r() * wH * 0.45);
+        for (let s = 0; s < ap(5); s++) { p.set(x, y, WR[0]); if (s === 0) p.set(x + 1, y, WR[3]); y++; if (r() < 0.5) x += r() < 0.5 ? -1 : 1; }
       }
       const bx = x0 + ap(3) + Math.floor(r() * (W * 0.25)), by = wallTop + Math.floor(wH * (0.5 + r() * 0.2));
-      fillWall(p, bx, by, ap(7), ap(4), dark(wallC, 0.86), 'brick', seed + 3);
-      p.rect(bx - 1, by - 1, ap(7) + 2, 1, light(wallC, 1.08));
+      fillWall(p, bx, by, ap(7), ap(4), P.clay[3], 'brick', seed + 3);
+      p.rect(bx - 1, by - 1, ap(7) + 2, 1, WR[3]);
     } else if (style === 'marble') fillWall(p, x0, wallTop, W, wH, wallC, 'marble', seed);
     else if (style === 'stone') { fillWall(p, x0, wallTop, W, wH, wallC, 'block', seed); quoins(p, x0, wallTop, W, wH, wallC); }
     else if (style === 'port') clapboard(p, x0, wallTop, W, wH, wallC, seed);
     else {
-      const plasterC = pick(['#cdbb98', '#c8b088', '#d8c8a8']);
-      fillWall(p, x0, wallTop, W, wH, plasterC, 'plaster', seed);
+      fillWall(p, x0, wallTop, W, wH, pick(PLASTER), 'plaster', seed);
       // timber frame: braces, posts, rails, a sill beam, pegs
-      const tc = C(wallC), tl = light(tc, 1.1), td = dark(tc, 0.74);
+      const TR = R5(wallC), tc = TR[2], tl = TR[3], td = TR[0];
       const midY = wallTop + Math.floor(Hh * 0.5);
       const p1 = x0 + Math.floor(W / 3) - 1, p2 = x0 + Math.floor((W * 2) / 3) - 1;
       p.line(x0 + 2, midY - 2, p1 - 1, wallTop + 3, td, 2); p.line(x0 + 2, midY - 3, p1 - 1, wallTop + 2, tc);
@@ -471,102 +541,106 @@ export function houseSprite(style, w, d, h, seed, o = {}) {
       for (const ry of [wallTop, midY, yb - FH - 1]) { p.rect(x0, ry, W, 2, tc); p.rect(x0, ry, W, 1, tl); }
       for (const x of [x0, x0 + W - 2, p1, p2]) for (const ry of [wallTop, midY]) p.set(x, ry + 1, td);
       // a little exposed brick where the plaster fell off
-      if (r() < 0.6) { const bx = x0 + ap(3) + Math.floor(r() * (W - ap(12))), by = midY + ap(4) + Math.floor(r() * ap(4)); fillWall(p, bx, by, ap(5), ap(3), '#9a5a40', 'brick', seed + 2); }
+      if (r() < 0.6) { const bx = x0 + ap(3) + Math.floor(r() * (W - ap(12))), by = midY + ap(4) + Math.floor(r() * ap(4)); fillWall(p, bx, by, ap(5), ap(3), P.clay[3], 'brick', seed + 2); }
     }
-    // ---- eave shadow across the top of the wall
-    for (let j = 0; j <= ap(2); j++) for (let x = x0; x < x0 + W; x++) if (j < ap(2) || bayer(x, j) < 0.5) shadeAt(p, x, wallTop + j, j < ap(2) - 1 ? 0.7 : 0.82);
+    // ---- eave shadow across the top of the wall: two flat plum bands
+    for (let j = 0; j <= ap(2); j++) for (let x = x0; x < x0 + W; x++) shadeAt(p, x, wallTop + j, j < ap(2) - 1 ? 0.62 : 0.8);
     // ---- door + windows
     const dw = Math.max(ap(5), Math.round(W * 0.16)), dh = Math.min(Hh - ap(3) - FH, ap(20));
     const dx = cx - Math.floor(dw / 2), doorTop = yb - FH - dh + 1;
     const stoneFrame = style === 'stone' || style === 'marble' || style === 'desert';
-    doorAt(p, dx, yb - FH, dw, dh, style === 'desert' ? '#5a3420' : style === 'marble' ? '#5a3a24' : '#3e2616', { arch: style !== 'wood' && style !== 'port', frame: style === 'marble' ? '#c8a050' : style === 'stone' ? light(wallC, 1.12) : style === 'desert' ? dark(wallC, 0.78) : null, fw: stoneFrame ? 2 : 1, stones: style === 'stone' });
+    doorAt(p, dx, yb - FH, dw, dh, style === 'desert' || style === 'marble' ? P.wood[3] : P.wood[2], { arch: style !== 'wood' && style !== 'port', frame: style === 'marble' ? P.gold[3] : style === 'stone' ? light(wallC, 1.12) : style === 'desert' ? WR[1] : null, fw: stoneFrame ? 2 : 1, stones: style === 'stone' });
     // doorstep
-    p.rect(dx - 2, yb - FH + 1, dw + 4, FH, style === 'marble' ? '#e0d8c4' : '#8a8478'); p.rect(dx - 2, yb - FH + 1, dw + 4, 1, style === 'marble' ? '#f4eee0' : '#a8a298'); p.rect(dx - 2, yb, dw + 4, 1, '#4a4440');
+    const ST = R5(style === 'marble' ? '#cdbfa6' : P.stone[4]);
+    p.rect(dx - 2, yb - FH + 1, dw + 4, FH, ST[2]); p.rect(dx - 2, yb - FH + 1, dw + 4, 1, ST[3]); p.rect(dx - 2, yb, dw + 4, 1, ST[0]);
     const wwid = style === 'desert' ? ap(3) : ap(4) + 1, whgt = style === 'desert' ? ap(6) : ap(5) + 1;
     const wy = wallTop + Math.max(ap(3), Math.floor(Hh * 0.28));
     const winX = [cx - Math.floor(W * 0.3) - (wwid >> 1), cx + Math.floor(W * 0.3) - (wwid >> 1)];
-    const frameC = style === 'marble' ? '#d8ccb0' : style === 'stone' ? '#5a5a58' : S.trim;
-    if (W >= ap(40)) for (const wx of winX) windowAt(p, e, wx, wy, wwid, whgt, frameC, { mullion: style !== 'desert', arch: style === 'desert', lattice: style === 'desert' ? '#4a2a18' : null, snow: o.snow, shutters: style === 'wood' && r() < 0.6 ? pick(['#4a6a3a', '#6a3a2a', '#3a4a6a']) : null, flowers: (style === 'wood' || style === 'stone' || style === 'port') && !o.snow && r() < 0.4 ? pick(['#e04050', '#f0d040', '#e080c0', '#f0f0f0']) : null });
+    const frameC = style === 'marble' ? '#cdbfa6' : style === 'stone' ? P.stone[2] : S.trim;
+    if (W >= ap(40)) for (const wx of winX) windowAt(p, e, wx, wy, wwid, whgt, frameC, { mullion: style !== 'desert', arch: style === 'desert', lattice: style === 'desert' ? C(P.wood[1]) : null, snow: o.snow, shutters: style === 'wood' && r() < 0.6 ? pick([P.teal[3], P.rose[1], P.slate[2]]) : null, flowers: (style === 'wood' || style === 'stone' || style === 'port') && !o.snow && r() < 0.4 ? pick([P.rose[3], P.gold[4], P.lavender[4], CREAM]) : null });
     const uw = ap(4) + 1, uwy = wallTop + ap(2) + 2;
     if (Hh > ap(26) && style !== 'desert' && uwy + uw + 4 < doorTop - 2) windowAt(p, e, cx - (uw >> 1), uwy, uw, uw, frameC, { mullion: true, snow: o.snow });
-    // a wall lantern beside the door
+    // a wall lantern beside the door (ember glass; glows at night)
     if ((style === 'wood' || style === 'stone' || style === 'port') && r() < 0.5) {
       const lx = dx + dw + ap(2) + 1, ly = doorTop + ap(2);
-      p.rect(lx - 1, ly - 1, 3, 1, '#2a2420'); p.rect(lx - 1, ly, 3, ap(3), '#2a2420'); p.rect(lx, ly + 1, 1, ap(3) - 2, '#ffc060');
-      e.rect(lx, ly + 1, 1, ap(3) - 2, '#ffd080'); p.rect(lx - 2, ly - 2, 5, 1, '#3a3230');
+      p.rect(lx - 1, ly - 1, 3, 1, INK_SOFT); p.rect(lx - 1, ly, 3, ap(3), INK_SOFT); p.rect(lx, ly + 1, 1, ap(3) - 2, P.ember[3]);
+      e.rect(lx, ly + 1, 1, ap(3) - 2, P.ember[5]); p.rect(lx - 2, ly - 2, 5, 1, IRON[2]);
     }
     // ---- portico (marble)
     if (style === 'marble') {
-      for (const fx of [0.06, 0.32, 0.68, 0.94]) column(p, x0 + Math.round(W * fx) - ap(1.5), yb - FH, wH, ap(3) + 1, '#f0e8d8');
+      for (const fx of [0.06, 0.32, 0.68, 0.94]) column(p, x0 + Math.round(W * fx) - ap(1.5), yb - FH, wH, ap(3) + 1, '#e2d4b8');
       const ex = x0 - ap(2), ew = W + ap(4), ey = wallTop - ap(2);
-      const rows = ['#fffaf0', '#e8e0c8', '#c8a050', '#e8e0c8', '#a8a090'];
+      const MR = R5('#d8c8a8');
+      const rows = [MR[4], MR[3], GOLD[3], MR[2], MR[1]];
       rows.forEach((col, j) => p.rect(ex, ey + j, ew, 1, col));
-      for (let x = ex + 1; x < ex + ew; x += 3) p.set(x, ey + 3, '#b8b098');
+      for (let x = ex + 1; x < ex + ew; x += 3) p.set(x, ey + 3, MR[1]);
     }
     // ---- roof
     const ry0 = wallTop - RH;
     if (style === 'desert') {
       // flat roof: the top surface with a parapet lip, beam ends below
-      fillWall(p, x0 - 1, ry0 + 2, W + 2, RH - 2, light(wallC, 1.12), 'adobe', seed + 1);
-      const PH = ap(2);
-      p.rect(x0 - 1, ry0, W + 2, PH, dark(wallC, 0.9)); p.rect(x0 - 1, ry0, W + 2, 1, light(wallC, 1.06));
-      p.rect(x0 - 1, wallTop - PH, W + 2, PH, dark(wallC, 0.82)); p.rect(x0 - 1, wallTop - PH, W + 2, 1, light(wallC, 1.04));
-      p.rect(x0 + 1, ry0 + PH, W - 2, 1, dark(wallC, 0.74)); p.rect(x0 + 1, ry0 + PH, 1, RH - PH * 2, dark(wallC, 0.86));
+      fillWall(p, x0 - 1, ry0 + 2, W + 2, RH - 2, light(wallC, 1.1), 'adobe', seed + 1);
+      const PH = ap(2), TR = R5(light(wallC, 1.1));
+      p.rect(x0 - 1, ry0, W + 2, PH, WR[2]); p.rect(x0 - 1, ry0, W + 2, 1, WR[3]);
+      p.rect(x0 - 1, wallTop - PH, W + 2, PH, WR[1]); p.rect(x0 - 1, wallTop - PH, W + 2, 1, WR[3]);
+      p.rect(x0 + 1, ry0 + PH, W - 2, 1, TR[1]); p.rect(x0 + 1, ry0 + PH, 1, RH - PH * 2, TR[1]);
       p.clear(x0 - 1, ry0); p.clear(x0 + W, ry0);
-      for (let x = x0 + ap(3); x < x0 + W - ap(3); x += ap(6)) { p.rect(x, wallTop + 1, 3, 3, '#5a3a24'); p.set(x, wallTop + 1, '#7a5232'); p.set(x + 2, wallTop + 3, '#3a2214'); shadeAt(p, x + 1, wallTop + 4, 0.8); }
+      for (let x = x0 + ap(3); x < x0 + W - ap(3); x += ap(6)) { p.rect(x, wallTop + 1, 3, 3, WOOD[2]); p.set(x, wallTop + 1, WOOD[4]); p.set(x + 2, wallTop + 3, WOOD[0]); shadeAt(p, x + 1, wallTop + 4, 0.72); }
       // rooftop clutter: a hatch and a drying rug
       const hx = x0 + ap(4) + Math.floor(r() * (W * 0.3)), hy = ry0 + PH + ap(3);
-      if (hy + ap(4) < wallTop - PH - 1) { p.rect(hx, hy, ap(5), ap(4), '#5a3a24'); p.rect(hx + 1, hy + 1, ap(5) - 2, ap(4) - 2, '#1e1410'); p.rect(hx, hy, ap(5), 1, '#7a5232'); }
-      if (r() < 0.45) dome(p, e, cx, ry0 + Math.floor(RH * 0.6), Math.min(W, D) * 0.28, r() < 0.3 ? '#d8a040' : pick(['#e0c8a0', '#6a9ab0', '#c8a070']), r() < 0.35);
+      if (hy + ap(4) < wallTop - PH - 1) { p.rect(hx, hy, ap(5), ap(4), WOOD[2]); p.rect(hx + 1, hy + 1, ap(5) - 2, ap(4) - 2, INK); p.rect(hx, hy, ap(5), 1, WOOD[4]); }
+      if (r() < 0.45) dome(p, e, cx, ry0 + Math.floor(RH * 0.6), Math.min(W, D) * 0.28, r() < 0.3 ? P.gold[3] : pick(['#dcc6a2', P.teal[3], '#c8987a']), r() < 0.35);
       else {
         // striped awning over the door with a scalloped hem
         const aw = Math.round(W * 0.7), ax = cx - Math.floor(aw / 2), AH = ap(5), ay = doorTop - ap(6), SW = ap(3);
-        const cc = C(pick(S.cloth)), cw = C('#f0e8d8');
+        const CR = R5(pick(S.cloth)), CW = R5('#e2cfae');
         for (let y = 0; y <= AH; y++) for (let x = 0; x < aw; x++) {
           const st = Math.floor(x / SW) % 2, sx = x % SW;
           if (y === AH && (sx === 0 || sx === SW - 1)) continue;
-          let col = st ? cc : cw;
-          if (y === 0) col = light(col, 1.1); else if (y >= AH - 1) col = dark(col, 0.78); else if (y >= AH - 2) col = shade(col, 0.9);
-          if (sx === SW - 1 && y < AH - 1) col = shade(col, 0.92);
-          p.set(ax + x, ay + y, col);
+          const R = st ? CR : CW;
+          let k = 2;
+          if (y === 0) k = 3; else if (y >= AH - 1) k = 1;
+          if (sx === SW - 1 && y < AH - 1 && k > 1) k--;
+          p.set(ax + x, ay + y, R[k]);
         }
-        for (let j = 1; j <= ap(2); j++) for (let x = 0; x < aw; x++) shadeAt(p, ax + x, ay + AH + j, 0.78);
-        for (const sx of [ax, ax + aw - 2]) { p.rect(sx, ay + AH, 2, yb - FH - ay - AH + 1, '#4a3020'); p.rect(sx, ay + AH, 1, yb - FH - ay - AH + 1, '#6a4a30'); }
+        for (let j = 1; j <= ap(2); j++) for (let x = 0; x < aw; x++) shadeAt(p, ax + x, ay + AH + j, 0.7);
+        for (const sx of [ax, ax + aw - 2]) { p.rect(sx, ay + AH, 2, yb - FH - ay - AH + 1, WOOD[1]); p.rect(sx, ay + AH, 1, yb - FH - ay - AH + 1, WOOD[3]); }
       }
     } else {
       const kind = style === 'stone' ? 'slate' : style === 'wood' && r() < 0.3 ? 'thatch' : 'tile';
-      const rc = kind === 'thatch' ? mixc(roofC, '#b89850', 0.65) : roofC;
+      const rc = kind === 'thatch' ? '#9a7a4e' : roofC;
       fillRoof(p, x0 - ov, ry0, W + ov * 2, RH, rc, kind, seed, o.snow ? 0.55 : 0, { ridge: 0.2, moss: !o.snow && (style === 'wood' || style === 'port') ? 0.22 : 0 });
-      if (style === 'wood' || style === 'port') for (const vx of [x0 - ov, x0 + W + ov - 2]) { p.rect(vx, ry0 + 1, 2, RH - 1, dark(trim, 1.2)); p.rect(vx, ry0 + 1, 1, RH - 1, light(trim, 1.3)); }
-      if (style === 'marble') for (let x = x0 - ov + 1; x < x0 + W + ov - 1; x += ap(3)) { p.rect(x, ry0 + RH - 2, 2, 2, '#e8e0c8'); p.set(x, ry0 + RH - 2, '#fffaf0'); }
+      if (style === 'wood' || style === 'port') { const BR5 = R5(trim); for (const vx of [x0 - ov, x0 + W + ov - 2]) { p.rect(vx, ry0 + 1, 2, RH - 1, BR5[2]); p.rect(vx, ry0 + 1, 1, RH - 1, BR5[4]); } }
+      if (style === 'marble') { const MR = R5('#d8c8a8'); for (let x = x0 - ov + 1; x < x0 + W + ov - 1; x += ap(3)) { p.rect(x, ry0 + RH - 2, 2, 2, MR[2]); p.set(x, ry0 + RH - 2, MR[4]); } }
       // chimney with its shadow on the roof
       if (style !== 'marble') {
         const chw = ap(5), chh = ap(10);
         const chx = x0 + Math.round(W * (r() < 0.5 ? 0.22 : 0.72)), chy = ry0 + Math.floor(RH * 0.35);
-        for (let j = -Math.round(chh * 0.4); j < 4; j++) for (let i = 0; i < 3; i++) shadeAt(p, chx + chw + i, chy + j, 0.74);
-        fillWall(p, chx, chy - chh + 1, chw, chh, '#6a6058', 'brick', seed + 5);
-        for (let j = 0; j < 2; j++) for (let i = 0; i < chw; i++) shadeAt(p, chx + i, chy - chh + 1 + j, 0.7);
-        const cy0 = chy - chh - 2;
-        p.rect(chx - 1, cy0, chw + 2, 3, '#4a4038'); p.rect(chx - 1, cy0, chw + 2, 1, o.snow ? '#eef2f8' : '#6a6058'); p.rect(chx + 1, cy0 + 1, chw - 2, 1, '#161012');
-        p.rect(chx - 1, chy + 1, chw + 2, 1, dark(roofC, 0.55));
+        for (let j = -Math.round(chh * 0.4); j < 4; j++) for (let i = 0; i < 3; i++) shadeAt(p, chx + chw + i, chy + j, 0.66);
+        const CH = style === 'stone' ? P.stone[3] : '#8a5e56';
+        fillWall(p, chx, chy - chh + 1, chw, chh, CH, 'brick', seed + 5);
+        for (let j = 0; j < 2; j++) for (let i = 0; i < chw; i++) shadeAt(p, chx + i, chy - chh + 1 + j, 0.66);
+        const cy0 = chy - chh - 2, CR = R5(CH);
+        p.rect(chx - 1, cy0, chw + 2, 3, CR[1]); p.rect(chx - 1, cy0, chw + 2, 1, o.snow ? SNOW[3] : CR[3]); p.rect(chx + 1, cy0 + 1, chw - 2, 1, INK);
+        p.rect(chx - 1, chy + 1, chw + 2, 1, R5(roofC)[0]);
         o.chimney = [chx + (chw >> 1) - p.ox, cy0 - 1 - p.oy];
       }
-      if (W >= ap(50) && style !== 'marble') dormer(p, e, cx, ry0 + Math.floor(RH * 0.5), rc, S.trim, style === 'stone' ? C(wallC) : style === 'port' ? C(wallC) : C('#cdbb98'));
-      // icicles along the eave
-      if (o.snow) for (let x = x0 - ov; x < x0 + W + ov; x++) if (hash2(x, seed, 7) < 0.22) { const L = 1 + Math.floor(hash2(x, 2, seed) * ap(3)); for (let k = 0; k < L; k++) p.set(x, wallTop + k, k === L - 1 ? '#ffffff' : '#c8e0f0'); }
+      if (W >= ap(50) && style !== 'marble') dormer(p, e, cx, ry0 + Math.floor(RH * 0.5), rc, S.trim, style === 'stone' || style === 'port' ? wallC : PLASTER[0]);
+      // icicles along the eave, in two-pixel clumps
+      if (o.snow) for (let x = x0 - ov; x < x0 + W + ov; x++) if (hash2(x >> 1, seed, 7) < 0.3) { const L = 1 + Math.floor(hash2(x >> 1, 2, seed) * ap(3)) - (x & 1); for (let k = 0; k < L; k++) p.set(x, wallTop + k, k === L - 1 ? P.frost[5] : P.frost[4]); }
     }
     // ---- things leaning on the wall
     if (r() < 0.65) {
       const kind = style === 'desert' ? 'pots' : style === 'marble' ? null : pick(style === 'port' ? ['barrel', 'crate', 'crate'] : ['barrel', 'crate', 'logs']);
       if (kind) clutter(p, r() < 0.5 ? x0 + ap(2) : x0 + W - ap(2) - ap(9), yb, kind, seed);
     }
-    if (o.snow) for (let x = x0 - 1; x <= x0 + W; x++) if (hash2(x, 9, seed) < 0.5) p.set(x, yb - FH + 1, '#eef2f8');
+    if (o.snow) for (let x = x0 - 1; x <= x0 + W; x++) if (hash2(x >> 2, 9, seed) < 0.6) p.set(x, yb - FH + 1, SNOW[2]);
     return done(p, e, { chimney: o.chimney || null, footprint: [w, d] });
   });
 }
 // fluted column: x = left edge, yb = ground row, h = total height, w = shaft width
 function column(p, x, yb, h, w, col) {
-  const c = C(col), R4 = [dark(c, 0.7), shade(c, 0.88), c, light(c, 1.1)];
+  const R = R5(col), R4 = [R[1], mixc(R[1], R[2], 0.5), R[2], R[3]];
   const capH = ap(2), baseH = ap(2);
   for (let y = yb - h + capH + 1; y <= yb - baseH; y++) for (let i = 0; i < w; i++) {
     const u = (i + 0.5) / w;
@@ -574,17 +648,17 @@ function column(p, x, yb, h, w, col) {
     if (w >= 5 && i > 0 && i < w - 1 && i % 2 === 0) idx = Math.max(0, idx - 1);
     p.set(x + i, y, R4[idx]);
   }
-  p.rect(x - 1, yb - h + 1, w + 2, capH, R4[3]); p.rect(x - 1, yb - h + capH, w + 2, 1, R4[1]); p.set(x + w, yb - h + 1, R4[2]);
-  p.rect(x - 1, yb - baseH + 1, w + 2, baseH, R4[2]); p.rect(x - 1, yb - baseH + 1, w + 2, 1, R4[3]); p.rect(x - 1, yb, w + 2, 1, R4[1]);
+  p.rect(x - 1, yb - h + 1, w + 2, capH, R[4]); p.rect(x - 1, yb - h + capH, w + 2, 1, R[1]); p.set(x + w, yb - h + 1, R[2]);
+  p.rect(x - 1, yb - baseH + 1, w + 2, baseH, R[2]); p.rect(x - 1, yb - baseH + 1, w + 2, 1, R[3]); p.rect(x - 1, yb, w + 2, 1, R[1]);
 }
 function dome(p, e, cx, yb, r, col, onion) {
-  const R = ramp(col), Rh = r * (onion ? 1.5 : 1), drum = ap(3);
+  const R = R5(col), Rh = r * (onion ? 1.5 : 1), drum = ap(3), DR = R5('#d6c4a2');
   // drum
   for (let y = yb - drum + 1; y <= yb; y++) for (let x = Math.round(cx - r * 0.9); x <= cx + r * 0.9; x++) {
     const u = (x + 0.5 - cx) / (r * 0.9);
-    let c = u < -0.4 ? light(C('#e8d8b8'), 1.04) : u < 0.4 ? C('#d8c8a8') : C('#b0a088');
-    if (y === yb - drum + 1) c = light(c, 1.1);
-    if (Math.abs(((x - cx) % ap(4) + ap(4)) % ap(4) - ap(2)) < 1 && y > yb - drum + 1) c = '#2a2018';
+    let c = u < -0.4 ? DR[3] : u < 0.4 ? DR[2] : DR[1];
+    if (y === yb - drum + 1) c = DR[4];
+    if (Math.abs(((x - cx) % ap(4) + ap(4)) % ap(4) - ap(2)) < 1 && y > yb - drum + 1) c = INK_SOFT;
     p.set(x, y, c);
   }
   const base = yb - drum;
@@ -592,86 +666,89 @@ function dome(p, e, cx, yb, r, col, onion) {
     const ny = (base - y) / Rh, nx = (x + 0.5 - cx) / r;
     const wdt = onion ? Math.sin(Math.min(1, ny * 1.25) * Math.PI) * 0.9 + (ny < 0.4 ? 0.4 : 0) : Math.sqrt(Math.max(0, 1 - ny * ny));
     if (Math.abs(nx) > wdt) continue;
-    const l = -0.6 * nx + 0.55 * ny + (hash2(x, y, 3) - 0.5) * 0.15;
-    let c = R[l > 0.45 ? 3 : l > 0 ? 2 : l > -0.4 ? 1 : 0];
-    for (let k = -3; k <= 3; k++) if (Math.abs(x + 0.5 - (cx + (k / 4) * wdt * r)) < 0.5 && ny > 0.08 && ny < 0.92) c = dark(c, 0.86);
-    if (y === base) c = dark(c, 0.8);
-    p.set(x, y, c);
+    const l = -0.6 * nx + 0.55 * ny;
+    let k = l > 0.5 ? 4 : l > 0.12 ? 3 : l > -0.35 ? 2 : 1;
+    // ribs a step down
+    for (let q = -3; q <= 3; q++) if (Math.abs(x + 0.5 - (cx + (q / 4) * wdt * r)) < 0.5 && ny > 0.08 && ny < 0.92) k = Math.max(0, k - 1);
+    if (y === base) k = 0;
+    p.set(x, y, R[k]);
   }
   const tip = Math.floor(base - Rh);
-  p.rect(Math.round(cx), tip - ap(3), 1, ap(3), '#d8b050'); p.disc(Math.round(cx) + 0.5, tip - ap(3), 1.6, '#e8c060'); p.set(Math.round(cx), tip - ap(3) - 1, '#fff0a0');
+  p.rect(Math.round(cx), tip - ap(3), 1, ap(3), GOLD[3]); p.disc(Math.round(cx) + 0.5, tip - ap(3), 1.6, GOLD[4]); p.set(Math.round(cx), tip - ap(3) - 1, GOLD[5]);
 }
 function tent(p, e, S, r, W, H, snow) {
-  const cc = C(S.cloth[Math.floor(r() * S.cloth.length)]);
-  const body = C(S.wall[Math.floor(r() * S.wall.length)]), Rm = ramp(body);
+  const CC = R5(S.cloth[Math.floor(r() * S.cloth.length)]);
+  const body = C(S.wall[Math.floor(r() * S.wall.length)]), Rm = R5(body);
   const cx = p.w / 2, yb = p.h - 1, R0 = W * 0.5, top = Math.round(yb - Math.min(H, W * 0.8));
   const band = top + Math.round((yb - top) * 0.55);
   // guy ropes behind the body
-  for (const sd of [-1, 1]) { const ax = cx + sd * R0 * 0.62, ay = band - ap(3); p.line(ax, ay, cx + sd * (R0 + ap(3)), yb, '#a89070'); p.set(Math.round(cx + sd * (R0 + ap(3))), yb, '#3a2a1a'); }
+  for (const sd of [-1, 1]) { const ax = cx + sd * R0 * 0.62, ay = band - ap(3); p.line(ax, ay, cx + sd * (R0 + ap(3)), yb, P.sand[2]); p.set(Math.round(cx + sd * (R0 + ap(3))), yb, WOOD[1]); }
   for (let y = top; y <= yb; y++) {
     const t = (y - top) / (yb - top), half = R0 * Math.sqrt(t) + 1;
     for (let x = Math.floor(cx - half); x <= cx + half; x++) {
       const u = (x + 0.5 - (cx - half)) / (2 * half);
-      let col = Rm[u < 0.22 ? 3 : u < 0.6 ? 2 : u > 0.84 ? 0 : 1];
-      if (Math.floor(u * 8) % 2) col = shade(col, 0.94);
+      let k = u < 0.22 ? 3 : u < 0.6 ? 2 : u > 0.84 ? 0 : 1;
+      // hide panels: seams between eight gores
       const su = u * 8;
-      if (Math.abs(su - Math.round(su)) * (2 * half / 8) < 0.5 && u > 0.06 && u < 0.94) col = dark(col, 0.82);
-      if (hash2(x, y, 9) < 0.05) col = shade(col, 0.9);
-      if (y > yb - ap(3)) col = dark(col, 0.8);
+      if (Math.abs(su - Math.round(su)) * (2 * half / 8) < 0.5 && u > 0.06 && u < 0.94) k = Math.max(0, k - 1);
+      if (y > yb - ap(3)) k = Math.max(0, Math.min(k, 2) - 1);
+      let col = Rm[k];
       const dy = y - band;
-      if (dy === -1) col = light(cc, 1.12); else if (dy === 0) col = (x + y) % 4 < 2 ? cc : dark(cc, 0.7); else if (dy === 1) col = dark(cc, 0.75);
-      if (snow && t < 0.22 + (vnoise(x, 0, 4, ap(3)) - 0.5) * 0.12) col = t > 0.16 ? C('#c0ccdc') : C('#eef2f8');
+      if (dy === -1) col = CC[3]; else if (dy === 0) col = (x + y) % 4 < 2 ? CC[2] : CC[1]; else if (dy === 1) col = CC[0];
+      if (snow && t < 0.22 + (vnoise(Math.floor(x / 3) * 3, 0, 4, ap(3)) - 0.5) * 0.12) col = t > 0.16 ? SNOW[1] : u < 0.5 ? SNOW[3] : SNOW[2];
       p.set(x, y, col);
     }
   }
   // door flap, rolled back to the right
   const dh = ap(14), dwh = ap(4);
-  p.poly([[cx - dwh, yb + 1], [cx, yb - dh], [cx + dwh, yb + 1]], '#2a1a12');
-  p.poly([[cx - dwh + 2, yb + 1], [cx, yb - dh + ap(4)], [cx + dwh - 2, yb + 1]], '#1a100a');
-  p.poly([[cx, yb - dh], [cx + dwh + 2, yb + 1], [cx + dwh - 1, yb + 1]], light(body, 1.18));
-  p.line(cx, yb - dh, cx + dwh + 2, yb, light(body, 1.3));
-  p.rect(Math.round(cx + dwh - 1), yb - Math.round(dh * 0.45), 3, 1, cc);
+  p.poly([[cx - dwh, yb + 1], [cx, yb - dh], [cx + dwh, yb + 1]], GLASS[1]);
+  p.poly([[cx - dwh + 2, yb + 1], [cx, yb - dh + ap(4)], [cx + dwh - 2, yb + 1]], GLASS[0]);
+  p.poly([[cx, yb - dh], [cx + dwh + 2, yb + 1], [cx + dwh - 1, yb + 1]], Rm[3]);
+  p.line(cx, yb - dh, cx + dwh + 2, yb, Rm[4]);
+  p.rect(Math.round(cx + dwh - 1), yb - Math.round(dh * 0.45), 3, 1, CC[2]);
   // pole and pennant
-  p.rect(Math.round(cx) - 1, top - ap(4), 2, ap(5), '#4a3020'); p.rect(Math.round(cx) - 1, top - ap(4), 1, ap(5), '#6a4a30');
-  p.poly([[cx + 1, top - ap(4)], [cx + ap(6), top - ap(2.5)], [cx + 1, top - ap(1)]], cc);
+  p.rect(Math.round(cx) - 1, top - ap(4), 2, ap(5), WOOD[1]); p.rect(Math.round(cx) - 1, top - ap(4), 1, ap(5), WOOD[3]);
+  p.poly([[cx + 1, top - ap(4)], [cx + ap(6), top - ap(2.5)], [cx + 1, top - ap(1)]], CC[2]);
   return done(p, null, { footprint: [W / PPU, W / PPU] });
 }
 function mushroomHouse(p, e, r, W, Hh) {
   const cx = p.w / 2, yb = p.h - 1;
-  const stem = ramp('#e8dcc8'), cap = ramp(['#8a3a9a', '#c04040', '#4a8a9a'][Math.floor(r() * 3)]);
+  const stem = R5('#dcc8aa'), cap = R5([P.plum[4], P.rose[2], P.teal[3]][Math.floor(r() * 3)]);
   const sw = W * 0.22;
   for (let y = yb - Hh; y <= yb; y++) {
     const t = (y - (yb - Hh)) / Hh, half = sw * (1 + Math.max(0, t - 0.75) * 0.7);
     for (let x = Math.round(cx - half); x <= cx + half; x++) {
       const u = (x + 0.5 - (cx - half)) / (2 * half);
-      let col = stem[u < 0.25 ? 3 : u < 0.62 ? 2 : u < 0.86 ? 1 : 0];
-      if (hash2(x, Math.floor(y / 4), 4) < 0.16) col = shade(col, 0.93);
-      p.set(x, y, col);
+      let k = u < 0.25 ? 3 : u < 0.62 ? 2 : u < 0.86 ? 1 : 0;
+      // vertical fibres: short dashes a step down
+      if (k >= 2 && hash2(x, Math.floor(y / ap(4)), 4) < 0.14) k--;
+      p.set(x, y, stem[k]);
     }
   }
-  doorAt(p, Math.round(cx) - ap(3), yb, ap(6), ap(12), '#5a3a24', { arch: true });
-  windowAt(p, e, Math.round(cx) + ap(4), yb - Hh + ap(8), ap(3), ap(3), '#5a3a24', { color: C('#c0ff80'), arch: true });
+  doorAt(p, Math.round(cx) - ap(3), yb, ap(6), ap(12), P.wood[2], { arch: true });
+  windowAt(p, e, Math.round(cx) + ap(4), yb - Hh + ap(8), ap(3), ap(3), P.wood[2], { color: P.aether[5], arch: true });
   const cy = yb - Hh, rx = W * 0.6, ry = W * 0.32;
   // gills under the rim
   for (let y = Math.floor(cy); y <= cy + ry * 0.42; y++) for (let x = Math.floor(cx - rx * 0.92); x <= cx + rx * 0.92; x++) {
     const nx = (x + 0.5 - cx) / (rx * 0.92), ny = (y + 0.5 - cy) / (ry * 0.42);
     if (nx * nx + ny * ny > 1 || ny < 0) continue;
-    p.set(x, y, Math.round(Math.atan2(ny, nx) * 14) % 2 ? '#a8987e' : '#8a7a64');
+    p.set(x, y, Math.round(Math.atan2(ny, nx) * 14) % 2 ? stem[1] : stem[0]);
   }
-  // cap: a lumpy dome lit from the top-left, rim shadow, spots
+  // cap: a lumpy dome lit from the top-left in flat bands, rim shadow, spots
   const ph = r() * 6;
   for (let y = Math.floor(cy - ry - 2); y <= cy + ry * 0.35; y++) for (let x = Math.floor(cx - rx - 2); x <= cx + rx + 2; x++) {
     const nx = (x + 0.5 - cx) / rx, ny = (y + 0.5 - cy) / ry;
     const ang = Math.atan2(ny, nx), edge = 1 + 0.07 * Math.sin(ang * 7 + ph);
     if (ny > 0.35 || nx * nx + ny * ny > edge * edge) continue;
-    const l = -0.55 * nx - 0.75 * ny + (hash2(x, y, 2) - 0.5) * 0.12;
-    let col = cap[l > 0.55 ? 3 : l > 0 ? 2 : l > -0.4 ? 1 : 0];
-    if (ny > 0.22) col = dark(col, 0.82);
-    p.set(x, y, col);
+    const l = -0.55 * nx - 0.75 * ny;
+    let k = l > 0.62 ? 4 : l > 0.2 ? 3 : l > -0.3 ? 2 : 1;
+    if (ny > 0.22) k = Math.max(0, k - 1);
+    p.set(x, y, cap[k]);
   }
+  const SP = R5(CREAM);
   for (let k = 0; k < 8; k++) {
     const sx = cx + (r() - 0.5) * rx * 1.5, sy = cy - r() * ry * 0.75 - 1, s = 1.3 + r() * ap(1.2);
-    p.ellipse(sx, sy, s * 1.3, s, '#f4ecec'); p.set(Math.round(sx + s * 0.6), Math.round(sy + s * 0.5), '#c8b8b8'); p.set(Math.round(sx - s * 0.5), Math.round(sy - s * 0.4), '#ffffff');
+    p.ellipse(sx, sy, s * 1.3, s, SP[2]); p.set(Math.round(sx + s * 0.6), Math.round(sy + s * 0.5), SP[1]); p.set(Math.round(sx - s * 0.5), Math.round(sy - s * 0.4), SP[4]);
   }
   return done(p, e, { footprint: [W / PPU, W / PPU] });
 }
@@ -679,69 +756,73 @@ function mushroomHouse(p, e, r, W, Hh) {
 // ------------------------------------------------------------------ town kit
 function goods(p, x, y, kind, r) {
   if (kind === 'fruit') {
-    const g = C(['#c04030', '#e08a30', '#60a040', '#d8c040'][Math.floor(r() * 4)]);
-    for (let k = 0; k < 5; k++) { const fx = x + (k % 3) * 3 + (k >= 3 ? 1.5 : 0), fy = y - (k >= 3 ? 3 : 0); p.disc(fx + 1.5, fy - 1, 1.8, g); p.set(fx + 1, fy - 2, light(g, 1.35)); p.set(fx + 2, fy, dark(g, 0.7)); }
+    const g = R5([P.red[4], P.ember[3], P.green[4], P.gold[4]][Math.floor(r() * 4)]);
+    for (let k = 0; k < 5; k++) { const fx = x + (k % 3) * 3 + (k >= 3 ? 1.5 : 0), fy = y - (k >= 3 ? 3 : 0); p.disc(fx + 1.5, fy - 1, 1.8, g[2]); p.set(fx + 1, fy - 2, g[4]); p.set(fx + 2, fy, g[0]); }
   } else if (kind === 'bread') {
-    for (let k = 0; k < 2; k++) { p.ellipse(x + 3 + k * 5, y - 2, 3, 2, '#c8904a'); p.rect(x + 1 + k * 5, y - 3, 4, 1, '#e0b070'); p.set(x + 3 + k * 5, y - 2, '#8a5a2a'); }
+    const B5 = R5(P.wood[5]);
+    for (let k = 0; k < 2; k++) { p.ellipse(x + 3 + k * 5, y - 2, 3, 2, B5[2]); p.rect(x + 1 + k * 5, y - 3, 4, 1, B5[4]); p.set(x + 3 + k * 5, y - 2, B5[0]); }
   } else if (kind === 'jars') {
-    for (let k = 0; k < 3; k++) { const c = C(['#a86a42', '#6a8aa0', '#c8b890'][k]); p.rect(x + k * 4, y - 5, 3, 5, c); p.set(x + k * 4, y - 5, light(c, 1.3)); p.rect(x + k * 4, y - 6, 3, 1, dark(c, 0.7)); p.rect(x + k * 4 + 2, y - 4, 1, 4, dark(c, 0.8)); }
+    for (let k = 0; k < 3; k++) { const J = R5([P.clay[3], P.teal[4], P.sand[3]][k]); p.rect(x + k * 4, y - 5, 3, 5, J[2]); p.set(x + k * 4, y - 5, J[4]); p.rect(x + k * 4, y - 6, 3, 1, J[0]); p.rect(x + k * 4 + 2, y - 4, 1, 4, J[1]); }
   } else if (kind === 'cloth') {
-    for (let k = 0; k < 3; k++) { const c = C(['#8a2a6a', '#2a6a8a', '#c8a040', '#4a8a3a'][Math.floor(r() * 4)]); p.rect(x, y - 3 - k * 2, 11 - k, 2, c); p.rect(x, y - 3 - k * 2, 11 - k, 1, light(c, 1.2)); p.set(x + 10 - k, y - 2 - k * 2, dark(c, 0.6)); }
+    for (let k = 0; k < 3; k++) { const c = R5([P.plum[4], P.teal[3], P.gold[3], P.green[3]][Math.floor(r() * 4)]); p.rect(x, y - 3 - k * 2, 11 - k, 2, c[2]); p.rect(x, y - 3 - k * 2, 11 - k, 1, c[3]); p.set(x + 10 - k, y - 2 - k * 2, c[0]); }
   } else {
-    for (let k = 0; k < 3; k++) { p.ellipse(x + 3 + k * 3, y - 1 - (k % 2), 3, 1.2, '#a8b0b8'); p.set(x + 1 + k * 3, y - 1 - (k % 2), '#e0e8f0'); p.set(x + 6 + k * 3, y - 1 - (k % 2), '#6a7078'); }
+    const F = P.steel;
+    for (let k = 0; k < 3; k++) { p.ellipse(x + 3 + k * 3, y - 1 - (k % 2), 3, 1.2, F[4]); p.set(x + 1 + k * 3, y - 1 - (k % 2), F[6]); p.set(x + 6 + k * 3, y - 1 - (k % 2), F[2]); }
   }
 }
 export function stallSprite(cloth, seed = 0) {
   return memo('stall' + cloth + seed, () => {
     const W = ap(30), H = ap(26);
     const p = mk(W, H), e = mk(W, H);
-    const c = C(cloth), r = srand(seed + 5), yb = H - 1;
+    const CR = R5(cloth), CW = R5('#e2cfae'), r = srand(seed + 5), yb = H - 1;
     const px0 = ap(2), px1 = W - ap(2) - 2, awY = ap(1) + 1, AH = ap(6), ctop = ap(15);
     // shadowed back of the booth with a shelf of wares
-    p.rect(px0 + 2, awY + AH, px1 - px0 - 2, ctop - awY - AH, '#3a2a22');
-    p.rect(px0 + 2, awY + AH + ap(4), px1 - px0 - 2, 2, '#6a4a30'); p.rect(px0 + 2, awY + AH + ap(4), px1 - px0 - 2, 1, '#8a6440');
-    for (let x = px0 + 4; x < px1 - 4; x += 5) { const jc = C(['#a86a42', '#6a8aa0', '#c8b890', '#7a5a8a'][Math.floor(r() * 4)]); p.rect(x, awY + AH + ap(4) - 4, 3, 4, jc); p.set(x, awY + AH + ap(4) - 4, light(jc, 1.25)); }
-    for (const x of [px0, px1]) { p.rect(x, awY + 2, 2, yb - awY - 3, '#4a3020'); p.rect(x, awY + 2, 1, yb - awY - 3, '#6a4a30'); }
+    p.rect(px0 + 2, awY + AH, px1 - px0 - 2, ctop - awY - AH, '#2e1e28');
+    p.rect(px0 + 2, awY + AH + ap(4), px1 - px0 - 2, 2, WOOD[2]); p.rect(px0 + 2, awY + AH + ap(4), px1 - px0 - 2, 1, WOOD[4]);
+    for (let x = px0 + 4; x < px1 - 4; x += 5) { const J = R5([P.clay[3], P.teal[4], P.sand[3], P.lavender[3]][Math.floor(r() * 4)]); p.rect(x, awY + AH + ap(4) - 4, 3, 4, J[2]); p.set(x, awY + AH + ap(4) - 4, J[4]); p.rect(x + 2, awY + AH + ap(4) - 3, 1, 3, J[1]); }
+    for (const x of [px0, px1]) { p.rect(x, awY + 2, 2, yb - awY - 3, WOOD[1]); p.rect(x, awY + 2, 1, yb - awY - 3, WOOD[3]); }
     // counter: top board, plank front with a hanging cloth, dark base
-    p.rect(ap(1), ctop, W - 2 * ap(1), 1, '#a8885a'); p.rect(ap(1), ctop + 1, W - 2 * ap(1), 1, '#8a6a44'); p.rect(ap(1), ctop + 2, W - 2 * ap(1), 1, '#5a3e24');
-    fillWall(p, ap(2), ctop + 3, W - 2 * ap(2), yb - ctop - 4, '#7a5a38', 'plank', seed);
-    p.rect(ap(2), yb - 1, W - 2 * ap(2), 2, '#3a2a1a');
+    p.rect(ap(1), ctop, W - 2 * ap(1), 1, WOOD[5]); p.rect(ap(1), ctop + 1, W - 2 * ap(1), 1, WOOD[4]); p.rect(ap(1), ctop + 2, W - 2 * ap(1), 1, WOOD[1]);
+    fillWall(p, ap(2), ctop + 3, W - 2 * ap(2), yb - ctop - 4, P.wood[3], 'plank', seed);
+    p.rect(ap(2), yb - 1, W - 2 * ap(2), 2, WOOD[0]);
     const dw = Math.round(W * 0.5), dx0 = (W - dw) >> 1;
     for (let j = 0; j < ap(6); j++) for (let i = 0; i < dw; i++) {
       if (j === ap(6) - 1 && i % 2) continue;
-      const fold = Math.sin(i * 0.9);
-      let col = fold > 0.4 ? light(c, 1.1) : fold < -0.5 ? dark(c, 0.78) : c;
-      if (j === 0) col = light(c, 1.2); else if (j >= ap(6) - 2) col = dark(col, 0.85);
-      p.set(dx0 + i, ctop + 3 + j, col);
+      // folds: 2-3 px wide bands, lit and shadowed
+      const f = Math.floor(i / 3) % 3;
+      let k = f === 0 ? 3 : f === 2 ? 1 : 2;
+      if (j === 0) k = 4; else if (j >= ap(6) - 2) k = Math.max(0, k - 1);
+      p.set(dx0 + i, ctop + 3 + j, CR[k]);
     }
     // wares on the counter
     const kinds = ['fruit', 'bread', 'jars', 'cloth', 'fish'];
     for (let x = ap(3), k = 0; x < W - ap(9); x += 13, k++) goods(p, x, ctop - 1, kinds[(seed + k + Math.floor(r() * 2)) % kinds.length], r);
-    // striped awning with a scalloped valance
+    // striped awning with a scalloped valance, three flat bands
     const SW = ap(3);
     for (let y = 0; y <= AH; y++) for (let x = 0; x < W - 2; x++) {
       const st = Math.floor(x / SW) % 2, sx = x % SW;
       if (y === AH && (sx === 0 || sx === SW - 1)) continue;
-      let col = st ? c : C('#f0e8d8');
-      if (y === 0) col = light(col, 1.2); else if (y >= AH - 1) col = dark(col, 0.72); else if (y > AH * 0.6) col = shade(col, 0.9);
-      if (sx === SW - 1 && y < AH - 1) col = shade(col, 0.92);
-      p.set(1 + x, awY + y, col);
+      const R = st ? CR : CW;
+      let k = y === 0 ? 4 : y >= AH - 1 ? 1 : y > AH * 0.55 ? 2 : 3;
+      if (sx === SW - 1 && y < AH - 1) k = Math.max(1, k - 1);
+      p.set(1 + x, awY + y, R[k]);
     }
-    for (let j = 1; j <= 2; j++) for (let x = px0 + 2; x < px1; x++) shadeAt(p, x, awY + AH + j, 0.7);
+    for (let j = 1; j <= 2; j++) for (let x = px0 + 2; x < px1; x++) shadeAt(p, x, awY + AH + j, 0.62);
     return done(p, e);
   });
 }
-// braziers: bowl on legs; flames are drawn live by the structure (animated)
+// braziers: iron bowl on legs; flames are drawn live by the structure (animated). The coals sit
+// in stepped ember rings, hottest in the middle.
 export function brazierSprite(big = 1) {
   return memo('brazier' + big, () => {
     const s = big * ART;
     const p = mk(Math.round(14 * s) + 6, Math.round(16 * s) + 6);
     const cx = p.w / 2, yb = p.h - 1;
-    const I = ramp('#4a4448');
+    const I = IRON;
     const by = yb - 8 * s, lw = Math.max(1, Math.round(0.8 * s));
     for (const dx of [0, -3, 3]) {
       p.line(cx + dx * s, yb - 1, cx + dx * s * 0.6, by + 1, dx === 0 ? I[0] : I[1], lw);
-      if (dx) { p.rect(Math.round(cx + dx * s) - 1, yb - 1, 3, 2, I[1]); p.set(Math.round(cx + dx * s) - 1, yb - 1, I[2]); }
+      if (dx) { p.rect(Math.round(cx + dx * s) - 1, yb - 1, 3, 2, I[1]); p.set(Math.round(cx + dx * s) - 1, yb - 1, I[3]); }
     }
     p.line(cx - 2.2 * s, yb - 3.6 * s, cx + 2.2 * s, yb - 3.6 * s, I[1]);
     // bowl
@@ -749,53 +830,57 @@ export function brazierSprite(big = 1) {
       const nx = (x + 0.5 - cx) / (5.6 * s), ny = (y + 0.5 - by) / (3 * s);
       if (nx * nx + ny * ny > 1 || ny < 0) continue;
       let col = I[nx < -0.45 ? 3 : nx < 0.15 ? 2 : nx < 0.6 ? 1 : 0];
-      if (y === Math.round(by + 1.3 * s)) col = (x % 3 === 0) ? I[3] : I[0];
+      if (y === Math.round(by + 1.3 * s)) col = (x % 3 === 0) ? I[4] : I[0];
       p.set(x, y, col);
     }
     p.ellipse(cx, by, 5.6 * s, 1.8 * s, I[2]);
     for (let x = Math.floor(cx - 5.6 * s); x <= cx + 5.6 * s; x++) for (let y = Math.floor(by - 1.8 * s); y < by; y++) if (p.a(x, y)) p.set(x, y, I[3]);
-    // glowing coals
+    // glowing coals: concentric ember bands with a few dark clinkers
     const e = new Pix(p.w, p.h); e.ox = p.ox; e.oy = p.oy;
+    const E = P.ember;
     for (let y = Math.floor(by - 1.3 * s); y <= by + 1.2 * s; y++) for (let x = Math.floor(cx - 4.6 * s); x <= cx + 4.6 * s; x++) {
       const nx = (x + 0.5 - cx) / (4.6 * s), ny = (y + 0.5 - (by - 0.3 * s)) / (1.25 * s);
-      if (nx * nx + ny * ny > 1) continue;
-      const n = hash2(x, y, 7);
-      const col = n < 0.18 ? C('#4a2020') : n > 0.8 ? C('#ffe090') : C('#ff8030');
-      p.set(x, y, col);
-      if (n >= 0.18) e.set(x, y, n > 0.8 ? '#ffd080' : '#ff9030');
+      const d = nx * nx + ny * ny;
+      if (d > 1) continue;
+      const clinker = vnoise(x, y, 7, 2.2) > 0.72;
+      const k = clinker ? 1 : d > 0.62 ? 2 : d > 0.25 ? 3 : 4;
+      p.set(x, y, E[k]);
+      if (!clinker) e.set(x, y, E[k + 1]);
     }
     return done(p, e, { fireAt: [0, -Math.round(9 * s)] });
   });
 }
-export function lampSprite(color = '#ffc060') {
+export function lampSprite(color = P.ember[4]) {
   return memo('lamp' + color, () => {
     const W = ap(9) | 1, H = ap(40);
     const p = mk(W, H), e = mk(W, H);
-    const cx = W >> 1, yb = H - 1, lc = C(color);
+    const cx = W >> 1, yb = H - 1, L = R5(color), S = R5(P.stone[3]);
     // post: 3 px, lit left; stone foot
-    p.rect(cx - 1, ap(9), 3, yb - ap(9) - 2, '#3a2a1a'); p.rect(cx - 1, ap(9), 1, yb - ap(9) - 2, '#5a4028'); p.rect(cx + 1, ap(9), 1, yb - ap(9) - 2, '#2a1c12');
-    p.rect(cx - 3, yb - 3, 7, 4, '#5a5450'); p.rect(cx - 3, yb - 3, 7, 1, '#7a7470'); p.rect(cx - 2, yb - 5, 5, 2, '#4a4440'); p.rect(cx - 2, yb - 5, 5, 1, '#6a6460');
+    p.rect(cx - 1, ap(9), 3, yb - ap(9) - 2, WOOD[1]); p.rect(cx - 1, ap(9), 1, yb - ap(9) - 2, WOOD[3]); p.rect(cx + 1, ap(9), 1, yb - ap(9) - 2, WOOD[0]);
+    p.rect(cx - 3, yb - 3, 7, 4, S[1]); p.rect(cx - 3, yb - 3, 7, 1, S[3]); p.rect(cx - 2, yb - 5, 5, 2, S[2]); p.rect(cx - 2, yb - 5, 5, 1, S[4]);
     // lantern: cap, glass cage, base
     const ly = ap(2) + 1, lh = ap(5);
-    p.poly([[cx - 4.5, ly], [cx + 5.5, ly], [cx + 3.5, ly - 3], [cx - 2.5, ly - 3]], '#2a2420'); p.rect(cx - 2, ly - 3, 4, 1, '#4a4038');
-    p.rect(cx, ly - 5, 1, 2, '#2a2420'); p.set(cx, ly - 6, '#d8b050');
-    p.rect(cx - 3, ly, 7, lh + 2, '#2a2420');
-    p.rect(cx - 2, ly + 1, 5, lh, lc); e.rect(cx - 2, ly + 1, 5, lh, lc);
-    p.rect(cx, ly + 1, 1, lh, '#3a3028'); e.clear(cx, ly + 1); for (let j = 0; j < lh; j++) e.clear(cx, ly + 1 + j);
-    p.set(cx - 1, ly + 3, '#fff8e0'); e.set(cx - 1, ly + 3, '#fff8e0'); e.set(cx + 1, ly + 3, light(lc, 1.3)); e.set(cx - 1, ly + 4, light(lc, 1.3));
-    p.rect(cx - 3, ly + lh + 1, 7, 1, '#4a4038'); p.rect(cx - 2, ly + lh + 2, 5, 1, '#2a2420');
+    p.poly([[cx - 4.5, ly], [cx + 5.5, ly], [cx + 3.5, ly - 3], [cx - 2.5, ly - 3]], IRON[1]); p.rect(cx - 2, ly - 3, 4, 1, IRON[3]);
+    p.rect(cx, ly - 5, 1, 2, IRON[1]); p.set(cx, ly - 6, GOLD[4]);
+    p.rect(cx - 3, ly, 7, lh + 2, IRON[1]);
+    p.rect(cx - 2, ly + 1, 5, lh, L[2]); e.rect(cx - 2, ly + 1, 5, lh, L[3]);
+    p.rect(cx - 2, ly + 1, 5, 1, L[1]); e.rect(cx - 2, ly + 1, 5, 1, L[2]);
+    for (let j = 0; j < lh; j++) { p.set(cx, ly + 1 + j, IRON[2]); e.clear(cx, ly + 1 + j); }
+    p.set(cx - 1, ly + 3, L[4]); e.set(cx - 1, ly + 3, L[4]); e.set(cx + 1, ly + 3, L[4]); e.set(cx - 1, ly + 4, L[4]);
+    p.rect(cx - 3, ly + lh + 1, 7, 1, IRON[3]); p.rect(cx - 2, ly + lh + 2, 5, 1, IRON[1]);
     return done(p, e, { lightAt: [0, -(yb - ly - 3)] });
   });
 }
 // Fountain: a round stone basin (block wall + rim), rippling water, a column with a bowl and
 // falling water arcs. basinAt is the rim centre relative to the pivot (front-bottom of the basin).
-export function fountainSprite(r = 3, stone = '#e0d8c4', frame = 0) {
+export function fountainSprite(r = 3, stone = '#d2c4a6', frame = 0) {
   return memo('fountain' + r + stone + frame, () => {
     const R = Math.round(r * PPU), ry = Math.round(R * 0.48), hw = ap(5), RW = ap(3);
     const colH = ap(22), n = R * 2 + ap(8);
     const p = mk(n, ry * 2 + hw + colH + ap(14)), e = mk(p.w, p.h);
     const cx = p.w / 2, yb = p.h - 1, cy = yb - ry - hw;
-    const S = ramp(stone);
+    const S5 = R5(stone), S = [S5[0], S5[1], S5[2], S5[3]];
+    const Wt = P.water.map((c) => C(c));
     // outer wall
     for (let x = Math.floor(cx - R); x <= Math.ceil(cx + R); x++) {
       const nx = (x + 0.5 - cx) / R; if (Math.abs(nx) > 1) continue;
@@ -803,11 +888,11 @@ export function fountainSprite(r = 3, stone = '#e0d8c4', frame = 0) {
       const seg = Math.floor((Math.asin(nx) / Math.PI + 0.5) * 12), segL = Math.floor((Math.asin(clamp((x - 0.5 - cx) / R, -1, 1)) / Math.PI + 0.5) * 12);
       for (let y = Math.floor(cy); y <= yf + hw; y++) {
         const ly = y - yf;
-        let col = S[nx < -0.5 ? 3 : nx < 0.2 ? 2 : nx < 0.7 ? 1 : 0];
-        if (seg !== segL && ly > 0) col = dark(col, 0.78);
-        if (Math.round(ly) === Math.round(hw / 2)) col = dark(col, 0.86);
-        if (ly > hw - 1.5) col = dark(col, 0.72);
-        p.set(x, y, col);
+        let k = nx < -0.5 ? 3 : nx < 0.2 ? 2 : nx < 0.7 ? 1 : 0;
+        if (seg !== segL && ly > 0) k = Math.max(0, k - 1);
+        if (Math.round(ly) === Math.round(hw / 2)) k = Math.max(0, k - 1);
+        if (ly > hw - 1.5) k = 0;
+        p.set(x, y, S5[k]);
       }
     }
     // rim ring + inner back wall
@@ -817,14 +902,13 @@ export function fountainSprite(r = 3, stone = '#e0d8c4', frame = 0) {
       if (d > 1) continue;
       const ix = (x + 0.5 - cx) / (R - RW), iy = (y + 0.5 - cy) / (ry - RW * 0.6);
       if (ix * ix + iy * iy <= 1) continue;
-      const a = Math.atan2(ny, nx), seg = Math.round(((a / Math.PI) * 9 + 18) * 1);
-      let col = ny < 0 ? S[2] : S[3];
+      const a = Math.atan2(ny, nx);
+      let col = ny < 0 ? S[2] : S5[4];
       if (Math.abs((a / Math.PI) * 9 - Math.round((a / Math.PI) * 9)) < 0.08) col = S[1];
       if (d > 0.9 && ny > 0) col = S[2];
-      if (hash2(x, y, seg) < 0.05) col = shade(col, 0.92);
       p.set(x, y, col);
     }
-    // water: inner back wall in shade, then the surface with ripples
+    // water: inner back wall in shade, then the surface in flat teal-blue bands with ripples
     const wr = R - RW, wry = ry - RW * 0.6;
     for (let y = Math.floor(cy - wry); y <= cy + wry; y++) for (let x = Math.floor(cx - wr); x <= cx + wr; x++) {
       const nx = (x + 0.5 - cx) / wr, ny = (y + 0.5 - cy) / wry;
@@ -833,33 +917,34 @@ export function fountainSprite(r = 3, stone = '#e0d8c4', frame = 0) {
       const wy = (y + 0.5 - cy - 2) / (wry - 2);
       let col;
       if (nx * nx + wy * wy > 1) col = S[0];
-      else col = C(d < 0.35 ? '#2e6a80' : d > 0.8 ? '#4a8aa0' : '#3a7a90');
+      else col = d < 0.35 ? Wt[3] : d > 0.8 ? Wt[5] : Wt[4];
       p.set(x, y, col);
     }
+    const isWater = (c) => c && c[2] > c[0] + 20;
     for (let k = 0; k < 3; k++) {
       const rr = ((k * 0.33 + frame * 0.083) % 1) * 0.85 + 0.15;
       for (let a = 0; a < Math.PI * 2; a += 0.09) {
         if (Math.sin(a * 5 + k * 2 + frame) < -0.3) continue;
         const x = Math.round(cx + Math.cos(a) * (wr - 2) * rr), y = Math.round(cy + 2 + Math.sin(a) * (wry - 3) * rr);
-        if (p.get(x, y)?.[2] > 120 && p.get(x, y)?.[0] < 100) p.set(x, y, rr > 0.7 ? '#5a9ab0' : '#7ac0d4');
+        if (isWater(p.get(x, y))) p.set(x, y, rr > 0.7 ? Wt[5] : Wt[6]);
       }
     }
-    for (let k = 0; k < 10; k++) { const a = hash2(k, frame, 3) * 6.283, d = 0.3 + hash2(k, frame, 4) * 0.6; const x = cx + Math.cos(a) * wr * d, y = cy + 2 + Math.sin(a) * (wry - 3) * d; if (p.get(Math.round(x), Math.round(y))?.[0] < 100) p.set(x, y, '#c0f0ff'); }
+    for (let k = 0; k < 8; k++) { const a = hash2(k, frame, 3) * 6.283, d = 0.3 + hash2(k, frame, 4) * 0.6; const x = Math.round(cx + Math.cos(a) * wr * d), y = Math.round(cy + 2 + Math.sin(a) * (wry - 3) * d); if (isWater(p.get(x, y)) && isWater(p.get(x + 1, y))) { p.set(x, y, P.frost[5]); p.set(x + 1, y, Wt[6]); } }
     // column, bowl and spout
     const ct = Math.round(cy) - colH, CW = ap(4) + 1, cl = Math.round(cx) - (CW >> 1);
     for (let y = ct; y <= cy + 1; y++) for (let i = 0; i < CW; i++) p.set(cl + i, y, S[i === 0 ? 3 : i < CW * 0.5 ? 2 : i < CW - 1 ? 1 : 0]);
     p.rect(cl - 1, Math.round(cy) - 2, CW + 2, 3, S[2]); p.rect(cl - 1, Math.round(cy) - 2, CW + 2, 1, S[3]);
     const bry = ap(2), brx = ap(6);
-    p.ellipse(cx, ct + 1, brx, bry + 1, S[0]); p.ellipse(cx, ct, brx, bry, S[3]); p.ellipse(cx, ct, brx - 2, bry - 1, '#4a8aa0');
+    p.ellipse(cx, ct + 1, brx, bry + 1, S[0]); p.ellipse(cx, ct, brx, bry, S[3]); p.ellipse(cx, ct, brx - 2, bry - 1, Wt[5]);
     const st = ct - ap(4);
     p.rect(Math.round(cx) - 1, st, 3, ct - st, S[2]); p.rect(Math.round(cx) - 1, st, 1, ct - st, S[3]); p.disc(Math.round(cx) + 0.5, st, 2, S[3]);
     // water: a short jet, then arcs falling from the bowl into the basin
-    const wc = C('#c0f0ff'), wd = C('#80c8e0');
-    for (let k = 1; k <= ap(3); k++) if ((k + frame) % 3) { p.set(Math.round(cx), st - k, wc); e.set(Math.round(cx), st - k, '#60b0d0'); }
+    const wc = C(P.frost[5]), wd = C(P.frost[4]), we = C(P.frost[3]);
+    for (let k = 1; k <= ap(3); k++) if ((k + frame) % 3) { p.set(Math.round(cx), st - k, wc); e.set(Math.round(cx), st - k, we); }
     for (const sd of [-1, 1]) for (let k = 0; k <= 14; k++) {
       const t = k / 14, x = cx + sd * (brx - 1 + t * ap(9)), y = ct + 1 + t * t * (cy - ct + 2);
       if ((k + frame) % 4 === 0) continue;
-      p.set(x, y, wc); p.set(x + sd, y + 1, wd); e.set(x, y, '#60b0d0');
+      p.set(x, y, wc); p.set(x + sd, y + 1, wd); e.set(x, y, we);
       if (k === 14) { p.set(x - 1, y - 1, wc); p.set(x + 1, y - 1, wc); }
     }
     return done(p, e, { basinAt: [0, Math.round(cy) - yb] });
@@ -869,12 +954,12 @@ export function bannerSprite(color, h = 7, frame = 0) {
   return memo('banner' + color + h + frame, () => {
     const H = Math.round(h * PPU * 0.75);
     const p = mk(ap(18), H + ap(4));
-    const c = C(color), Rm = [dark(c, 0.58), dark(c, 0.8), c, light(c, 1.16)];
-    const px = ap(4) - 1, y0 = ap(2) + 1, gold = C('#d8b050');
-    p.rect(px, y0, 2, H, '#4a3020'); p.rect(px, y0, 1, H, '#6a4a30');
-    p.disc(px + 1, y0 - 1, 1.8, gold); p.set(px, y0 - 2, '#fff0a0');
+    const R = R5(color), Rm = [R[0], R[1], R[2], R[3]];
+    const px = ap(4) - 1, y0 = ap(2) + 1, gold = GOLD[4];
+    p.rect(px, y0, 2, H, WOOD[1]); p.rect(px, y0, 1, H, WOOD[3]);
+    p.disc(px + 1, y0 - 1, 1.8, GOLD[3]); p.set(px, y0 - 2, GOLD[5]);
     const cw = ap(10), cl = px + 3, by = y0 + ap(2);
-    p.rect(px + 2, by, cw + 3, 2, '#5a3a24'); p.rect(px + 2, by, cw + 3, 1, '#7a5a38'); p.set(px + cw + 4, by, gold); p.set(px + cw + 4, by + 1, gold);
+    p.rect(px + 2, by, cw + 3, 2, WOOD[2]); p.rect(px + 2, by, cw + 3, 1, WOOD[4]); p.set(px + cw + 4, by, gold); p.set(px + cw + 4, by + 1, GOLD[3]);
     const ch = Math.max(ap(7), Math.round(H * 0.5));
     const sway = (j) => Math.round(Math.sin(j * 0.22 + frame * 2) * 1.4 * (j / ch));
     for (let j = 0; j < ch; j++) {
@@ -885,7 +970,7 @@ export function bannerSprite(color, h = 7, frame = 0) {
         let idx = fold > 0.45 ? 3 : fold > -0.2 ? 2 : fold > -0.7 ? 1 : 0;
         if (i === 0) idx = Math.min(3, idx + 1); else if (i === cw - 1) idx = Math.max(0, idx - 1);
         let col = Rm[idx];
-        if (j === 0 || j === 1) col = j ? gold : light(gold, 1.1);
+        if (j === 0 || j === 1) col = j ? GOLD[3] : GOLD[4];
         p.set(cl + i + sw, y, col);
       }
     }
@@ -894,32 +979,34 @@ export function bannerSprite(color, h = 7, frame = 0) {
     for (let dy = -3; dy <= 3; dy++) for (let dx = -3; dx <= 3; dx++) {
       const m = Math.abs(dx) + Math.abs(dy);
       if (m > 3) continue;
-      p.set(ex + dx + sway(ey + dy - by - 2), ey + dy, m <= 1 ? dark(c, 0.5) : dx + dy < 0 ? light(gold, 1.15) : gold);
+      p.set(ex + dx + sway(ey + dy - by - 2), ey + dy, m <= 1 ? R[0] : dx + dy < 0 ? GOLD[5] : GOLD[4]);
     }
     return done(p, null);
   });
 }
 // battlement merlons along a wall top
 function merlons(p, x0, w, y, color, snow) {
-  const c = C(color), mw = ap(3), mh = ap(3);
+  const R = R5(color), mw = ap(3), mh = ap(3);
   for (let x = x0 + ap(1); x + mw <= x0 + w; x += ap(6)) for (let j = 0; j < mh; j++) for (let i = 0; i < mw; i++) {
-    let col = j < 2 ? light(c, j ? 1.12 : 1.22) : light(c, 1.04);
-    if (i === 0) col = light(col, 1.06); else if (i === mw - 1) col = dark(col, 0.82);
-    if (snow && j === 0) col = C('#eef2f8');
+    let k = j < 2 ? (j ? 3 : 4) : 2;
+    if (i === mw - 1) k = 1; else if (i === 0 && k < 4) k++;
+    let col = R[k];
+    if (snow && j === 0) col = SNOW[3];
     p.set(x + i, y + j, col);
   }
 }
 // curtain wall segment (width in px) / round tower
 export function wallSprite(wpx, color, h = 4.2, seed = 0, snow = false) {
   return memo('wall' + wpx + color + h + seed + snow, () => {
-    const H = Math.round(h * PPU * 0.8), T = ap(9);
+    const H = Math.round(h * PPU * 0.8), T = ap(9), R = R5(color);
     const p = mk(wpx + 2, H + T + ap(4));
     const x0 = 1, yb = p.h - 1;
     fillWall(p, x0, yb - H + 1, wpx, H, color, 'block', seed);
-    fillWall(p, x0, yb - H - T + 1, wpx, T, light(color, 1.15), 'block', seed + 3);
-    p.rect(x0, yb - H - T + 1, wpx, 1, dark(color, 0.8));
+    fillWall(p, x0, yb - H - T + 1, wpx, T, R[3], 'block', seed + 3);
+    p.rect(x0, yb - H - T + 1, wpx, 1, R[1]);
+    p.rect(x0, yb - H + 1, wpx, 1, R[4]);
     merlons(p, x0, wpx, yb - H - T - 2, light(color, 1.05), snow);
-    if (snow) for (let x = x0; x < x0 + wpx; x++) if (hash2(x, 1, seed) < 0.7) { p.set(x, yb - H - T + 2, '#eef2f8'); p.set(x, yb - H + 1, '#eef2f8'); }
+    if (snow) for (let x = x0; x < x0 + wpx; x++) if (hash2(x >> 2, 1, seed) < 0.7) { p.set(x, yb - H - T + 2, SNOW[3]); p.set(x, yb - H + 1, SNOW[2]); }
     return done(p, null);
   });
 }
@@ -927,53 +1014,53 @@ export function towerSprite(r, h, color, roof, seed = 0, flat = false) {
   return memo('tower' + r + h + color + roof + flat, () => {
     const R = Math.round(r * PPU), H = Math.round(h * PPU * 0.75);
     const p = mk(R * 2 + ap(6), H + R + ap(26)), e = mk(p.w, p.h);
-    const cx = p.w / 2, yb = p.h - 1, c = C(color);
-    const Rm = [dark(c, 0.62), dark(c, 0.82), c, light(c, 1.12)];
+    const cx = p.w / 2, yb = p.h - 1, R5c = R5(color);
     const blk = (u) => (Math.asin(clamp(u, -1, 1)) / Math.PI + 0.5) * 9;
     for (let y = yb - H; y <= yb; y++) for (let x = Math.round(cx - R); x < cx + R; x++) {
       const u = (x + 0.5 - cx) / R, sh = -u * 0.55 + 0.15;
       const ly = yb - y, row = Math.floor(ly / KR), ry = ly % KR;
-      let col = Rm[sh > 0.36 ? 3 : sh > 0 ? 2 : sh > -0.32 ? 1 : 0];
+      // four flat bands across the drum: lit left, base, shadow, deep right edge
+      let k = sh > 0.36 ? 3 : sh > 0 ? 2 : sh > -0.32 ? 1 : 0;
       const off = (row % 2) * 0.5;
       const b = Math.floor(blk(u) + off), bl = Math.floor(blk((x - 0.5 - cx) / R) + off);
-      col = shade(col, 0.93 + hash2(b, row, seed + 3) * 0.12);
-      if (ry === 0 || b !== bl) col = dark(col, 0.76); else if (ry === KR - 1) col = light(col, 1.05);
-      if (ly < ap(3)) col = dark(col, 0.86);
-      p.set(x, y, col);
+      if (k >= 1 && k <= 2 && hash2(b, row, seed + 3) < 0.18) k--;
+      if (ry === 0 || b !== bl) k = Math.max(0, k - 1); else if (ry === KR - 1 && k < 3) k++;
+      if (ly < ap(3)) k = Math.max(0, k - 1);
+      p.set(x, y, R5c[k]);
     }
     // corbel band under the top
     const ty = yb - H;
-    for (let x = Math.round(cx - R); x < cx + R; x++) for (let j = 1; j <= 2; j++) { const on = Math.floor((x - cx + 64) / 3) % 2; shadeAt(p, x, ty + j, on ? 0.72 : 1.0); }
+    for (let x = Math.round(cx - R); x < cx + R; x++) for (let j = 1; j <= 2; j++) { const on = Math.floor((x - cx + 64) / 3) % 2; if (on) shadeAt(p, x, ty + j, 0.66); }
     windowAt(p, e, Math.round(cx) - 1, yb - Math.round(H * 0.6), 3, ap(4) + 1, dark(color, 0.6), { arch: true });
     windowAt(p, e, Math.round(cx - R * 0.5) - 1, yb - Math.round(H * 0.32), 2, ap(3), dark(color, 0.6), { arch: true });
     if (flat) {
       // walk-top behind a ring of merlons
       const ery = R * 0.45;
-      p.ellipse(cx, ty, R + 1, ery + 1, light(c, 1.2));
-      p.ellipse(cx, ty, R - 2, ery - 1.5, dark(c, 0.78));
-      p.ellipse(cx, ty + 1, R - 3, ery - 2.5, dark(c, 0.88));
+      p.ellipse(cx, ty, R + 1, ery + 1, R5c[4]);
+      p.ellipse(cx, ty, R - 2, ery - 1.5, R5c[1]);
+      p.ellipse(cx, ty + 1, R - 3, ery - 2.5, R5c[2]);
       for (let k = 0; k < 12; k++) {
         const a = (k / 12) * Math.PI * 2, mx = Math.round(cx + Math.cos(a) * R) - 1, my = Math.round(ty + Math.sin(a) * ery);
-        const mc = Math.sin(a) > 0 ? light(c, 1.08) : light(c, 1.0);
-        p.rect(mx, my - 3, 3, 4, mc); p.rect(mx, my - 3, 3, 1, light(c, 1.25)); p.set(mx + 2, my, dark(c, 0.8));
+        const mc = Math.sin(a) > 0 ? R5c[3] : R5c[2];
+        p.rect(mx, my - 3, 3, 4, mc); p.rect(mx, my - 3, 3, 1, R5c[4]); p.set(mx + 2, my, R5c[1]);
       }
     } else {
       // conical tiled roof with an eave and a pennant
-      const rc = C(roof), tip = ty - R - ap(14), RT = ap(2) + 1;
+      const RC = R5(roof), tip = ty - R - ap(14), RT = ap(2) + 1;
       for (let y = tip; y <= ty + ap(2); y++) {
         const t = (y - tip) / (ty + ap(2) - tip), half = (R + ap(2)) * t;
         for (let x = Math.floor(cx - half); x <= cx + half; x++) {
           const u = (x + 0.5 - cx) / Math.max(1, half);
-          let col = u < -0.45 ? light(rc, 1.14) : u < 0.1 ? rc : u < 0.55 ? dark(rc, 0.84) : dark(rc, 0.68);
+          let k = u < -0.45 ? 3 : u < 0.1 ? 2 : u < 0.55 ? 1 : 0;
           const ly = ty + ap(2) - y;
-          if (ly % RT === 0) col = dark(col, 0.74);
-          else if ((Math.floor((u + 1) * half * 0.5) + Math.floor(ly / RT)) % 3 === 0) col = shade(col, 0.9);
-          if (y >= ty + ap(2) - 1) col = dark(rc, 0.58);
-          p.set(x, y, col);
+          if (ly % RT === 0) k = Math.max(0, k - 1);
+          else if (ly % RT === RT - 1 && k < 3) k++;
+          if (y >= ty + ap(2) - 1) k = 0;
+          p.set(x, y, RC[k]);
         }
       }
-      p.rect(Math.round(cx), tip - ap(4), 1, ap(4), '#3a3030'); p.set(Math.round(cx), tip - ap(4) - 1, '#d8b050');
-      p.poly([[cx + 1, tip - ap(4)], [cx + ap(5), tip - ap(3)], [cx + 1, tip - ap(2)]], '#a02a20');
+      p.rect(Math.round(cx), tip - ap(4), 1, ap(4), IRON[1]); p.set(Math.round(cx), tip - ap(4) - 1, GOLD[4]);
+      p.poly([[cx + 1, tip - ap(4)], [cx + ap(5), tip - ap(3)], [cx + 1, tip - ap(2)]], P.red[3]);
     }
     void seed;
     return done(p, e);
@@ -982,31 +1069,31 @@ export function towerSprite(r, h, color, roof, seed = 0, flat = false) {
 export function pierSprite(len, wid) {
   return memo('pier' + len + wid, () => {
     const p = mk(wid, len); p.oy = len - 1;
-    const c = C('#7a5a3a'), BH = ap(3);
+    const BH = ap(3), R = R5(P.wood[3]);
     for (let y = 0; y < len; y++) for (let x = 0; x < wid; x++) {
       const row = Math.floor(y / BH), ry = y % BH;
       let col;
-      if (ry === BH - 1) col = C('#2a2420');
+      if (ry === BH - 1) col = C(INK_SOFT);
       else {
-        col = shade(c, 0.88 + hash2(row, 1, 4) * 0.18);
-        if (ry === 0) col = light(col, 1.08);
-        if (hash2(x >> 2, y, 7) < 0.1) col = shade(col, 0.9);
-        if (ry === 1 && (x === 2 || x === wid - 3)) col = C('#3a3030');
+        let k = hash2(row, 1, 4) < 0.3 ? 1 : 2;
+        if (ry === 0) k++;
+        col = R[k];
+        if (ry === 1 && (x === 2 || x === wid - 3)) col = IRON[1];
       }
-      if (x < 2 || x >= wid - 2) col = x === 0 ? C('#6a4a30') : C('#4a3020');
+      if (x < 2 || x >= wid - 2) col = x === 0 ? R[3] : R[0];
       p.set(x, y, col);
     }
     return done(p, null);
   });
 }
-export function boatSprite(color = '#5a3a24', sail = '#e8e0d0') {
+export function boatSprite(color = P.wood[2], sail = '#e2d4b4') {
   return memo('boat' + color + sail, () => {
     const W = ap(46), H = ap(70);
     const p = mk(W, H);
-    const c = C(color), Rc = ramp(color), cx = W >> 1, yb = H - 1;
+    const Rc = R5(color), cx = W >> 1, yb = H - 1;
     // rigging behind the sail
     const mt = yb - ap(66);
-    p.line(cx + 1, mt + 2, cx - ap(18), yb - ap(15), '#3a3030'); p.line(cx + 1, mt + 2, cx + ap(17), yb - ap(15), '#3a3030');
+    p.line(cx + 1, mt + 2, cx - ap(18), yb - ap(15), INK_SOFT); p.line(cx + 1, mt + 2, cx + ap(17), yb - ap(15), INK_SOFT);
     // hull
     const hy = yb - ap(12), hrx = ap(19), hry = ap(8);
     p.ellipse(cx, yb - ap(10), ap(20), ap(9), Rc[0]);
@@ -1014,68 +1101,75 @@ export function boatSprite(color = '#5a3a24', sail = '#e8e0d0') {
     for (let k = 1; k <= 3; k++) for (let x = cx - hrx; x <= cx + hrx; x++) {
       const nx = (x + 0.5 - cx) / hrx; if (Math.abs(nx) > 0.98) continue;
       const y = Math.round(hy + Math.sqrt(1 - nx * nx) * (hry - 1) + k * 2 - 1);
-      if (p.a(x, y)) p.set(x, y, dark(Rc[1], 0.78));
+      if (p.a(x, y)) p.set(x, y, Rc[0]);
     }
     p.ellipse(cx, hy - 1, ap(16), ap(5.5), Rc[3]);
     p.ellipse(cx, hy - 1, ap(15), ap(4.5), Rc[2]);
-    for (let x = cx - ap(14); x < cx + ap(14); x += 4) for (let y = hy - ap(4); y <= hy + ap(3); y++) if (p.get(x, y)?.[0] === Rc[2][0]) p.set(x, y, dark(Rc[2], 0.84));
+    for (let x = cx - ap(14); x < cx + ap(14); x += 4) for (let y = hy - ap(4); y <= hy + ap(3); y++) if (p.get(x, y)?.[0] === Rc[2][0]) p.set(x, y, Rc[1]);
     for (const tx of [-ap(8), ap(6)]) { p.rect(cx + tx - 1, hy - ap(4) + 1, 3, ap(8) - 1, Rc[1]); p.rect(cx + tx - 1, hy - ap(4) + 1, 1, ap(8) - 1, Rc[3]); }
     // mast + boom
-    p.rect(cx, mt, 3, hy - mt, '#4a3020'); p.rect(cx, mt, 1, hy - mt, '#6a4a30');
-    p.rect(cx + 2, yb - ap(26), ap(14), 2, '#5a3a24');
+    p.rect(cx, mt, 3, hy - mt, WOOD[1]); p.rect(cx, mt, 1, hy - mt, WOOD[3]);
+    p.rect(cx + 2, yb - ap(26), ap(14), 2, WOOD[2]);
     // sail with seams and a soft billow
-    const s = C(sail), S4 = [dark(s, 0.7), dark(s, 0.86), s, light(s, 1.06)];
+    const S5 = R5(sail), S4 = [S5[1], mixc(S5[1], S5[2], 0.5), S5[2], S5[3]];
     const sy0 = yb - ap(62), sy1 = yb - ap(26);
     for (let y = sy0; y < sy1; y++) {
       const t = (y - sy0) / (sy1 - sy0), half = ap(4) + t * ap(12), bil = Math.sin(t * Math.PI) * 2;
       for (let x = Math.round(cx + 3); x < cx + 3 + half + bil; x++) {
         const u = (x - cx - 3) / (half + bil);
-        let col = S4[u < 0.25 ? 3 : u < 0.65 ? 2 : u < 0.88 ? 1 : 0];
-        if ((y - sy0) % ap(4) === 0) col = dark(col, 0.88);
-        p.set(x, y, col);
+        let k = u < 0.25 ? 3 : u < 0.65 ? 2 : u < 0.88 ? 1 : 0;
+        if ((y - sy0) % ap(4) === 0) k = Math.max(0, k - 1);
+        p.set(x, y, S4[k]);
       }
     }
-    p.rect(cx + ap(6), sy0 + ap(14), 4, 3, mixc(s, '#a08060', 0.3));
-    p.poly([[cx + 1, mt], [cx + ap(6), mt + 2], [cx + 1, mt + 4]], '#a03020');
+    p.rect(cx + ap(6), sy0 + ap(14), 4, 3, S5[1]);
+    p.poly([[cx + 1, mt], [cx + ap(6), mt + 2], [cx + 1, mt + 4]], P.red[3]);
     return done(p, null);
   });
 }
 
 // ------------------------------------------------------------------ site pieces
 const GLYPH = [['010', '111', '010', '101', '010'], ['110', '011', '010', '110', '011'], ['111', '100', '111', '001', '111'], ['101', '111', '101', '010', '010'], ['011', '010', '111', '010', '110']];
+// moss clumps (2-4 px clusters) over the opaque pixels of a sprite: o = { n, x0, y0, w, h, seed }
+function mossClumps(p, x0, y0, w, h, n, seed, ramp = P.moss) {
+  const M = ramp.map((c) => C(c));
+  for (let k = 0; k < n; k++) {
+    const x = Math.floor(x0 + hash2(k, 1, seed) * w), y = Math.floor(y0 + hash2(k, 2, seed) * h), s = 1 + Math.floor(hash2(k, 3, seed) * 2);
+    for (let j = 0; j <= s; j++) for (let i = 0; i <= s + 1; i++) if (p.a(x + i, y + j) && (i + j) < s + 2) p.set(x + i, y + j, j === 0 ? M[3] : i === s + 1 ? M[1] : M[2]);
+  }
+}
 export function waystoneSprite(active) {
   return memo('waystone' + active, () => {
     const W = ap(26), H = ap(64);
     const p = mk(W, H), e = mk(W, H);
     const cx = W >> 1, yb = H - 1;
-    const st = C('#4a4a52'), SR = [dark(st, 0.6), dark(st, 0.8), st, light(st, 1.22)];
+    const SR5 = R5(P.stone[2]), SR = [SR5[0], SR5[1], SR5[2], SR5[3]], PL = R5(P.stone[3]);
     // plinth: two round steps of fitted stone
-    p.ellipse(cx, yb - ap(3), ap(12), ap(4), '#4a4440');
-    p.ellipse(cx, yb - ap(4), ap(12), ap(3.6), '#6a6460');
-    p.ellipse(cx, yb - ap(5), ap(9), ap(2.6), '#5a5450');
-    p.ellipse(cx, yb - ap(5.6), ap(9), ap(2.2), '#7a7470');
-    for (let k = 0; k < 10; k++) { const a = (k / 10) * Math.PI * 2; const x = Math.round(cx + Math.cos(a) * ap(10.5)), y = Math.round(yb - ap(4) + Math.sin(a) * ap(3.1)); if (Math.sin(a) > -0.2) p.set(x, y, '#3e3834'); }
+    p.ellipse(cx, yb - ap(3), ap(12), ap(4), PL[0]);
+    p.ellipse(cx, yb - ap(4), ap(12), ap(3.6), PL[2]);
+    p.ellipse(cx, yb - ap(5), ap(9), ap(2.6), PL[1]);
+    p.ellipse(cx, yb - ap(5.6), ap(9), ap(2.2), PL[3]);
+    for (let k = 0; k < 10; k++) { const a = (k / 10) * Math.PI * 2; const x = Math.round(cx + Math.cos(a) * ap(10.5)), y = Math.round(yb - ap(4) + Math.sin(a) * ap(3.1)); if (Math.sin(a) > -0.2) p.set(x, y, PL[0]); }
     // obelisk: two visible faces split by a lit arris
     const sTop = yb - ap(46), sBot = yb - ap(5);
     for (let y = sTop; y <= sBot; y++) {
       const t = (y - sTop) / (sBot - sTop), half = ap(3) + t * ap(2.5);
       for (let x = Math.round(cx - half); x <= cx + half; x++) {
         const u = (x + 0.5 - cx) / half;
-        let col = u < -0.7 ? SR[3] : u < -0.05 ? SR[2] : u < 0.12 ? light(SR[2], 1.1) : u < 0.75 ? SR[1] : SR[0];
-        if (hash2(x, y, 5) < 0.06) col = shade(col, 0.88);
-        if (t > 0.86 && hash2(x, y, 6) < 0.35 * (t - 0.86) / 0.14 * 2) col = mixc(col, '#4a6a3a', 0.6);
+        const col = u < -0.7 ? SR[3] : u < -0.05 ? SR[2] : u < 0.12 ? SR5[4] : u < 0.75 ? SR[1] : SR[0];
         p.set(x, y, col);
       }
     }
+    mossClumps(p, cx - ap(6), sBot - ap(7), ap(12), ap(6), 6, 3);
     p.poly([[cx - ap(3) - 0.5, sTop + 1], [cx + 0.5, sTop - ap(8)], [cx + ap(3) + 1.5, sTop + 1]], SR[1]);
     p.poly([[cx - ap(3) - 0.5, sTop + 1], [cx + 0.5, sTop - ap(8)], [cx + 0.5, sTop + 1]], SR[3]);
-    // runes
-    const rc = active ? C('#80c8ff') : SR[0];
+    // runes: carved dark when dormant, aether violet with a pink-white core once attuned
+    const A = P.aether;
     for (let k = 0; k < 5; k++) {
       const g = GLYPH[k], gy = yb - ap(41) + k * ap(7), gx = cx - 1;
       for (let j = 0; j < 5; j++) for (let i = 0; i < 3; i++) if (g[j][i] === '1') {
-        p.set(gx + i - 1, gy + j, rc);
-        if (active) e.set(gx + i - 1, gy + j, j === 0 || i === 0 ? '#c0e8ff' : '#80c8ff');
+        p.set(gx + i - 1, gy + j, active ? A[3] : SR[0]);
+        if (active) e.set(gx + i - 1, gy + j, j === 0 || i === 0 ? A[5] : A[4]);
         else if (g[j + 1]?.[i] !== '1') p.set(gx + i - 1, gy + j + 1, SR[3]);
       }
     }
@@ -1087,16 +1181,16 @@ export function waystoneSprite(active) {
 export function crystalSprite(color, h = 10) {
   return memo('cryst' + color + h, () => {
     const w = Math.max(9, Math.round(h * 0.72)) | 1;
-    const p = mk(w + 2, h + 2), c = C(color);
+    const p = mk(w + 2, h + 2), R = R5(color);
     const cx = (w + 2) / 2, ym = h * 0.42 + 1, T = [cx, 1], Rt = [w + 0.6, ym], Bt = [cx, h + 1], L = [1.4, ym], M = [cx - 0.5, ym];
-    p.poly([T, Rt, M], c);
-    p.poly([T, M, L], light(c, 1.35));
-    p.poly([L, M, Bt], shade(c, 0.86));
-    p.poly([M, Rt, Bt], dark(c, 0.62));
-    p.line(cx - 1, 3, cx - 1, ym, '#ffffff');
-    p.set(Math.round(cx - 2), Math.round(ym - 1), '#ffffff');
-    p.line(Math.round(cx), Math.round(ym + 1), Math.round(cx), h - 1, light(c, 1.1));
-    p.outline(dark(c, 0.4));
+    p.poly([T, Rt, M], R[2]);
+    p.poly([T, M, L], R[4]);
+    p.poly([L, M, Bt], R[1]);
+    p.poly([M, Rt, Bt], R[0]);
+    p.line(cx - 1, 3, cx - 1, ym, CREAM_HI);
+    p.set(Math.round(cx - 2), Math.round(ym - 1), CREAM_HI);
+    p.line(Math.round(cx), Math.round(ym + 1), Math.round(cx), h - 1, R[3]);
+    p.outline(C(INK));
     return { pix: p, emis: p };
   });
 }
@@ -1106,44 +1200,45 @@ export function entranceSprite(theme, biome, glowC) {
     const r = srand(theme.length * 97 + 5);
     const W = ap(110), H = ap(96);
     const p = mk(W, H), e = mk(W, H);
-    const cx = W >> 1, yb = H - 1, g = C(glowC);
+    const cx = W >> 1, yb = H - 1;
     const masonry = ['cursed_crypt', 'marble_vault', 'frozen_citadel', 'dwarven_deephall'];
     let doorW = ap(26), doorH = ap(32), doorY = yb - ap(4);
     let rim = null, rimW = 0, inner = 'stairs';
+    // wall torch: iron cup on a bracket, a stepped flame in the theme's light (ember by default)
+    const FL = R5(glowC);
     const torch = (x, y) => {
-      p.rect(x - 1, y, 3, ap(5), '#3a3030'); p.rect(x - 1, y, 1, ap(5), '#5a4a40'); p.rect(x - 2, y - 1, 5, 2, '#2a2420');
+      p.rect(x - 1, y, 3, ap(5), IRON[1]); p.rect(x - 1, y, 1, ap(5), IRON[3]); p.rect(x - 2, y - 1, 5, 2, IRON[0]);
       for (let j = 0; j < ap(4); j++) for (let i = -2; i <= 2; i++) {
         if (Math.abs(i) > 2 - j * 0.5) continue;
-        const col = j < 2 && Math.abs(i) < 2 ? '#fff0b0' : glowC;
+        const col = j < 2 && Math.abs(i) < 2 ? FL[4] : Math.abs(i) >= 2 - j * 0.5 - 0.5 ? FL[1] : FL[2];
         p.set(x + i, y - 2 - j, col); e.set(x + i, y - 2 - j, col);
       }
     };
     if (masonry.includes(theme)) {
-      const wallC = theme === 'marble_vault' ? '#e0d8c4' : theme === 'frozen_citadel' ? '#a8b8c8' : theme === 'dwarven_deephall' ? '#6a6058' : '#5a5860';
-      const roofC = theme === 'marble_vault' ? '#c8a050' : '#3a3a44';
-      const WR = ramp(wallC);
+      const wallC = theme === 'marble_vault' ? '#d2c2a2' : theme === 'frozen_citadel' ? '#8e98b8' : theme === 'dwarven_deephall' ? '#6a5a5c' : '#5a5266';
+      const roofC = theme === 'marble_vault' ? P.gold[3] : theme === 'frozen_citadel' ? P.slate[2] : '#2f2c3a';
+      const WR = R5(wallC);
       // facade
       const fx = cx - ap(34), fw = ap(68), ft = yb - ap(62);
       fillWall(p, fx, ft, fw, yb - ap(8) - ft, wallC, theme === 'marble_vault' ? 'marble' : 'block', 3);
       p.rect(fx, yb - ap(8) - 2, fw, 2, WR[1]); p.rect(fx, yb - ap(8) - 2, fw, 1, WR[3]);
-      // pyramid roof
-      const rt = yb - ap(82), rbm = yb - ap(62), rc = C(roofC);
+      // pyramid roof in flat bands: lit left slope, shaded right slope, tile courses
+      const rt = yb - ap(82), rbm = yb - ap(62), RC = R5(roofC);
       for (let y = rt; y <= rbm; y++) {
         const t = (y - rt) / (rbm - rt), half = ap(4) + t * ap(34);
         for (let x = Math.floor(cx - half); x <= cx + half; x++) {
           const u = (x + 0.5 - cx) / half;
-          let col = u < 0 ? light(rc, 1.1) : rc;
-          if ((rbm - y) % 3 === 0) col = dark(col, 0.78);
-          else if (Math.floor((x - cx + 64) / ap(3)) % 2 && (rbm - y) % 6 < 3) col = shade(col, 0.92);
-          if (Math.abs(u) > 1 - 1.6 / half) col = dark(rc, 0.62);
-          if (Math.abs(x + 0.5 - cx) < 0.6) col = u < 0 ? light(rc, 1.25) : dark(rc, 0.7);
-          p.set(x, y, col);
+          let k = u < 0 ? 3 : 2;
+          if ((rbm - y) % 3 === 0) k--;
+          if (Math.abs(u) > 1 - 1.6 / half) k = 1;
+          if (Math.abs(x + 0.5 - cx) < 0.6) k = u < 0 ? 4 : 1;
+          p.set(x, y, RC[k]);
         }
       }
-      p.rect(Math.round(cx), rt - ap(3), 1, ap(3), theme === 'marble_vault' ? '#e8c060' : '#2a2a30');
+      p.rect(Math.round(cx), rt - ap(3), 1, ap(3), theme === 'marble_vault' ? GOLD[4] : IRON[1]);
       // cornice with dentils
       const cy0 = yb - ap(63);
-      p.rect(cx - ap(36), cy0, ap(72), ap(3), light(wallC, 1.15)); p.rect(cx - ap(36), cy0, ap(72), 1, light(wallC, 1.3));
+      p.rect(cx - ap(36), cy0, ap(72), ap(3), WR[3]); p.rect(cx - ap(36), cy0, ap(72), 1, WR[4]);
       for (let x = cx - ap(36) + 1; x < cx + ap(36); x += 3) p.set(x, cy0 + 3, WR[0]);
       p.rect(cx - ap(36), cy0 + ap(3), ap(72), 1, WR[1]);
       for (const sx of [-1, 1]) column(p, cx + sx * ap(24) - ap(2.5), yb - ap(8), ap(52), ap(5), light(wallC, 1.1));
@@ -1151,156 +1246,164 @@ export function entranceSprite(theme, biome, glowC) {
       for (let i = 2; i >= 0; i--) {
         const sw = ap(44) - i * ap(4), sx = cx - (sw >> 1), sy = yb - 3 - i * 3 - 2;
         for (let j = 0; j < 5; j++) for (let x = sx; x < sx + sw; x++) {
-          let col = j < 2 ? (j ? WR[3] : light(WR[3], 1.06)) : j === 4 ? WR[0] : WR[1];
+          let col = j < 2 ? (j ? WR[3] : WR[4]) : j === 4 ? WR[0] : WR[1];
           if (j >= 2 && (x - sx + i * 5) % ap(8) === 0) col = WR[0];
           p.set(x, sy + j, col);
         }
       }
       for (const sx of [-1, 1]) torch(cx + sx * ap(16), yb - ap(46));
       if (theme === 'cursed_crypt') {
-        const sy = yb - ap(72);
-        p.disc(cx + 0.5, sy, ap(4), '#d8d0c0'); p.rect(cx - 3, sy + 3, 7, 3, '#d8d0c0'); p.disc(cx - 0.5, sy - 1, ap(2), '#e8e0d0');
-        p.rect(cx - 3, sy - 1, 2, 3, '#0a0808'); p.rect(cx + 2, sy - 1, 2, 3, '#0a0808'); p.set(cx, sy + 2, '#0a0808');
-        for (let i = -2; i <= 2; i += 2) p.set(cx + i, sy + 5, '#6a6458');
+        const sy = yb - ap(72), BN = R5(CREAM);
+        p.disc(cx + 0.5, sy, ap(4), BN[2]); p.rect(cx - 3, sy + 3, 7, 3, BN[1]); p.disc(cx - 0.5, sy - 1, ap(2), BN[3]);
+        p.rect(cx - 3, sy - 1, 2, 3, INK); p.rect(cx + 2, sy - 1, 2, 3, INK); p.set(cx, sy + 2, INK);
+        for (let i = -2; i <= 2; i += 2) p.set(cx + i, sy + 5, BN[0]);
         for (let k = 0; k < 4; k++) { let x = fx + 4 + Math.floor(r() * (fw - 8)), y = ft + 4 + Math.floor(r() * 30); for (let s = 0; s < ap(6); s++) { p.set(x, y, WR[0]); y++; if (r() < 0.5) x += r() < 0.5 ? -1 : 1; } }
-        for (let k = 0; k < 40; k++) { const x = fx + Math.floor(r() * fw), y = yb - ap(8) - Math.floor(r() * r() * 30); if (p.a(x, y)) p.set(x, y, r() < 0.5 ? '#4a5a3a' : '#5a6a44'); }
+        mossClumps(p, fx, yb - ap(8) - ap(12), fw, ap(12), 18, 11);
       }
-      if (theme === 'marble_vault') { const sy = yb - ap(72); p.disc(cx + 0.5, sy, ap(3.4), '#e8c060'); p.disc(cx + 0.5, sy, ap(2.2), '#c8a040'); p.set(cx - 1, sy - 2, '#fff0a0'); for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; p.set(Math.round(cx + Math.cos(a) * ap(5)), Math.round(sy + Math.sin(a) * ap(5)), '#e8c060'); } }
-      if (theme === 'dwarven_deephall') for (let x = cx - ap(30); x < cx + ap(30); x += 6) { const gl = GLYPH[Math.floor(hash2(x, 1, 3) * 5)]; for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++) if (gl[j + 1][i] === '1') { p.set(x + i, yb - ap(62) + 3 + j, '#ff9030'); e.set(x + i, yb - ap(62) + 3 + j, '#ffa040'); } }
+      if (theme === 'marble_vault') { const sy = yb - ap(72); p.disc(cx + 0.5, sy, ap(3.4), GOLD[4]); p.disc(cx + 0.5, sy, ap(2.2), GOLD[3]); p.set(cx - 1, sy - 2, GOLD[5]); for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; p.set(Math.round(cx + Math.cos(a) * ap(5)), Math.round(sy + Math.sin(a) * ap(5)), GOLD[4]); } }
+      if (theme === 'dwarven_deephall') for (let x = cx - ap(30); x < cx + ap(30); x += 6) { const gl = GLYPH[Math.floor(hash2(x, 1, 3) * 5)]; for (let j = 0; j < 3; j++) for (let i = 0; i < 3; i++) if (gl[j + 1][i] === '1') { p.set(x + i, yb - ap(62) + 3 + j, P.ember[3]); e.set(x + i, yb - ap(62) + 3 + j, P.ember[4]); } }
       if (theme === 'frozen_citadel') {
-        for (let x = cx - ap(37); x < cx + ap(37); x++) if (hash2(x, 2, 9) < 0.85) { p.set(x, cy0 - 1, '#eef2f8'); p.set(x, cy0, '#ffffff'); }
-        for (let x = cx - ap(36); x < cx + ap(36); x++) if (hash2(x, 4, 9) < 0.25) { const L = 2 + Math.floor(hash2(x, 5, 9) * ap(4)); for (let k = 0; k < L; k++) p.set(x, cy0 + ap(3) + 1 + k, k === L - 1 ? '#ffffff' : '#c8e0f0'); }
-        for (let y = rt; y < rt + ap(9); y++) for (let x = cx - ap(20); x < cx + ap(20); x++) if (p.a(x, y) && hash2(x, y, 3) < 0.9 - (y - rt) / ap(9)) p.set(x, y, (y - rt) > ap(6) ? '#c0ccdc' : '#eef2f8');
-        for (let i = 0; i < 3; i++) p.rect(cx - ap(22) + i * ap(2), yb - 5 - i * 3, ap(44) - i * ap(4), 1, '#eef2f8');
+        for (let x = cx - ap(37); x < cx + ap(37); x++) if (hash2(x >> 2, 2, 9) < 0.85) { p.set(x, cy0 - 1, SNOW[2]); p.set(x, cy0, SNOW[3]); }
+        for (let x = cx - ap(36); x < cx + ap(36); x++) if (hash2(x >> 1, 4, 9) < 0.3) { const L = 2 + Math.floor(hash2(x >> 1, 5, 9) * ap(4)) - (x & 1); for (let k = 0; k < L; k++) p.set(x, cy0 + ap(3) + 1 + k, k === L - 1 ? P.frost[5] : P.frost[4]); }
+        for (let y = rt; y < rt + ap(9); y++) for (let x = cx - ap(20); x < cx + ap(20); x++) if (p.a(x, y) && vnoise(Math.floor(x / 3) * 3, 0, 3, ap(4)) < 1 - (y - rt) / ap(9)) p.set(x, y, (y - rt) > ap(6) ? SNOW[1] : SNOW[3]);
+        for (let i = 0; i < 3; i++) p.rect(cx - ap(22) + i * ap(2), yb - 5 - i * 3, ap(44) - i * ap(4), 1, SNOW[3]);
       }
       doorW = ap(22); doorH = ap(34); doorY = yb - ap(9);
-      rim = theme === 'marble_vault' ? C('#c8a050') : light(wallC, 1.08); rimW = ap(2);
+      rim = theme === 'marble_vault' ? GOLD[3] : light(wallC, 1.08); rimW = ap(2);
     } else if (theme === 'buried_colossus') {
-      const sand = ramp('#c8784a');
-      stoneMass(p, cx, yb - ap(20), ap(50), ap(20), '#c8784a', 11, { facet: ap(8), tilt: 0.25, bump: 0.12, cracks: 0, ramp: sand });
-      for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) if (p.a(x, y) && Math.sin(x * 0.45 + y * 1.7 + Math.sin(x * 0.1) * 3) > 0.93) p.set(x, y, light(p.get(x, y), 1.08));
-      fillWall(p, cx - ap(20), yb - ap(58), ap(40), ap(44), '#b87a4a', 'block', 7);
-      p.rect(cx - ap(22), yb - ap(60), ap(44), ap(3), '#c8885a'); p.rect(cx - ap(22), yb - ap(60), ap(44), 1, '#e0a070'); p.rect(cx - ap(22), yb - ap(60) + ap(3), ap(44), 1, '#7a4a2a');
-      for (const sx of [-1, 1]) column(p, cx + sx * ap(18) - ap(2.5), yb - ap(12), ap(48), ap(5), '#c08050');
+      const sandC = P.clay[4], sand = ramp(sandC);
+      stoneMass(p, cx, yb - ap(20), ap(50), ap(20), sandC, 11, { facet: ap(8), tilt: 0.25, bump: 0.12, cracks: 0, ramp: sand });
+      // wind ripples: long 1-px highlight streaks
+      for (let y = 0; y < p.h; y++) for (let x = 0; x < p.w; x++) if (p.a(x, y) && Math.sin(x * 0.45 + y * 1.7 + Math.sin(x * 0.1) * 3) > 0.93) p.set(x, y, sand[3]);
+      fillWall(p, cx - ap(20), yb - ap(58), ap(40), ap(44), P.clay[3], 'block', 7);
+      const LT = R5(P.clay[4]);
+      p.rect(cx - ap(22), yb - ap(60), ap(44), ap(3), LT[2]); p.rect(cx - ap(22), yb - ap(60), ap(44), 1, LT[4]); p.rect(cx - ap(22), yb - ap(60) + ap(3), ap(44), 1, LT[0]);
+      for (const sx of [-1, 1]) column(p, cx + sx * ap(18) - ap(2.5), yb - ap(12), ap(48), ap(5), P.clay[4]);
       // giant fingers rising beside the door (knuckle creases, nails)
       for (let k = 0; k < 4; k++) {
         const fx = cx - ap(46) + k * ap(6), tx = fx - ap(2) + k * ap(1), ty = yb - ap(40) - k * ap(4);
-        const fc = k % 2 ? '#c88a5a' : '#d89a6a', FR = ramp(fc);
+        const FR = R5(k % 2 ? '#c08a72' : '#d09a80');
         p.taper(fx, yb - ap(10), tx, ty, ap(8), ap(6), FR[1]);
         p.taper(fx - 1, yb - ap(10), tx - 1, ty, ap(6), ap(4), FR[2]);
         p.taper(fx - 3, yb - ap(10), tx - 3, ty + 1, ap(2), ap(1.4), FR[3]);
         for (const t of [0.35, 0.68]) { const x = fx + (tx - fx) * t, y = yb - ap(10) + (ty - yb + ap(10)) * t; p.line(x - ap(3.4), y, x + ap(3.2), y - 1, FR[0]); p.line(x - ap(3.4), y - 1, x - 1, y - 2, FR[3]); }
-        p.ellipse(tx, ty + 1, ap(2.4), ap(2.6), light(fc, 1.25)); p.ellipse(tx - 0.5, ty + 0.5, ap(1.4), ap(1.6), light(fc, 1.45)); p.set(Math.round(tx) - 1, Math.round(ty), '#fff0e0');
+        p.ellipse(tx, ty + 1, ap(2.4), ap(2.6), FR[3]); p.ellipse(tx - 0.5, ty + 0.5, ap(1.4), ap(1.6), FR[4]); p.set(Math.round(tx) - 1, Math.round(ty), CREAM_HI);
       }
-      stoneMass(p, cx - ap(40), yb - ap(7), ap(16), ap(6), '#c8784a', 12, { facet: ap(8), tilt: 0.2, bump: 0.1, cracks: 0, ramp: sand, flatBase: 0.6 });
+      stoneMass(p, cx - ap(40), yb - ap(7), ap(16), ap(6), sandC, 12, { facet: ap(8), tilt: 0.2, bump: 0.1, cracks: 0, ramp: sand, flatBase: 0.6 });
       doorW = ap(22); doorH = ap(36); doorY = yb - ap(12);
-      rim = C('#8a5232'); rimW = ap(2);
+      rim = C(P.clay[2]); rimW = ap(2);
     } else if (theme === 'sunken_temple') {
-      const sc = '#7a9a90';
-      fillWall(p, cx - ap(16), yb - ap(48), ap(32), ap(38), '#5a7a78', 'block', 5);
-      fillWall(p, cx - ap(40), yb - ap(10), ap(80), ap(8), '#5a7a7a', 'block', 2);
-      p.rect(cx - ap(40), yb - ap(10), ap(80), 1, '#8aaaa8');
+      const sc = '#6a8a86', TS = R5('#557572');
+      fillWall(p, cx - ap(16), yb - ap(48), ap(32), ap(38), '#4e6c6a', 'block', 5);
+      fillWall(p, cx - ap(40), yb - ap(10), ap(80), ap(8), '#4e6c6c', 'block', 2);
+      p.rect(cx - ap(40), yb - ap(10), ap(80), 1, TS[3]);
       for (const sx of [-30, -10, 10, 30]) column(p, cx + ap(sx) - ap(2.5), yb - ap(10), ap(46), ap(5), sc);
       const rt = yb - ap(74), rbm = yb - ap(56);
       for (let y = rt; y <= rbm; y++) {
         const t = (y - rt) / (rbm - rt), half = ap(6) + t * ap(36);
         for (let x = Math.floor(cx - half); x <= cx + half; x++) {
-          let col = (rbm - y) % 3 ? C('#6a8a88') : C('#5a7a78');
-          if (x < cx) col = light(col, 1.06);
-          if (Math.abs(x + 0.5 - cx) > half - 1.5) col = C('#4a6a68');
-          p.set(x, y, col);
+          let k = (rbm - y) % 3 ? 2 : 1;
+          if (x < cx && k === 2) k = 3;
+          if (Math.abs(x + 0.5 - cx) > half - 1.5) k = 0;
+          p.set(x, y, TS[k]);
         }
       }
-      p.rect(cx - ap(43), rbm, ap(86), ap(2), '#8aaaa8'); p.rect(cx - ap(43), rbm + ap(2), ap(86), 1, '#3a5a58');
-      // weed, barnacles, puddles
-      for (let k = 0; k < 18; k++) { const x = cx - ap(40) + Math.floor(r() * ap(80)); let y = rbm + ap(2) + 1; const L = 2 + Math.floor(r() * ap(10)); for (let s = 0; s < L && y < yb; s++, y++) if (p.a(x, y)) p.set(x + (s % 4 === 3 ? 1 : 0), y, s % 2 ? '#2a6a4a' : '#3a7a5a'); }
-      for (let k = 0; k < 30; k++) { const x = Math.round(cx - ap(40) + r() * ap(80)), y = Math.round(yb - ap(12) - r() * ap(44)); if (p.a(x, y)) p.set(x, y, r() < 0.5 ? '#3a7a5a' : '#c8c0a8'); }
-      for (const sx of [-1, 1]) { p.ellipse(cx + sx * ap(30), yb - 2, ap(7), ap(1.6), '#3a6a78'); p.rect(Math.round(cx + sx * ap(30)) - 3, yb - 3, 4, 1, '#8ad0e0'); }
+      p.rect(cx - ap(43), rbm, ap(86), ap(2), TS[3]); p.rect(cx - ap(43), rbm + ap(2), ap(86), 1, TS[0]);
+      // hanging weed, barnacle clumps, puddles
+      const WD = P.teal;
+      for (let k = 0; k < 18; k++) { const x = cx - ap(40) + Math.floor(r() * ap(80)); let y = rbm + ap(2) + 1; const L = 2 + Math.floor(r() * ap(10)); for (let s = 0; s < L && y < yb; s++, y++) if (p.a(x, y)) { p.set(x + (s % 4 === 3 ? 1 : 0), y, s % 2 ? WD[2] : WD[3]); } }
+      mossClumps(p, cx - ap(40), yb - ap(56), ap(80), ap(46), 22, 7, P.teal);
+      const WT = P.water;
+      for (const sx of [-1, 1]) { p.ellipse(cx + sx * ap(30), yb - 2, ap(7), ap(1.6), WT[3]); p.rect(Math.round(cx + sx * ap(30)) - 3, yb - 3, 4, 1, WT[6]); }
       doorW = ap(20); doorH = ap(30); doorY = yb - ap(11);
-      rim = C('#8aaaa0'); rimW = ap(2);
+      rim = TS[3]; rimW = ap(2);
     } else if (theme === 'living_labyrinth') {
-      const hedge = ramp('#2a4a24');
-      for (const i of [-3, 3, -2, 2, -1, 1, 0]) stoneMass(p, cx + i * ap(13), yb - ap(26) - Math.abs(i) * ap(2), ap(10), ap(26) + Math.abs(i) * ap(2), '#2a4a24', 40 + i, { leafy: true, facet: ap(4), bump: 0.1, lobes: 8, ramp: hedge, flatBase: 0.95 });
-      stoneMass(p, cx, yb - ap(62), ap(48), ap(13), '#335a2a', 47, { leafy: true, facet: ap(4), bump: 0.07, lobes: 9 });
-      for (let k = 0; k < 30; k++) { const x = Math.floor(r() * W), y = Math.floor(r() * H); if (p.a(x, y) && p.a(x, y - 1)) p.set(x, y, r() < 0.5 ? '#e090c0' : '#f0f0d0'); }
-      p.disc(cx + 0.5, yb - ap(64), ap(3), '#a0ff60'); e.disc(cx + 0.5, yb - ap(64), ap(3), '#a0ff60');
-      p.disc(cx + 0.5, yb - ap(64), ap(1.2), '#f0ffd0'); e.disc(cx + 0.5, yb - ap(64), ap(1.2), '#f0ffd0');
+      const hedgeC = P.moss[1], hedge = ramp(hedgeC);
+      for (const i of [-3, 3, -2, 2, -1, 1, 0]) stoneMass(p, cx + i * ap(13), yb - ap(26) - Math.abs(i) * ap(2), ap(10), ap(26) + Math.abs(i) * ap(2), hedgeC, 40 + i, { leafy: true, facet: ap(4), bump: 0.1, lobes: 8, ramp: hedge, flatBase: 0.95 });
+      stoneMass(p, cx, yb - ap(62), ap(48), ap(13), P.moss[2], 47, { leafy: true, facet: ap(4), bump: 0.07, lobes: 9 });
+      // rose and lavender blooms, two-pixel clusters
+      for (let k = 0; k < 26; k++) { const x = Math.floor(r() * W), y = Math.floor(r() * H), fc = r() < 0.5 ? P.rose[3] : P.lavender[4]; if (p.a(x, y) && p.a(x, y - 1) && p.a(x + 1, y)) { p.set(x, y, fc); p.set(x + 1, y, fc); p.set(x, y - 1, light(fc, 1.2)); } }
+      const LB = R5(glowC);
+      p.disc(cx + 0.5, yb - ap(64), ap(3), LB[2]); e.disc(cx + 0.5, yb - ap(64), ap(3), LB[3]);
+      p.disc(cx + 0.5, yb - ap(64), ap(1.2), LB[4]); e.disc(cx + 0.5, yb - ap(64), ap(1.2), LB[4]);
       doorW = ap(22); doorH = ap(38); doorY = yb - ap(2);
-      rim = C('#16280e'); rimW = ap(1.5); inner = 'deep';
+      rim = C(P.grass[0]); rimW = ap(1.5); inner = 'deep';
     } else {
       // cave mouth in a rock outcrop
-      const rc = { glass_cavern: '#2a1a20', void_rift: '#2a2034', dragon_lair: '#4a2a22', fungal_warren: '#3a3430', pirate_cove: '#4a4a48', bandit_hideout: biome === 'wastes' ? '#8a4a30' : '#5a5048', beast_den: biome === 'frost' ? '#6a7480' : '#5a5040' }[theme] || '#5a5048';
+      const rc = { glass_cavern: '#3a2230', void_rift: '#2e2440', dragon_lair: '#4e2a26', fungal_warren: '#3e3040', pirate_cove: '#4e4b53', bandit_hideout: biome === 'wastes' ? '#8a5048' : '#5e5050', beast_den: biome === 'frost' ? '#6e7a9a' : '#5e5048' }[theme] || '#5e5050';
       const RC = ramp(light(rc, 1.15));
       stoneMass(p, cx, yb - ap(36), ap(50), ap(36), rc, 21, { facet: ap(10), tilt: 0.75, lobes: 7, ramp: RC, cracks: 6, flatBase: 0.95 });
       for (let k = 0; k < 5; k++) stoneMass(p, cx - ap(40) + k * ap(20), yb - ap(12), ap(12), ap(11), rc, 30 + k, { facet: ap(7), tilt: 0.7, ramp: ramp(rc), cracks: 1, flatBase: 0.95 });
       if (biome === 'frost' || biome === 'verdant') {
-        const t1 = biome === 'frost' ? C('#ffffff') : C('#6a9a3a'), t2 = biome === 'frost' ? C('#dde6f2') : C('#4a7a2a'), t3 = biome === 'frost' ? C('#b8c4d8') : C('#2a4a1a');
+        const caps = biome === 'frost' ? [SNOW[3], SNOW[2], SNOW[1]] : [C(P.moss[4]), C(P.moss[3]), C(P.moss[1])];
         for (let x = 0; x < p.w; x++) for (let y = 0; y < p.h; y++) if (p.a(x, y) && !p.a(x, y - 1)) {
-          const L = ap(2) + Math.floor(hash2(x, 3, 5) * ap(2.5));
-          for (let k = 0; k < L; k++) if (p.a(x, y + k)) p.set(x, y + k, k === 0 ? t1 : k === L - 1 ? t3 : t2);
-          if (biome === 'verdant' && hash2(x, 1, 7) < 0.12) for (let k = L; k < L + ap(5); k++) if (p.a(x, y + k)) p.set(x, y + k, k % 2 ? '#3a6a2a' : '#4a7a2a');
+          const L = ap(2) + Math.floor(hash2(x >> 1, 3, 5) * ap(2.5));
+          for (let k = 0; k < L; k++) if (p.a(x, y + k)) p.set(x, y + k, k === 0 ? caps[0] : k === L - 1 ? caps[2] : caps[1]);
+          if (biome === 'verdant' && hash2(x >> 1, 1, 7) < 0.12) for (let k = L; k < L + ap(5); k++) if (p.a(x, y + k)) p.set(x, y + k, k % 2 ? P.moss[2] : P.moss[3]);
         }
       }
       if (theme === 'glass_cavern' || theme === 'void_rift' || theme === 'dragon_lair' || theme === 'fungal_warren') {
-        const hc = theme === 'glass_cavern' ? '#ff4060' : theme === 'void_rift' ? '#a060ff' : theme === 'dragon_lair' ? '#ff7030' : '#c080ff';
+        const HC = R5(theme === 'glass_cavern' ? P.rose[3] : theme === 'void_rift' ? P.aether[3] : theme === 'dragon_lair' ? P.ember[3] : P.aether[4]);
         for (let k = 0; k < 5; k++) {
           let x = cx + (r() - 0.5) * ap(80), y = yb - ap(20) - r() * ap(40);
           if (theme === 'glass_cavern' || theme === 'fungal_warren') {
             if (!p.a(Math.round(x), Math.round(y))) continue;
-            if (theme === 'glass_cavern') { const s = ap(3) + r() * ap(3); p.poly([[x - s * 0.4, y], [x, y - s * 1.6], [x + s * 0.4, y]], hc); p.poly([[x - s * 0.4, y], [x, y - s * 1.6], [x, y]], light(C(hc), 1.3)); e.poly([[x - s * 0.4, y], [x, y - s * 1.6], [x + s * 0.4, y]], hc); }
-            else { p.rect(Math.round(x), Math.round(y) - 2, 1, 3, '#d8d0c0'); p.ellipse(x + 0.5, y - 3, 2.5, 1.5, hc); e.ellipse(x + 0.5, y - 3, 2.5, 1.5, hc); }
+            if (theme === 'glass_cavern') { const s = ap(3) + r() * ap(3); p.poly([[x - s * 0.4, y], [x, y - s * 1.6], [x + s * 0.4, y]], HC[2]); p.poly([[x - s * 0.4, y], [x, y - s * 1.6], [x, y]], HC[4]); e.poly([[x - s * 0.4, y], [x, y - s * 1.6], [x + s * 0.4, y]], HC[3]); }
+            else { p.rect(Math.round(x), Math.round(y) - 2, 1, 3, CREAM); p.ellipse(x + 0.5, y - 3, 2.5, 1.5, HC[2]); e.ellipse(x + 0.5, y - 3, 2.5, 1.5, HC[3]); }
           } else for (let s = 0; s < ap(10); s++) {
             const X = Math.round(x), Y = Math.round(y);
-            if (p.a(X, Y)) { p.set(X, Y, hc); e.set(X, Y, hc); }
+            if (p.a(X, Y)) { p.set(X, Y, HC[2]); e.set(X, Y, HC[3]); if (p.a(X + 1, Y)) { p.set(X + 1, Y, HC[1]); e.set(X + 1, Y, HC[2]); } }
             y += 1; x += r() < 0.5 ? -1 : 1;
           }
         }
       }
       if (theme === 'bandit_hideout' || theme === 'pirate_cove') {
-        const wd = C('#5a3a22');
-        for (const sx of [-1, 1]) { const x = cx + sx * ap(30) - 1; p.rect(x, yb - ap(34), ap(2), ap(32), wd); p.rect(x, yb - ap(34), 1, ap(32), light(wd, 1.2)); }
-        p.rect(cx - ap(32), yb - ap(36), ap(64), ap(2) + 1, wd); p.rect(cx - ap(32), yb - ap(36), ap(64), 1, light(wd, 1.25));
-        for (let x = cx - ap(31); x < cx + ap(31); x += ap(6)) p.set(x, yb - ap(35), '#2a2420');
-        const cl = C(theme === 'pirate_cove' ? '#1a1a1a' : '#8a2a1a');
+        const WD = R5(P.wood[2]);
+        for (const sx of [-1, 1]) { const x = cx + sx * ap(30) - 1; p.rect(x, yb - ap(34), ap(2), ap(32), WD[2]); p.rect(x, yb - ap(34), 1, ap(32), WD[3]); }
+        p.rect(cx - ap(32), yb - ap(36), ap(64), ap(2) + 1, WD[2]); p.rect(cx - ap(32), yb - ap(36), ap(64), 1, WD[4]);
+        for (let x = cx - ap(31); x < cx + ap(31); x += ap(6)) p.set(x, yb - ap(35), IRON[0]);
+        const CL = R5(theme === 'pirate_cove' ? '#2a2234' : P.red[3]);
         for (let y = yb - ap(33); y < yb - ap(17); y++) for (let x = cx - ap(30) + 3; x < cx - ap(30) + ap(10); x++) {
-          const fold = Math.sin((x - cx) * 0.9);
-          let col = fold > 0.4 ? light(cl, 1.25) : fold < -0.5 ? dark(cl, 0.8) : cl;
+          const f = Math.floor((x - cx) / 3) % 3;
+          const col = f === 0 ? CL[3] : f === 2 || f === -1 ? CL[1] : CL[2];
           if (y >= yb - ap(18) && (x % 2)) continue;
           p.set(x, y, col);
         }
-        if (theme === 'pirate_cove') { const sx = cx - ap(24), sy = yb - ap(28); p.disc(sx + 0.5, sy, ap(2), '#e8e0d0'); p.set(sx - 1, sy, '#1a1a1a'); p.set(sx + 1, sy, '#1a1a1a'); p.line(sx - 3, sy + 4, sx + 3, sy + 7, '#e8e0d0'); p.line(sx + 3, sy + 4, sx - 3, sy + 7, '#e8e0d0'); }
+        if (theme === 'pirate_cove') { const sx = cx - ap(24), sy = yb - ap(28); p.disc(sx + 0.5, sy, ap(2), CREAM); p.set(sx - 1, sy, INK); p.set(sx + 1, sy, INK); p.line(sx - 3, sy + 4, sx + 3, sy + 7, CREAM); p.line(sx + 3, sy + 4, sx - 3, sy + 7, CREAM); }
       }
       doorW = ap(34); doorH = ap(30); doorY = yb - ap(2);
       rim = dark(rc, 0.55); rimW = ap(2); inner = 'deep';
     }
-    // the dark doorway: an arched void with a lit jamb, a faint floor and steps leading down
+    // the dark doorway: an arched ink void with a lit jamb, a faint floor and steps leading down
     const dx0 = cx - Math.floor(doorW / 2), dTop = doorY - doorH;
     const inDoor = (x, y) => {
       if (y < dTop || y > doorY || x < dx0 || x >= dx0 + doorW) return false;
       const ly = y - dTop, r0 = doorW / 2, dy = Math.max(0, r0 - ly);
       return Math.abs(x + 0.5 - cx) <= Math.sqrt(Math.max(0, r0 * r0 - dy * dy)) + 0.3;
     };
+    const RIM = rim ? R5(rim) : null;
     if (rim) for (let y = dTop - rimW; y <= doorY; y++) for (let x = dx0 - rimW; x < dx0 + doorW + rimW; x++) {
       if (inDoor(x, y)) continue;
       let near = false;
       for (let k = 1; k <= rimW && !near; k++) near = inDoor(x + k, y) || inDoor(x - k, y) || inDoor(x, y + k) || inDoor(x + k, y + k) || inDoor(x - k, y + k);
       if (!near) continue;
-      let col = rim;
+      let col = RIM[2];
       if (inner === 'stairs') {
         const a = Math.atan2(y - (dTop + doorW / 2), x + 0.5 - cx);
-        col = Math.floor((a + 7) * 3.2) % 2 ? light(rim, 1.12) : rim;
-        if (Math.abs(x + 0.5 - cx) < 2 && y < dTop + 2) col = light(rim, 1.25);
-      } else if (hash2(x, y, 3) < 0.3) col = shade(rim, 1.2);
+        col = Math.floor((a + 7) * 3.2) % 2 ? RIM[3] : RIM[2];
+        if (Math.abs(x + 0.5 - cx) < 2 && y < dTop + 2) col = RIM[4];
+      } else if (vnoise(x, y, 3, 2.5) > 0.66) col = RIM[3];
       p.set(x, y, col);
     }
+    const VOID = [C(INK), C('#0e0a14'), C('#231a2c'), C('#2a1e34')];
     for (let y = dTop; y <= doorY; y++) for (let x = dx0; x < dx0 + doorW; x++) {
       if (!inDoor(x, y)) continue;
       const ly = y - dTop;
-      let col = C('#06040a');
-      if (!inDoor(x - 2, y)) col = C('#1a1420');
-      else if (!inDoor(x + 2, y)) col = C('#0a080e');
-      if (ly > doorH - 3) col = C('#1a1418');
-      else if (inner === 'stairs' && ly > doorH * 0.55) { const k = Math.floor((doorH - ly) / 3); if ((doorH - ly) % 3 === 0 && Math.abs(x + 0.5 - cx) < doorW / 2 - k * 2 - 1) col = C('#241e28'); }
+      let col = VOID[1];
+      if (!inDoor(x - 2, y)) col = VOID[2];
+      else if (!inDoor(x + 2, y)) col = VOID[0];
+      if (ly > doorH - 3) col = VOID[2];
+      else if (inner === 'stairs' && ly > doorH * 0.55) { const k = Math.floor((doorH - ly) / 3); if ((doorH - ly) % 3 === 0 && Math.abs(x + 0.5 - cx) < doorW / 2 - k * 2 - 1) col = VOID[3]; }
       p.set(x, y, col);
     }
     return done(p, e, { door: [0, doorY - yb, doorW, doorH] });
@@ -1311,25 +1414,26 @@ export function shrineSprite() {
     const W = ap(70), H = ap(46);
     const p = mk(W, H);
     const cx = W >> 1, yb = H - 1, r = srand(77);
+    const DS = R5(P.stone[3]);
     // round dais of fitted flagstones
     const dy = yb - ap(8);
-    p.ellipse(cx, dy + ap(2), ap(24), ap(8), '#4a4440');
-    p.ellipse(cx, dy, ap(24), ap(8), '#7a7470');
+    p.ellipse(cx, dy + ap(2), ap(24), ap(8), DS[0]);
+    p.ellipse(cx, dy, ap(24), ap(8), DS[2]);
     for (let y = Math.floor(dy - ap(8)); y <= dy + ap(8); y++) for (let x = cx - ap(24); x <= cx + ap(24); x++) {
       const nx = (x + 0.5 - cx) / ap(24), ny = (y + 0.5 - dy) / ap(8), d = Math.hypot(nx, ny);
       if (d > 1 || !p.a(x, y)) continue;
       const a = Math.atan2(ny, nx);
-      let col = C(d < 0.55 ? '#86807a' : '#7a7470');
-      if (Math.abs(d - 0.55) < 0.06 || (d > 0.55 && Math.abs((a / Math.PI) * 6 - Math.round((a / Math.PI) * 6)) < 0.07) || (d < 0.55 && Math.abs((a / Math.PI) * 3 - Math.round((a / Math.PI) * 3)) < 0.1)) col = C('#5a5450');
-      else if (d > 0.93 && ny < 0) col = C('#9a948e');
-      if (hash2(x, y, 4) < 0.05) col = C('#6a7a5a');
+      let col = d < 0.55 ? DS[3] : DS[2];
+      if (Math.abs(d - 0.55) < 0.06 || (d > 0.55 && Math.abs((a / Math.PI) * 6 - Math.round((a / Math.PI) * 6)) < 0.07) || (d < 0.55 && Math.abs((a / Math.PI) * 3 - Math.round((a / Math.PI) * 3)) < 0.1)) col = DS[1];
+      else if (d > 0.93 && ny < 0) col = DS[4];
       p.set(x, y, col);
     }
+    mossClumps(p, cx - ap(24), dy - ap(4), ap(48), ap(10), 10, 5);
     // standing stones around (back ones first)
     const stones = [];
     for (let i = 0; i < 6; i++) { const a = (i / 6) * Math.PI * 2; stones.push([cx + Math.cos(a) * ap(28), yb - ap(9) + Math.sin(a) * ap(9), i]); }
     stones.sort((a, b) => a[1] - b[1]);
-    const st = ramp('#5a5650');
+    const st = R5(P.stone[2]);
     const drawStone = (x, y, i) => {
       const h = ap(18) + (i % 2) * ap(5), hw = ap(3);
       for (let yy = Math.round(y - h); yy <= y; yy++) {
@@ -1337,24 +1441,23 @@ export function shrineSprite() {
         for (let xx = Math.round(x - half); xx <= x + half; xx++) {
           const u = (xx + 0.5 - x) / half;
           let col = u < -0.45 ? st[3] : u > 0.45 ? st[1] : st[2];
-          if (t < 0.06) col = st[3];
-          if (hash2(xx, yy, i) < 0.07) col = shade(col, 0.88);
-          if (t > 0.75 && hash2(xx, yy, i + 9) < (t - 0.75) * 2.2) col = mixc(col, '#4a6a3a', 0.65);
+          if (t < 0.06) col = st[4];
           p.set(xx, yy, col);
         }
       }
+      mossClumps(p, x - hw, y - h * 0.3, hw * 2, h * 0.3, 4, i + 20);
       // carved spiral rune
       const gx = Math.round(x) - 1, gy = Math.round(y - h * 0.62);
       for (const [a, b] of [[0, 0], [1, 0], [2, 0], [2, 1], [2, 2], [1, 2], [0, 2], [0, 1], [1, 1]]) p.set(gx + a, gy + b, st[0]);
-      for (let k = 0; k < 3; k++) p.set(Math.round(x - 2 + r() * 4), Math.round(y - h * r()), '#6a8a5a');
+      void r;
     };
     for (const [x, y, i] of stones) if (y < dy) drawStone(x, y, i);
     // altar
-    const ax = cx - ap(7), ay = yb - ap(20);
-    fillWall(p, ax, ay, ap(14), ap(12), '#7a7268', 'block', 7);
-    p.rect(ax - ap(1), ay - ap(2), ap(16), ap(2), '#9a9288'); p.rect(ax - ap(1), ay - ap(2), ap(16), 1, '#b0a89e'); p.rect(ax - ap(1), ay, ap(16), 1, '#5a544c');
-    for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; p.set(Math.round(cx + Math.cos(a) * 3), Math.round(ay + ap(6) + Math.sin(a) * 3), '#5a544c'); }
-    p.set(cx, ay + ap(6), '#c8a050');
+    const ax = cx - ap(7), ay = yb - ap(20), AL = R5('#7a7070');
+    fillWall(p, ax, ay, ap(14), ap(12), AL[2], 'block', 7);
+    p.rect(ax - ap(1), ay - ap(2), ap(16), ap(2), AL[3]); p.rect(ax - ap(1), ay - ap(2), ap(16), 1, AL[4]); p.rect(ax - ap(1), ay, ap(16), 1, AL[0]);
+    for (let k = 0; k < 8; k++) { const a = (k / 8) * Math.PI * 2; p.set(Math.round(cx + Math.cos(a) * 3), Math.round(ay + ap(6) + Math.sin(a) * 3), AL[0]); }
+    p.set(cx, ay + ap(6), GOLD[4]);
     for (const [x, y, i] of stones) if (y >= dy) drawStone(x, y, i);
     return done(p, null, { orbAt: [0, -ap(34)] });
   });
@@ -1366,8 +1469,8 @@ export function relicSprite(taken) {
     const L = sw ? sw.pix.w : 0, sink = Math.round(L * 0.16);
     const W = ap(40), H = Math.max(ap(50), L - sink + ap(18));
     const p = mk(W, H), cx = W >> 1, yb = H - 1;
-    stoneMass(p, cx, yb - ap(7), ap(16), ap(7), '#6a5a4a', 33, { facet: ap(3), cracks: 3, flatBase: 0.8 });
-    stoneMass(p, cx + ap(9), yb - ap(3), ap(5), ap(3), '#5a4a3c', 34, { facet: ap(3), cracks: 0 });
+    stoneMass(p, cx, yb - ap(7), ap(16), ap(7), '#6a5a5e', 33, { facet: ap(3), cracks: 3, flatBase: 0.8 });
+    stoneMass(p, cx + ap(9), yb - ap(3), ap(5), ap(3), '#5a4a52', 34, { facet: ap(3), cracks: 0 });
     const entry = yb - ap(11);
     let topY = entry;
     if (sw) {
@@ -1378,7 +1481,8 @@ export function relicSprite(taken) {
         p.set(cx + (y - sw.pix.oy), topY + x, [sw.pix.d[i], sw.pix.d[i + 1], sw.pix.d[i + 2], 255]);
       }
       // the split where the blade enters the stone
-      p.rect(cx - 3, entry + 1, 7, 1, '#2a2018'); p.set(cx - 4, entry + 2, '#3a2e24'); p.set(cx + 4, entry + 2, '#3a2e24'); p.rect(cx - 3, entry, 7, 1, '#8a7a68');
+      const SR = R5('#6a5a5e');
+      p.rect(cx - 3, entry + 1, 7, 1, INK_SOFT); p.set(cx - 4, entry + 2, SR[0]); p.set(cx + 4, entry + 2, SR[0]); p.rect(cx - 3, entry, 7, 1, SR[4]);
     }
     return done(p, null, { orbAt: [0, -(yb - topY + ap(6))] });
   });
@@ -1390,10 +1494,10 @@ export function rockSprite(rx, ry, color, seed = 1, top = null) {
     const p = mk(rx * 2 + ap(6), ry * 2 + ap(6));
     stoneMass(p, p.w / 2, p.h - ry - ap(2), rx, ry, color, seed, { facet: Math.max(ap(4), Math.round(Math.min(rx, ry) / 3)), bump: 0.2, flatBase: 0.85 });
     if (top) {
-      const tc = C(top);
+      const TR = R5(top);
       for (let x = 0; x < p.w; x++) for (let y = 0; y < p.h; y++) if (p.a(x, y) && !p.a(x, y - 1)) {
-        const L = ap(2) + Math.floor(hash2(x, 0, seed) * ap(2));
-        for (let k = 0; k < L; k++) if (p.a(x, y + k)) p.set(x, y + k, k === L - 1 ? dark(tc, 0.82) : k === 0 ? light(tc, 1.06) : tc);
+        const L = ap(2) + Math.floor(hash2(x >> 1, 0, seed) * ap(2));
+        for (let k = 0; k < L; k++) if (p.a(x, y + k)) p.set(x, y + k, k === L - 1 ? TR[1] : k === 0 ? TR[3] : TR[2]);
       }
     }
     return done(p, null);
@@ -1404,7 +1508,7 @@ export function columnSprite(h, color, broken = 0, seed = 0) {
     const H = Math.round(h * PPU * 0.7), W = (ap(13) + (broken ? ap(8) : 0)) | 1;
     const p = mk(W, H + ap(6)), cx = W >> 1, yb = p.h - 1;
     const top = yb - Math.round(H * (broken ? 1 - broken : 1));
-    const c = C(color), Rm = [dark(c, 0.62), dark(c, 0.8), c, light(c, 1.12)];
+    const R = R5(color), Rm = [R[0], R[1], R[2], R[3]];
     const sh = ap(3);
     // plinth and torus
     for (let j = 0; j < 3; j++) for (let i = -ap(5); i <= ap(5); i++) p.set(cx + i, yb - 2 + j, j === 0 ? Rm[3] : j === 2 ? Rm[1] : i === -ap(5) ? Rm[3] : i === ap(5) ? Rm[1] : Rm[2]);
@@ -1414,22 +1518,20 @@ export function columnSprite(h, color, broken = 0, seed = 0) {
       const u = i / sh;
       let idx = u < -0.55 ? 3 : u < 0.05 ? 2 : u < 0.6 ? 1 : 0;
       if (i % 2 === 0 && Math.abs(i) < sh) idx = Math.max(0, idx - 1);
-      let col = Rm[idx];
-      if (hash2(cx + i, y, seed) < 0.04) col = shade(col, 0.86);
-      p.set(cx + i, y, col);
+      p.set(cx + i, y, Rm[idx]);
     }
     if (broken) {
       for (let i = -sh; i <= sh; i++) {
-        const cut = 1 + Math.floor(hash2(i, seed, 2) * ap(3));
+        const cut = 1 + Math.floor(hash2(i >> 1, seed, 2) * ap(3));
         for (let k = 0; k < cut; k++) p.clear(cx + i, top + k);
-        p.set(cx + i, top + cut, i < 1 ? light(c, 1.24) : light(c, 1.08));
+        p.set(cx + i, top + cut, i < 1 ? R[4] : R[3]);
       }
-      for (let y = yb - Math.round((yb - top) * 0.4); y < yb - 3; y++) for (let i = -sh; i <= sh; i++) if (hash2(cx + i, y, seed + 4) < 0.12 * ((y - top) / (yb - top))) p.set(cx + i, y, '#6a7a4a');
+      mossClumps(p, cx - sh, yb - Math.round((yb - top) * 0.4), sh * 2, Math.round((yb - top) * 0.4), 4, seed + 4);
       // a fallen drum at the foot
       const fx = cx + (seed % 2 ? 1 : -1) * ap(6);
       p.ellipse(fx, yb - 2, ap(3), ap(2), Rm[1]); p.ellipse(fx - 0.5, yb - 2.5, ap(3) - 1, ap(2) - 1, Rm[2]); p.ellipse(fx - 1, yb - 3, ap(1.4), 1.2, Rm[3]);
     } else {
-      p.rect(cx - ap(5), top - ap(3), ap(10) + 1, ap(3), Rm[2]); p.rect(cx - ap(5), top - ap(3), ap(10) + 1, 1, Rm[3]); p.rect(cx + ap(5), top - ap(3), 1, ap(3), Rm[1]);
+      p.rect(cx - ap(5), top - ap(3), ap(10) + 1, ap(3), Rm[2]); p.rect(cx - ap(5), top - ap(3), ap(10) + 1, 1, R[4]); p.rect(cx + ap(5), top - ap(3), 1, ap(3), Rm[1]);
       p.rect(cx - ap(4), top - 1, ap(8) + 1, 1, Rm[1]); p.rect(cx - ap(4) + 1, top, ap(8) - 1, 1, Rm[0]);
       for (const sd of [-1, 1]) p.set(cx + sd * (ap(5) - 1), top - 1, Rm[3]);
     }
@@ -1439,9 +1541,9 @@ export function columnSprite(h, color, broken = 0, seed = 0) {
 export function ruinWallSprite(wu, hu, color, seed) {
   return memo('ruin' + wu + hu + color + seed, () => {
     const W = Math.round(wu * PPU), H = Math.round(hu * PPU * 0.7), TT = ap(6);
-    const p = mk(W + 2, H + ap(10)), yb = p.h - 1;
+    const p = mk(W + 2, H + ap(10)), yb = p.h - 1, R = R5(color), M = P.moss.map((c) => C(c));
     fillWall(p, 1, yb - H, W, H, color, 'block', seed);
-    fillWall(p, 1, yb - H - TT, W, TT, light(color, 1.15), 'block', seed + 1);
+    fillWall(p, 1, yb - H - TT, W, TT, light(color, 1.13), 'block', seed + 1);
     // broken top: stepped along the block courses, crumbly at the edges
     const seg = ap(5);
     for (let x = 1; x <= W; x++) {
@@ -1453,13 +1555,14 @@ export function ruinWallSprite(wu, hu, color, seed) {
       cut = Math.min(cut, H - ap(4));
       for (let y = yb - H - TT; y < yb - H - TT + cut; y++) p.clear(x, y);
       const ty = yb - H - TT + cut;
-      if (cut > 0 && p.a(x, ty)) { p.set(x, ty, light(color, 1.24)); if (p.a(x, ty + 1)) p.set(x, ty + 1, light(color, 1.08)); }
+      if (cut > 0 && p.a(x, ty)) { p.set(x, ty, R[4]); if (p.a(x, ty + 1)) p.set(x, ty + 1, R[3]); }
     }
-    doorAt(p, Math.round(W / 2) - ap(5), yb, ap(10), Math.min(ap(18), H - ap(4)), '#2a2018', { arch: true, dark: true, frame: dark(color, 0.7) });
-    // moss on the broken tops, hanging vines, rubble at the foot
+    doorAt(p, Math.round(W / 2) - ap(5), yb, ap(10), Math.min(ap(18), H - ap(4)), P.wood[1], { arch: true, dark: true, frame: dark(color, 0.7) });
+    // moss on the broken tops (in runs a few pixels wide), hanging vines, rubble at the foot
     for (let x = 1; x <= W; x++) for (let y = 0; y < yb; y++) if (p.a(x, y) && !p.a(x, y - 1)) {
-      if (hash2(x, 1, seed) < 0.45) p.set(x, y, hash2(x, 2, seed) < 0.5 ? '#7a8a50' : '#9aa070');
-      if (hash2(x, 3, seed) < 0.08) { const L = ap(3) + Math.floor(hash2(x, 4, seed) * ap(8)); for (let k = 1; k < L; k++) if (p.a(x, y + k)) p.set(x, y + k, k % 3 === 2 ? '#7a9a50' : '#5a7040'); }
+      const run = Math.floor(x / 3);
+      if (hash2(run, 1, seed) < 0.45) { p.set(x, y, hash2(run, 2, seed) < 0.5 ? M[3] : M[4]); if (p.a(x, y + 1)) p.set(x, y + 1, M[2]); }
+      if (hash2(x, 3, seed) < 0.06) { const L = ap(3) + Math.floor(hash2(x, 4, seed) * ap(8)); for (let k = 2; k < L; k++) if (p.a(x, y + k)) p.set(x, y + k, k % 3 === 2 ? M[3] : M[2]); }
       break;
     }
     for (let k = 0; k < Math.max(2, Math.round(W / ap(14))); k++) { const rx = 1 + hash2(k, 7, seed) * W; stoneMass(p, rx, yb - 2, ap(2) + hash2(k, 8, seed) * ap(2), ap(1.6), light(color, 1.05), seed * 7 + k, { facet: ap(2), cracks: 0, flatBase: 0.7 }); }
@@ -1483,22 +1586,26 @@ export function stuckWeapon(type, seed) {
       p.set(Math.round(p.ox + (y - w.pix.oy) + lean * (x - L)), py, [w.pix.d[i], w.pix.d[i + 1], w.pix.d[i + 2], 255]);
     }
     // a little mound of churned earth
-    p.ellipse(p.ox + 0.5, yb - 0.5, ap(3.5), ap(1.5), '#4a3a2c'); p.ellipse(p.ox, yb - 1, ap(2.5), ap(1), '#6a5440');
-    p.set(p.ox - ap(2), yb - 1, '#8a7058'); p.set(p.ox + 1, yb - 2, '#7a6450');
+    const D = P.dirt;
+    p.ellipse(p.ox + 0.5, yb - 0.5, ap(3.5), ap(1.5), D[2]); p.ellipse(p.ox, yb - 1, ap(2.5), ap(1), D[4]);
+    p.set(p.ox - ap(2), yb - 1, D[6]); p.set(p.ox + 1, yb - 2, D[5]);
     return { pix: p, emis: null };
   });
 }
 // a single block of curtain wall (overlapping blocks build walls along any curve)
 export function wallBlock(color, h = 4.2, snow = false) {
   return memo('wblock' + color + h + snow, () => {
-    const BWk = ap(18), H = Math.round(h * PPU * 0.7), T = ap(12);
+    const BWk = ap(18), H = Math.round(h * PPU * 0.7), T = ap(12), R = R5(color);
     const p = mk(BWk, H + T + ap(3)), yb = p.h - 1;
     fillWall(p, 0, yb - H + 1, BWk, H, color, 'block', 3);
-    fillWall(p, 0, yb - H - T + 1, BWk, T, light(color, 1.16), 'block', 5);
-    p.rect(0, yb - H - T + 1, BWk, 1, dark(color, 0.84));
-    p.rect(0, yb - H, BWk, 1, light(color, 1.28));
+    // the walk-top (seen from above): a lit cap a step brighter than the face
+    fillWall(p, 0, yb - H - T + 1, BWk, T, R[3], 'block', 5);
+    p.rect(0, yb - H - T + 1, BWk, 1, R[1]);
+    p.rect(0, yb - H, BWk, 1, R[4]);
+    // plum shadow band under the cap lip
+    for (let x = 0; x < BWk; x++) { shadeAt(p, x, yb - H + 1, 0.66); shadeAt(p, x, yb - H + 2, 0.8); }
     merlons(p, 0, BWk, yb - H - T - 2, light(color, 1.08), snow);
-    if (snow) for (let x = 0; x < BWk; x++) { p.set(x, yb - H - T + 2, '#eef2f8'); if (hash2(x, 3, 1) < 0.6) p.set(x, yb - H - T + 3, '#d8e0ec'); p.set(x, yb - H, '#eef2f8'); }
+    if (snow) for (let x = 0; x < BWk; x++) { p.set(x, yb - H - T + 2, SNOW[3]); if (hash2(x >> 2, 3, 1) < 0.6) p.set(x, yb - H - T + 3, SNOW[2]); p.set(x, yb - H, SNOW[3]); }
     return { pix: p, emis: null };
   });
 }

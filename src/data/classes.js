@@ -2,7 +2,7 @@
 
 export const CLASSES = [
   {
-    id: 'knight', name: 'Knight', die: 1, color: '#d8c080',
+    id: 'knight', name: 'Knight', die: 1, color: '#243e7b',
     tagline: 'Oath, shield, and steel.',
     desc: 'Armoured defenders. Blocking builds Resolve; spend it on Oathbreaker, a shield charge that stuns everything in its path.',
     stats: { str: 3, vit: 3, wil: 1 },
@@ -13,7 +13,7 @@ export const CLASSES = [
     mechanic: 'Blocking and parrying build Resolve. At full Resolve you take 15% less damage.',
   },
   {
-    id: 'berserker', name: 'Berserker', die: 2, color: '#d04030',
+    id: 'berserker', name: 'Berserker', die: 2, color: '#8a3434',
     tagline: 'Rage is a weapon too.',
     desc: 'Dealing and taking damage builds Rage. Unleash Bloodfrenzy to gain lifesteal and attack speed.',
     stats: { str: 4, vit: 2, dex: 1 },
@@ -24,7 +24,7 @@ export const CLASSES = [
     mechanic: 'Hits dealt and taken build Rage, which slowly fades out of combat.',
   },
   {
-    id: 'ranger', name: 'Ranger', die: 3, color: '#70a050',
+    id: 'ranger', name: 'Ranger', die: 3, color: '#4a6e36',
     tagline: 'One breath. One arrow.',
     desc: 'Standing still while drawing builds Focus. Fully focused shots always crit. Mark Prey makes a target take more damage.',
     stats: { dex: 4, vit: 1, wil: 2 },
@@ -35,7 +35,7 @@ export const CLASSES = [
     mechanic: 'Drawing your bow while standing still builds Focus. At 100 Focus your next shot is a guaranteed crit.',
   },
   {
-    id: 'assassin', name: 'Assassin', die: 4, color: '#8060a0',
+    id: 'assassin', name: 'Assassin', die: 4, color: '#4a1a48',
     tagline: 'Strike from where they are not looking.',
     desc: 'Hits from behind always crit. Shadowmeld makes you invisible until you strike.',
     stats: { dex: 4, str: 1, int: 1, wil: 1 },
@@ -46,7 +46,7 @@ export const CLASSES = [
     mechanic: 'Attacks from behind always crit and build Shadow. Kills refund dodge stamina.',
   },
   {
-    id: 'pyromancer', name: 'Pyromancer', die: 5, color: '#ff7030',
+    id: 'pyromancer', name: 'Pyromancer', die: 5, color: '#b04a3e',
     tagline: 'Burn bright. Burn everything.',
     desc: 'Casting fire builds Heat for more damage. If Heat maxes out you overheat and explode, unless you vent it first with Flashpoint.',
     stats: { int: 4, wil: 2, vit: 1 },
@@ -57,7 +57,7 @@ export const CLASSES = [
     mechanic: 'Every 10 Heat grants 4% spell damage. At 100 Heat you overheat: an explosion that also burns you.',
   },
   {
-    id: 'cryomancer', name: 'Cryomancer', die: 6, color: '#80c8ff',
+    id: 'cryomancer', name: 'Cryomancer', die: 6, color: '#5a8fc8',
     tagline: 'Patience. Stillness. Shatter.',
     desc: 'Frost spells stack Chill on enemies; at 3 stacks they freeze. Shatter breaks frozen foes for huge damage.',
     stats: { int: 4, wil: 2, vit: 1 },
@@ -68,7 +68,7 @@ export const CLASSES = [
     mechanic: 'Freezing enemies builds Rime. You take 10% less damage from chilled enemies.',
   },
   {
-    id: 'cleric', name: 'Cleric', die: 7, color: '#fff0b0',
+    id: 'cleric', name: 'Cleric', die: 7, color: '#e2c494',
     tagline: 'The light remembers.',
     desc: 'Healing and holy damage build Devotion. Spend it on Sanctuary, a consecrated circle that heals you and burns the unholy.',
     stats: { wil: 3, vit: 2, int: 2 },
@@ -79,7 +79,7 @@ export const CLASSES = [
     mechanic: 'Heals and holy hits build Devotion. Overhealing becomes a shield.',
   },
   {
-    id: 'necromancer', name: 'Necromancer', die: 8, color: '#80e0a0',
+    id: 'necromancer', name: 'Necromancer', die: 8, color: '#2f7070',
     tagline: 'Death is a resource.',
     desc: 'Kills grant Souls. Spend Souls to raise skeletal servants that fight for you.',
     stats: { int: 4, wil: 3 },
@@ -90,7 +90,7 @@ export const CLASSES = [
     mechanic: 'Enemies that die near you leave Souls. Each Soul held grants 2% spell damage.',
   },
   {
-    id: 'bard', name: 'Bard', die: 9, color: '#e0a0e0',
+    id: 'bard', name: 'Bard', die: 9, color: '#a94a68',
     tagline: 'Every fight has a rhythm.',
     desc: 'A beat pulses at the edge of your vision. Hits landed on the beat build Tempo; each tier of Tempo strengthens your songs.',
     stats: { dex: 2, wil: 3, int: 2 },
@@ -101,7 +101,7 @@ export const CLASSES = [
     mechanic: 'Attacks and casts on the beat deal 25% more damage and build Tempo. Off-beat actions lose a little.',
   },
   {
-    id: 'alchemist', name: 'Alchemist', die: 10, color: '#a0e060',
+    id: 'alchemist', name: 'Alchemist', die: 10, color: '#6f8a52',
     tagline: 'Everything is an ingredient.',
     desc: 'Throws volatile flasks. Kills drop reagents that recharge your flasks. Transmute turns junk loot into gold or materials.',
     stats: { int: 3, dex: 2, wil: 2 },
@@ -112,7 +112,7 @@ export const CLASSES = [
     mechanic: 'Flasks recharge over time and on kills. Potions heal 50% more.',
   },
   {
-    id: 'warden', name: 'Warden', die: 11, color: '#60a060',
+    id: 'warden', name: 'Warden', die: 11, color: '#557048',
     tagline: 'The wild keeps its own.',
     desc: 'A spear-wielding protector of the wilds. Summons Thorn Totems that root foes; standing near totems builds Bark.',
     stats: { str: 2, vit: 3, wil: 2 },
@@ -123,7 +123,7 @@ export const CLASSES = [
     mechanic: 'Bark builds while near your totems or in forests. Each 25 Bark grants 5% damage reduction.',
   },
   {
-    id: 'duelist', name: 'Duelist', die: 12, color: '#e0e0f0',
+    id: 'duelist', name: 'Duelist', die: 12, color: '#60282c',
     tagline: 'A blade is a conversation.',
     desc: 'Perfect parries trigger an automatic Riposte that always crits. Style rises with clean play and falls when you get hit.',
     stats: { dex: 3, str: 2, wil: 2 },

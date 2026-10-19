@@ -6,6 +6,7 @@ import { deflateSync } from 'node:zlib';
 import { pathToFileURL } from 'node:url';
 import { Pix } from '../src/px/pix.js';
 import { DUNGEON_THEMES } from '../src/data/world.js';
+import { RAMPS } from '../src/px/palette.js';
 
 const out = process.argv[2] || '.';
 const SC = +(process.argv[3] || 2);
@@ -82,18 +83,18 @@ writeFileSync(out + '/houses-night.png', png(sheet([['wood', 'stone', 'marble', 
 
 // ---- town kit
 const krows = [];
-krows.push([...['#a02a20', '#d8a040', '#2a4a7a', '#4a7a3a'].map((c, i) => T('stall', () => pix(B.stallSprite(c, i)))), T('braz1', () => pix(B.brazierSprite(1))), T('braz14', () => pix(B.brazierSprite(1.4))), T('braz22', () => pix(B.brazierSprite(2.2))), T('braz08', () => pix(B.brazierSprite(0.8))), T('lamp', () => pix(B.lampSprite('#ffc060'))), T('lamp2', () => pix(B.lampSprite('#c0ff80')))]);
-krows.push([...[0, 1, 2, 3].map((f) => T('fountain', () => pix(B.fountainSprite(3, '#e0d8c4', f)))), T('fountain2', () => pix(B.fountainSprite(3.6, '#8a5a3a', 0))), T('fountain3', () => pix(B.fountainSprite(3, '#b08060', 0)))]);
-krows.push([...[0, 1].map((f) => T('banner', () => pix(B.bannerSprite('#b02a20', 7, f)))), T('banner2', () => pix(B.bannerSprite('#e8c050', 7, 0))), T('banner3', () => pix(B.bannerSprite('#3a4a6a', 3.6, 0))), T('banner4', () => pix(B.bannerSprite('#8a2020', 3.4, 1))),
-  T('tower', () => pix(B.towerSprite(1.4, 6.5, '#7a7a80', '#3a4250', 0, false))), T('towerd', () => pix(B.towerSprite(1.4, 6.5, '#c89a6a', '#a86a42', 0, true))), T('towerm', () => pix(B.towerSprite(1.4, 6.5, '#e8e0cc', '#b8583a', 0, false))),
-  ...['#6a6a72', '#b8845a', '#d8cfb8', '#8a6a48'].map((c) => T('wblock', () => pix(B.wallBlock(c, 4.2, false)))), T('wblocks', () => pix(B.wallBlock('#6a6a72', 4.2, true))), T('wall', () => pix(B.wallSprite(60, '#7a7a80', 4.2, 1, false))), T('walls', () => pix(B.wallSprite(60, '#7a7a80', 4.2, 1, true)))]);
-krows.push([T('pier', () => pix(B.pierSprite(Math.round(2.2 * PPU), Math.round(2.2 * PPU)))), T('boat', () => pix(B.boatSprite('#5a3a24', '#e8e0d0'))), T('boat2', () => pix(B.boatSprite('#3a4a5a', '#c8b8a0')))]);
+krows.push([...B.STYLE.wood.cloth.map((c, i) => T('stall', () => pix(B.stallSprite(c, i)))), T('braz1', () => pix(B.brazierSprite(1))), T('braz14', () => pix(B.brazierSprite(1.4))), T('braz22', () => pix(B.brazierSprite(2.2))), T('braz08', () => pix(B.brazierSprite(0.8))), T('lamp', () => pix(B.lampSprite(RAMPS.ember[4]))), T('lamp2', () => pix(B.lampSprite('#e0a0f0')))]);
+krows.push([...[0, 1, 2, 3].map((f) => T('fountain', () => pix(B.fountainSprite(3, '#d2c4a6', f)))), T('fountain2', () => pix(B.fountainSprite(3.6, '#9c6a5a', 0))), T('fountain3', () => pix(B.fountainSprite(3, '#b88a70', 0)))]);
+krows.push([...[0, 1].map((f) => T('banner', () => pix(B.bannerSprite(RAMPS.red[3], 7, f)))), T('banner2', () => pix(B.bannerSprite(RAMPS.gold[3], 7, 0))), T('banner3', () => pix(B.bannerSprite(RAMPS.teal[3], 3.6, 0))), T('banner4', () => pix(B.bannerSprite(RAMPS.lavender[2], 3.4, 1))),
+  T('tower', () => pix(B.towerSprite(1.4, 6.5, B.STYLE.stone.wall[0], B.STYLE.stone.roof[0], 0, false))), T('towerd', () => pix(B.towerSprite(1.4, 6.5, B.STYLE.desert.wall[0], B.STYLE.desert.roof[0], 0, true))), T('towerm', () => pix(B.towerSprite(1.4, 6.5, B.STYLE.marble.wall[0], B.STYLE.marble.roof[0], 0, false))),
+  ...['stone', 'desert', 'marble', 'port'].map((st) => T('wblock', () => pix(B.wallBlock(B.STYLE[st].wall[1], 4.2, false)))), T('wblocks', () => pix(B.wallBlock(B.STYLE.stone.wall[1], 4.2, true))), T('wall', () => pix(B.wallSprite(60, '#7a7a80', 4.2, 1, false))), T('walls', () => pix(B.wallSprite(60, '#7a7a80', 4.2, 1, true)))]);
+krows.push([T('pier', () => pix(B.pierSprite(Math.round(2.2 * PPU), Math.round(2.2 * PPU)))), T('boat', () => pix(B.boatSprite(RAMPS.wood[2], '#e2d4b4'))), T('boat2', () => pix(B.boatSprite('#3a4a5a', '#c8b8a0')))]);
 writeFileSync(out + '/townkit.png', png(sheet(krows), SC));
-writeFileSync(out + '/townkit-night.png', png(sheet([[T('lamp', () => lit(B.lampSprite('#ffc060'))), T('braz', () => lit(B.brazierSprite(1.4))), T('tower', () => lit(B.towerSprite(1.4, 6.5, '#7a7a80', '#3a4250', 0, false))), T('ws', () => lit(B.waystoneSprite(true))), T('fountain', () => lit(B.fountainSprite(3, '#e0d8c4', 0)))]]), SC, [20, 22, 30]));
+writeFileSync(out + '/townkit-night.png', png(sheet([[T('lamp', () => lit(B.lampSprite(RAMPS.ember[4]))), T('braz', () => lit(B.brazierSprite(1.4))), T('tower', () => lit(B.towerSprite(1.4, 6.5, B.STYLE.stone.wall[0], B.STYLE.stone.roof[0], 0, false))), T('ws', () => lit(B.waystoneSprite(true))), T('fountain', () => lit(B.fountainSprite(3, '#e0d8c4', 0)))]]), SC, [20, 22, 30]));
 
 // ---- sites
 const srows = [];
-srows.push([T('ws0', () => pix(B.waystoneSprite(false))), T('ws1', () => pix(B.waystoneSprite(true))), T('cr', () => pix(B.crystalSprite('#a0d8ff', Math.round(12 * PPU / 10)))), T('cr2', () => pix(B.crystalSprite('#808890', Math.round(12 * PPU / 10)))), T('shrine', () => pix(B.shrineSprite())), T('relic0', () => pix(B.relicSprite(false))), T('relic1', () => pix(B.relicSprite(true))),
+srows.push([T('ws0', () => pix(B.waystoneSprite(false))), T('ws1', () => pix(B.waystoneSprite(true))), T('cr', () => pix(B.crystalSprite('#c87ef0', Math.round(12 * PPU / 10)))), T('cr2', () => pix(B.crystalSprite(RAMPS.stone[4], Math.round(12 * PPU / 10)))), T('shrine', () => pix(B.shrineSprite())), T('relic0', () => pix(B.relicSprite(false))), T('relic1', () => pix(B.relicSprite(true))),
   ...['sword', 'spear', 'greatsword'].map((t, i) => T('stuck', () => pix(B.stuckWeapon(t, i))))]);
 const ents = [];
 const biomeOf = { bandit_hideout: 'wastes', beast_den: 'frost', glass_cavern: 'wastes', void_rift: 'wastes', dragon_lair: 'wastes', fungal_warren: 'verdant', pirate_cove: 'coast' };
@@ -108,7 +109,7 @@ writeFileSync(out + '/sites-night.png', png(sheet([Object.entries(DUNGEON_THEMES
 
 // ---- dungeon dressing
 const drows = [];
-const types = ['barrel', 'crate', 'coffin', 'urn', 'candles', 'anvil', 'anchor', 'minecart', 'nest', 'shell', 'gold_pile', 'bones', 'campfire', 'tent'];
+const types = ['barrel', 'crate', 'coffin', 'urn', 'candles', 'anvil', 'anchor', 'minecart', 'nest', 'shell', 'gold_pile', 'bones', 'campfire', 'tent', 'statue'];
 drows.push(types.map((t) => T(t, () => pix(DP.dpropSprite(t, 0)))));
 drows.push(types.map((t) => T(t, () => pix(DP.dpropSprite(t, 2)))));
 drows.push([T('c0', () => pix(DP.chestSprite(false, false))), T('c1', () => pix(DP.chestSprite(true, false))), T('c2', () => pix(DP.chestSprite(false, true))), T('c3', () => pix(DP.chestSprite(true, true))),
@@ -124,7 +125,7 @@ for (const [id, th] of Object.entries(DUNGEON_THEMES)) {
     const t = DP.dungeonTiles({ ...th, name: id }, Tt, WP);
     const n = 4, room = new Pix(Tt * n, Tt * (n + 1) + WP);
     const y0 = Tt + WP;
-    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) room.blit(t.floor[(i * 3 + j * 5) % t.floor.length], i * Tt, y0 + j * Tt);
+    for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) { const set = (i + j) % 4 === 0 && t.floorDark ? t.floorDark : i === 3 && t.floorWorn ? t.floorWorn : t.floor; room.blit(set[(i * 3 + j * 5) % 6], i * Tt, y0 + j * Tt); }
     // a wall row on top: caps + faces
     for (let i = 0; i < n; i++) { room.blit(t.top, i * Tt, 0); room.blit(t.front, i * Tt, Tt); }
     // and one free-standing block in the room
@@ -136,5 +137,20 @@ for (const [id, th] of Object.entries(DUNGEON_THEMES)) {
 }
 if (row.length) trows.push(row);
 writeFileSync(out + '/dtiles.png', png(sheet(trows, 6), SC === 2 ? 1 : SC - 1));
+{
+  const ids = Object.keys(DUNGEON_THEMES);
+  const litRows = trows.map((r, ri) => r.map((room, ci) => {
+    if (!room) return null;
+    const th = DUNGEON_THEMES[ids[ri * 5 + ci]], lc = th.light.match(/\w\w/g).map((h) => parseInt(h, 16) / 255);
+    const q = room.clone(), lx = q.w * 0.5, ly = q.h * 0.42, R = q.w * 0.75;
+    for (let y = 0; y < q.h; y++) for (let x = 0; x < q.w; x++) {
+      const i = (y * q.w + x) * 4, f = Math.max(0, 1 - Math.hypot(x - lx, y - ly) / R);
+      const band = Math.round(f * 4) / 4;
+      for (let c = 0; c < 3; c++) q.d[i + c] = Math.min(255, q.d[i + c] * Math.min(1.15, 0.29 + band * 1.1 * lc[c]));
+    }
+    return q;
+  }));
+  writeFileSync(out + '/dtiles-lit.png', png(sheet(litRows, 6), SC === 2 ? 1 : SC - 1, [8, 6, 12]));
+}
 
 console.log('done', fails ? fails + ' failures' : 'ok');
