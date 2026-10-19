@@ -365,7 +365,7 @@ export class Actor {
     this.shadowInfo = null;
     if (this.hidden) return;
     const e = this.ent;
-    if (e.dead && e.deathT > (e.isPlayer ? 1e9 : 2.6) && Math.floor(e.deathT * 14) % 2) return;
+    if (e.dead && e.deathT > (e.isPlayer || e.isRemote ? 1e9 : 2.6) && Math.floor(e.deathT * 14) % 2) return;
     const x = Math.round(e.pos.x * PPU - view.x0);
     const h = e.pos.y - view.ground(e.pos.x, e.pos.z);
     const y = Math.round(e.pos.z * PPU - view.y0 - h * PPU);

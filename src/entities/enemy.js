@@ -15,7 +15,7 @@ import { bus } from '../core/events.js';
 import { segmentBlocked } from '../systems/collision.js';
 import { dungeonLOS, dungeonFlowDir } from '../world/dungeonQuery.js';
 import { groundHeight } from '../world/terrain.js';
-import { angleDiff, clamp } from '../core/math.js';
+import { angleDiff, clamp, dampAngle } from '../core/math.js';
 import { rand, pick, chance } from '../core/rng.js';
 
 const ELITE_AFFIXES = [
@@ -41,7 +41,9 @@ export class Enemy extends Entity {
     this.elite = !this.boss && !tpl.ally && (opts.elite || false);
     this.ally = !!tpl.ally || !!opts.ally;
     this.team = this.ally ? 'player' : 'enemy';
-    this.affix = this.elite ? pick(ELITE_AFFIXES) : null;
+    this.spawnOpts = opts;      // co-op: the host sends these so guests build the same enemy
+    this.affix = this.elite ? (ELITE_AFFIXES.find((a) => a.id === opts.affix) || pick(ELITE_AFFIXES)) : null;
+    this.seed = opts.seed ?? this.id;
     this.name = (this.affix ? this.affix.name + ' ' : '') + (opts.name || tpl.name);
     const mult = this.boss ? (this.world ? 12 : tpl.final ? 16 : 7) : this.elite ? 2.6 : 1;
     const sl = S(this.level);
@@ -91,7 +93,7 @@ export class Enemy extends Entity {
     this.rival = !!tpl.rival;
     this.weaponType = tpl.weapon;
     // model
-    const actor = new Actor(this, enemySpec(tpl, { scale: (opts.scale || 1) * (this.elite ? 1.18 : 1), rarity: this.boss ? 'epic' : this.elite ? 'rare' : 'common', ilvl: this.level, seed: this.id }));
+    const actor = new Actor(this, enemySpec(tpl, { scale: (opts.scale || 1) * (this.elite ? 1.18 : 1), rarity: this.boss ? 'epic' : this.elite ? 'rare' : 'common', ilvl: this.level, seed: this.seed }));
     this.attachModel(actor);
     this.st.runSpeed = this.speed;
     this.st.heavy = tpl.size > 1.3;
@@ -149,7 +151,7 @@ export class Enemy extends Entity {
       if (d < bd && this.canSee(p)) { bd = d; best = p; }
     }
     for (const e of G.entities) {
-      if (e.dead || e.team !== 'player') continue;
+      if (e.dead || e.team !== 'player' || e.away || e.stealthed) continue;
       const d = (e.pos.x - this.pos.x) ** 2 + (e.pos.z - this.pos.z) ** 2;
       if (d < bd * (e.decoy ? 4 : 1) && this.canSee(e)) { bd = d; best = e; }
     }
@@ -171,6 +173,7 @@ export class Enemy extends Entity {
       if (this.deathT > 3.5) this.removeModel();
       return;
     }
+    if (this.netPuppet) { this.puppetUpdate(dt); return; }
     if (this.lifeTime) { this.lifeTime -= dt; if (this.lifeTime <= 0) { this.hp = 0; this.dead = true; burst(this.pos.x, this.pos.y + 1, this.pos.z, { count: 20, color: '#80ffa0' }); this.removeModel(); return; } }
     if (this.flying) this.flyH = 1.2 + Math.sin(this.st.t * 2 + this.id) * 0.3;
     if (this.elite && Math.random() < dt * 6) particle({ x: this.pos.x + rand(-0.6, 0.6), y: this.pos.y + rand(0.2, this.height), z: this.pos.z + rand(-0.6, 0.6), vy: 1.4, life: 0.6, size: 0.3, color: this._eliteColor });
@@ -264,6 +267,38 @@ export class Enemy extends Entity {
     this.syncModel(dt);
   }
 
+  // co-op guest: this enemy lives in the host's game. Follow its reports and replay the attacks the
+  // host starts, so its swings and spells land on this player exactly where they see them.
+  puppetUpdate(dt) {
+    const n = this.net;
+    if (this.flying) this.flyH = 1.2 + Math.sin(this.st.t * 2 + this.id) * 0.3;
+    if (this.elite && Math.random() < dt * 6) particle({ x: this.pos.x + rand(-0.6, 0.6), y: this.pos.y + rand(0.2, this.height), z: this.pos.z + rand(-0.6, 0.6), vy: 1.4, life: 0.6, size: 0.3, color: this._eliteColor });
+    this.moveSpeedNow = 0;
+    if (n.ph > this.phase) this.enterPhase(n.ph);
+    if (n.flags & 1) this.frozen = Math.max(this.frozen || 0, 0.2);
+    if (n.flags & 2) this.stun = Math.max(this.stun || 0, 0.2);
+    if (n.flags & 8) this.st.hitT = 1;
+    if (this.atk) {
+      this.updateAttack(dt);
+      if (!this.charging && !this.burrowPhase) this.follow(n, dt, 2.5);
+    } else {
+      this.model.hidden = !!(n.flags & 4);
+      this.follow(n, dt, 10);
+      this.facing = dampAngle(this.facing, n.f, 12, dt);
+      this.moveSpeedNow = n.ms;
+    }
+    this.syncModel(dt);
+  }
+
+  follow(n, dt, rate) {
+    const age = Math.min(0.25, G.realTime - n.at);
+    const tx = n.x + n.vx * age, tz = n.z + n.vz * age;
+    const dx = tx - this.pos.x, dz = tz - this.pos.z;
+    if (dx * dx + dz * dz > 64) { this.pos.x = tx; this.pos.z = tz; return; }
+    const k = Math.min(1, dt * rate);
+    this.pos.x += dx * k; this.pos.z += dz * k;
+  }
+
   enterPhase(n) {
     this.phase = n;
     this.speed *= 1.12;
@@ -338,6 +373,7 @@ export class Enemy extends Entity {
       }
     }
     if (a.type === 'storm') this.stormLeft = a.count, this.stormT = 0;
+    G.net?.enemyAttack(this, i);
   }
 
   updateAttack(dt) {
@@ -632,11 +668,18 @@ function groundY(x, z) { return G.realm === 'dungeon' ? (G.dungeon?.floorY ?? 0)
 
 // Game-time timers (respect pause/hitstop)
 const timers = [];
-export function setTimeoutGame(delay, fn) { timers.push({ t: delay, fn }); }
+// a timer set while a co-op partner's actions replay keeps their events muted when it fires
+export function setTimeoutGame(delay, fn) { timers.push({ t: delay, fn, muted: bus.muted }); }
 export function updateTimers(dt) {
   for (let i = timers.length - 1; i >= 0; i--) {
     timers[i].t -= dt;
-    if (timers[i].t <= 0) { const f = timers[i].fn; timers.splice(i, 1); f(); }
+    if (timers[i].t <= 0) {
+      const { fn, muted } = timers[i];
+      timers.splice(i, 1);
+      const prev = bus.muted;
+      bus.muted = muted;
+      try { fn(); } finally { bus.muted = prev; }
+    }
   }
 }
 export function clearTimers() { timers.length = 0; }

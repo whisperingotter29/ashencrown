@@ -159,9 +159,11 @@ function dpropFor(type, rng) {
 }
 
 // ------------------------------------------------------------------- enter / exit
-export function enterDungeon(def, returnPos) {
+// seed: co-op guests build the host's layout
+export function enterDungeon(def, returnPos, seed) {
   const theme = DUNGEON_THEMES[def.theme];
-  const rng = new RNG(hashStr(def.id) + (G.char.cleared[def.id] ? G.char.deaths + G.char.day : 0));
+  seed ??= hashStr(def.id) + (G.char.cleared[def.id] ? G.char.deaths + G.char.day : 0);
+  const rng = new RNG(seed);
   const size = { small: 4, medium: 5, large: 7 }[def.size] || 5;
   const lay = theme.layout === 'cave' ? genCave(rng, size) : theme.layout === 'maze' ? genMaze(rng, size - 1) : genRooms(rng, size);
   const tile = theme.layout === 'maze' ? 3.2 : 3.6;
@@ -171,7 +173,7 @@ export function enterDungeon(def, returnPos) {
   const d = {
     def, theme, tile, w: lay.W, h: lay.H, grid: lay.grid, ox: OX, oz: OZ, floorY: 0, rooms: lay.rooms, entrance: lay.entrance, maze: lay.maze,
     objs: [], lights: [], chests: [], flow: new Int16Array(lay.W * lay.H).fill(-1), flowTile: -1,
-    returnPos: returnPos.clone(), returnRealm: G.realm, bossDead: !!G.char.cleared[def.id] && false, shiftT: 26, rng, fires: [],
+    returnPos: returnPos.clone(), returnRealm: G.realm, bossDead: !!G.char.cleared[def.id] && false, shiftT: 26, rng, seed, fires: [],
   };
   G.dungeon = d;
   G.realm = 'dungeon';
@@ -536,6 +538,30 @@ export function placeChest(d, x, z, o) {
   return chest;
 }
 
+// co-op guests: the host's boss arrives as a mirrored enemy; it opens the hoard here too
+export function adoptDungeonBoss(b) {
+  const d = G.dungeon;
+  if (!d || d.boss === b) return;
+  d.boss = b;
+  b.dungeonBoss = true;
+  b.onKilled = () => onBossDead(d, b);
+}
+
+// co-op guests: the host moved the labyrinth's walls
+export function applyMazeGrid(grid) {
+  const d = G.dungeon;
+  if (!d?.maze || grid.length !== d.grid.length) return;
+  for (let i = 0; i < grid.length; i++) d.grid[i] = grid.charCodeAt(i) - 48;
+  const p = G.player;
+  const ex = Math.floor((p.pos.x - OX) / d.tile), ez = Math.floor((p.pos.z - OZ) / d.tile);
+  if (ex > 0 && ez > 0 && ex < d.w - 1 && ez < d.h - 1) d.grid[ez * d.w + ex] = 0;
+  refreshMazeWalls(d, false);
+  d.flowTile = -1;
+  d.shiftT = 28; d.warned = false;
+  addShake(0.4);
+  bus.emit('mazeShift');
+}
+
 function onBossDead(d, b) {
   if (d.bossDead) return;
   d.bossDead = true;
@@ -567,7 +593,8 @@ export function updateDungeon(dt) {
   if (Math.random() < dt * 12) particle({ x: p.pos.x + (Math.random() - 0.5) * 30, y: Math.random() * 4, z: p.pos.z + (Math.random() - 0.5) * 30, vx: (Math.random() - 0.5) * 0.3, vy: 0.1, vz: (Math.random() - 0.5) * 0.3, life: 4, size: 0.12, color: d.theme.accent, intensity: 1.2, drag: 0 });
   // living labyrinth: the walls move
   if (d.maze) {
-    d.shiftT -= dt;
+    // co-op guests wait for the host to move the walls (it warns at the same time)
+    if (G.net?.role !== 'guest' || d.shiftT > 2) d.shiftT -= dt;
     if (d.shiftT < 3 && !d.warned) { d.warned = true; bus.emit('toast', 'The labyrinth groans. The walls are about to move...'); addShake(0.2); }
     if (d.shiftT <= 0) {
       d.shiftT = 28; d.warned = false;
@@ -587,6 +614,7 @@ export function updateDungeon(dt) {
       d.flowTile = -1;
       addShake(0.4);
       bus.emit('mazeShift');
+      G.net?.mazeShifted(d);
     }
     let changed = false;
     const W_ = d.walls;

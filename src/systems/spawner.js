@@ -26,6 +26,8 @@ export function addEntity(e) { G.entities.push(e); return e; }
 
 export function spawnEnemy(id, level, x, z, opts = {}) {
   if (!ENEMIES[id]) { console.warn('unknown enemy', id); return null; }
+  // co-op guests see the host's enemies; only their own summons are theirs to make
+  if (G.net?.role === 'guest' && !opts.ally) return null;
   const e = new Enemy(id, level, x, z, opts);
   return addEntity(e);
 }
@@ -70,24 +72,41 @@ function pickTable(biome) {
   return t;
 }
 
+// every hero the wilds spawn around: this player plus co-op partners in the same place
+function heroes() {
+  const list = [G.player];
+  if (G.net) for (const g of G.net.ghosts()) if (!g.away) list.push(g);
+  return list;
+}
+function nearestHero(x, z, list) {
+  let best = 1e9;
+  for (const h of list) best = Math.min(best, Math.hypot(h.pos.x - x, h.pos.z - z));
+  return best;
+}
+
 export function updateSpawner(dt) {
   const p = G.player;
   if (!p || G.realm === 'dungeon') return;
+  spawnT -= dt;
+  // co-op guests: the host spawns the enemies; town folk are local
+  if (G.net?.role === 'guest') { if (spawnT <= 0) { spawnT = 0.9; updateTownNpcs(p); } return; }
+  const hs = heroes();
   // despawn far enemies
   for (const e of G.entities) {
     if (e.removed || e.isNpc || e.team === 'player') continue;
-    const d = Math.hypot(e.pos.x - p.pos.x, e.pos.z - p.pos.z);
+    const d = nearestHero(e.pos.x, e.pos.z, hs);
     if (d > (e.boss ? 220 : 140)) { e.removeModel(); e.dead = true; e.despawned = true; }
   }
-  spawnT -= dt;
   if (spawnT <= 0) {
     spawnT = 0.9;
-    const inTown = isTownNear(p.pos.x, p.pos.z, 30);
+    // packs appear around a random hero; a bigger party gets a busier world
+    const anchor = hs[Math.floor(Math.random() * hs.length)];
+    const inTown = isTownNear(anchor.pos.x, anchor.pos.z, 30);
     const n = liveEnemies().filter((e) => !e.camp && !e.world && !e.questTag).length;
-    if (!inTown && n < MAX_OPEN) {
+    if (!inTown && n < MAX_OPEN * (1 + (hs.length - 1) * 0.5)) {
       // spawn a pack just off-screen
       const a = Math.random() * Math.PI * 2, r = rand(46, 72);
-      const x = p.pos.x + Math.cos(a) * r, z = p.pos.z + Math.sin(a) * r;
+      const x = anchor.pos.x + Math.cos(a) * r, z = anchor.pos.z + Math.sin(a) * r;
       if (!isTownNear(x, z, 40) && goodSpot(x, z)) {
         const biome = primaryBiome(x, z, G.realm);
         const lvl = dangerLevel(x, z, G.realm);
@@ -103,9 +122,9 @@ export function updateSpawner(dt) {
         }
       }
     }
-    updateCamps(p);
+    updateCamps(hs);
     updateHunts(p);
-    updateWorldBosses(p);
+    updateWorldBosses(p, hs);
     updateTownNpcs(p);
   }
 }
@@ -138,12 +157,12 @@ function updateHunts(p) {
 }
 
 // Fixed camps near dungeon entrances & on the road: bandits around their fires, beasts at dens.
-function updateCamps(p) {
+function updateCamps(hs) {
   if (G.realm !== 'surface' && G.realm !== 'deep') return;
   for (const d of DUNGEONS) {
     if ((d.realm || 'surface') !== G.realm) continue;
     const key = 'camp:' + d.id;
-    const dist = Math.hypot(d.x - p.pos.x, d.z - p.pos.z);
+    const dist = nearestHero(d.x, d.z, hs);
     if (dist < 90 && dist > 30 && !campsAlive.has(key) && (campCooldown.get(key) || 0) < G.time) {
       const theme = d.theme;
       const pool = d.denOf || { bandit_hideout: ['bandit', 'bandit_archer'], pirate_cove: ['corsair', 'corsair_gunner'], cursed_crypt: ['skeleton', 'skeleton_archer'], void_rift: ['void_wretch'], fungal_warren: ['fungal_shambler', 'spore_sprite'], glass_cavern: ['glass_beetle'], frozen_citadel: ['frozen_knight', 'frost_wolf'], sunken_temple: ['drowned_sailor', 'tidecrab'], marble_vault: ['gilded_revenant', 'looter'], dwarven_deephall: ['deep_crawler'], dragon_lair: ['drakeling', 'ember_cultist'], buried_colossus: ['sand_wraith', 'ash_scorpion'], living_labyrinth: ['thornwolf'] }[theme] || ['bandit'];
@@ -163,12 +182,12 @@ function updateCamps(p) {
   }
 }
 
-function updateWorldBosses(p) {
+function updateWorldBosses(p, hs) {
   for (const wb of WORLD_BOSSES) {
     if ((wb.realm || 'surface') !== G.realm) continue;
     const st = wbState[wb.id] || (wbState[wb.id] = { alive: null });
     const cond = !wb.cond || (wb.cond === 'night' ? isNight() : G.weather?.id === wb.cond && G.biome === wb.biome);
-    const dist = Math.hypot(wb.x - p.pos.x, wb.z - p.pos.z);
+    const dist = nearestHero(wb.x, wb.z, hs);
     const respawnAt = G.char.worldBossTimers[wb.id] || 0;
     if (!st.alive && cond && dist < wb.roam + 120 && G.time > respawnAt) {
       const a = Math.random() * Math.PI * 2;
@@ -221,8 +240,11 @@ function updateTownNpcs(p) {
 }
 
 export function clearSpawns(keepNpcs = false) {
-  for (const e of G.entities) { if (keepNpcs && e.isNpc) continue; e.removeModel(); }
-  G.entities = keepNpcs ? G.entities.filter((e) => e.isNpc) : [];
+  // co-op partners' heroes stay
+  const keep = (e) => e.isRemote || (keepNpcs && e.isNpc);
+  for (const e of G.entities) { if (keep(e)) continue; e.removeModel(); }
+  G.entities = G.entities.filter(keep);
+  G.net?.onSpawnsCleared();
   campsAlive.clear();
   for (const k in wbState) wbState[k].alive = null;
   if (!keepNpcs) townNpcs.clear();

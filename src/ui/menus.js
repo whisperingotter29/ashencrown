@@ -22,6 +22,7 @@ import { FACTIONS, TOWNS, DEEP_TOWNS, DUNGEONS, WAYSTONES, SHRINES, BIOMES, WORL
 import { repTier } from '../systems/factions.js';
 import { MAP } from '../world/mapdata.js';
 import { refreshSkillbar } from './hud.js';
+import { openCoop } from './coop.js';
 import { bus } from '../core/events.js';
 import { trackedObjectiveMarkers } from '../systems/quests.js';
 import { R, applySettings } from '../render/renderer.js';
@@ -776,6 +777,16 @@ function initMapView(view) {
       g.beginPath(); g.moveTo(0, -6 * p); g.lineTo(4 * p, 5 * p); g.lineTo(0, 2 * p); g.lineTo(-4 * p, 5 * p); g.closePath();
       g.fillStyle = '#fff4dc'; g.fill(); g.strokeStyle = '#140f1c'; g.lineWidth = p; g.stroke(); g.restore();
     }
+    // co-op partners
+    if (G.net && G.realm === mapView.realm) {
+      const p = u();
+      for (const pg of G.net.ghosts()) {
+        if (pg.away) continue;
+        const [gx, gy] = toScreen(pg.pos.x, pg.pos.z);
+        g.fillStyle = '#140f1c'; g.fillRect(Math.round(gx) - 4 * p, Math.round(gy) - 4 * p, 8 * p, 8 * p);
+        g.fillStyle = '#a8d0ec'; g.fillRect(Math.round(gx) - 3 * p, Math.round(gy) - 3 * p, 6 * p, 6 * p);
+      }
+    }
   }
   mapView.draw = draw;
   let drag = null;
@@ -823,7 +834,7 @@ function initMapView(view) {
 const SYS_TABS = [['main', 'Menu'], ['settings', 'Settings'], ['controls', 'Controls']];
 const sysTab = (t) => (t === 'settings' ? openSettings() : t === 'controls' ? openControls() : openPause());
 export function openPause() {
-  const { w, body } = windowFrame('Paused', G.char ? SYS_TABS : null, 'main', sysTab, { id: 'system', cls: 'sys-win pause-win', hints: [['Esc', 'Resume']] });
+  const { w, body } = windowFrame(G.net ? 'Menu' : 'Paused', G.char ? SYS_TABS : null, 'main', sysTab, { id: 'system', cls: 'sys-win pause-win', hints: [['Esc', 'Resume']] });
   const col = el('div', 'pause');
   const c = G.char;
   if (c) {
@@ -834,6 +845,7 @@ export function openPause() {
   const btns = el('div', 'pbtns');
   const mk = (t, fn, cls = '') => { const b = el('button', cls, t); b.onclick = fn; btns.appendChild(b); };
   mk('Resume', closeModal, 'primary');
+  if (c) mk(G.net ? (G.net.isHost ? `Co-op · room ${G.net.code}` : 'Co-op · in a party') : 'Co-op', openCoop);
   if (c) mk('Save game', () => { saveGame(0) ? toast('Game saved.') : toast('Save failed.'); });
   mk('Settings', openSettings);
   mk('Controls', openControls);
@@ -894,7 +906,7 @@ const CONTROLS_KB = [
   ['W+A+S+D', 'Move'], ['Mouse', 'Aim'], ['Left Click', 'Attack (hold to keep attacking)'], ['Right Click', 'Block · tap just before a hit to parry'],
   ['Space', 'Dodge roll'], ['Shift', 'Sprint'], ['1+2+3+4', 'Switch weapon slot'], ['Q+E+R', 'Abilities of the weapon in hand (hold to keep casting)'],
   ['X', 'Class signature'], ['F', 'Interact · talk · loot'], ['Z', 'Health potion'], ['V', 'Mana potion'], ['G', 'Mount'],
-  ['I', 'Inventory (also Tab)'], ['C', 'Character'], ['K', 'Skills'], ['J', 'Journal'], ['M', 'Map & fast travel'], ['H', 'Controls'], ['Esc', 'Menu · close'],
+  ['I', 'Inventory (also Tab)'], ['C', 'Character'], ['K', 'Skills'], ['J', 'Journal'], ['M', 'Map & fast travel'], ['H', 'Controls'], ['Enter', 'Party chat (co-op)'], ['Esc', 'Menu · close · co-op'],
 ];
 const CONTROLS_PAD = [
   ['L Stick', 'Move'], ['R Stick', 'Aim'], ['RT', 'Attack'], ['LT', 'Block · parry'], ['A', 'Dodge roll'], ['L3', 'Sprint'],
@@ -916,13 +928,13 @@ export function openControls() {
 }
 
 // ===================================================================== DEATH
-export function showDeath(onRespawn) {
+export function showDeath(onRespawn, note) {
   const d = el('div', 'death', `<div class="t"></div><div class="death-sub">The dice are not finished with you.</div>`);
   d.querySelector('.t').appendChild(pxTitle('You have fallen', window.innerWidth < 1100 ? 3 : 4, { bands: ['#ecc6a8', '#d9765a', '#b04a3e', '#4a1420'] }));
   const b = el('button', 'primary', 'Rise again');
   b.onclick = () => { d.remove(); onRespawn(); };
   d.appendChild(b);
-  d.appendChild(el('div', 'death-note', 'You will wake at the last waystone you touched, lighter by a tenth of your gold.'));
+  d.appendChild(el('div', 'death-note', esc(note || 'You will wake at the last waystone you touched, lighter by a tenth of your gold.')));
   root().appendChild(d);
 }
 

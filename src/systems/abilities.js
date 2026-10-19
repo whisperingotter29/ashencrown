@@ -72,8 +72,21 @@ export function useAbility(player, id, quiet = false) {
   player.cooldowns[id] = def.cd || 0.5;
   player.lastCombatT = G.time;
   if (magicOn() && kind !== 'spell') abilityFlourish(player, def.element || player.derived.weapon.element || (def.caster ? 'void' : '#ffd890'), kind === 'combo');
+  G.net?.act(player, 'ab', { id, ax: player.aim.x, az: player.aim.z });
   bus.emit('abilityUsed', { id, kind, def });
   return true;
+}
+
+// A co-op partner's ability, played out on their stand-in hero: same visuals, no costs or checks.
+// Its hits are only for show (the partner's own game deals the damage).
+export function replayAbility(player, id) {
+  const a = abilityDef(id);
+  if (!a) return;
+  const { kind, def } = a;
+  if (player.action) { player.action = null; player.st.action = null; player.drawing = false; }
+  if (kind === 'spell') castSpell(player, def);
+  else useSkill(player, def, kind === 'combo');
+  if (magicOn() && kind !== 'spell') abilityFlourish(player, def.element || player.derived.weapon.element || (def.caster ? 'void' : '#ffd890'), kind === 'combo');
 }
 
 function aimAngle(p) { return Math.atan2(p.aim.x - p.pos.x, p.aim.z - p.pos.z); }
@@ -315,7 +328,7 @@ function startChannel(p, s, base, el, color) {
     tick: (dt) => {
       const a = p.action;
       const k = keyForAbility(s.id);
-      const held = !!k && input.down.has(k);
+      const held = p.isRemote ? !!p.netHeld : !!k && input.down.has(k);
       if (!held) { a.stop = true; return; }
       if (s.hpCost) { const c = p.maxHp * s.hpCost * dt * 3; if (p.hp <= c + 1) { a.stop = true; return; } p.hp -= c; }
       else if (!p.useMana(cost * dt * 3)) { a.stop = true; return; }

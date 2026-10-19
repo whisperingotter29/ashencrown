@@ -54,6 +54,8 @@ import { startFateTable, updateFate, fateActive } from './ui/fate.js';
 import { initAudio, setMusic, audioReady } from './audio/audio.js';
 import { xpToNext } from './systems/stats.js';
 import { desktop } from './core/desktop.js';
+import { hostGame, joinGame } from './net/session.js';
+import { initCoop, updateCoop, openCoop } from './ui/coop.js';
 import './systems/achievements.js';
 
 // ============================================================================ boot
@@ -74,6 +76,7 @@ initQuestMarkers();
 initWeather();
 initStructures();
 initClassMechanics();
+initCoop();
 initProgression();
 initQuests();
 initFactions();
@@ -90,7 +93,7 @@ ambientFx(() => {
 const params = new URLSearchParams(location.search);
 window.__G = G;
 // live module handles for automated testing
-window.__dbg = { forceWeather, cam, atmo, R, spawnEnemy, enterDungeon, terrain, input, worldToScreen, queryColliders, groundHeight };
+window.__dbg = { forceWeather, cam, atmo, R, spawnEnemy, enterDungeon, terrain, input, worldToScreen, queryColliders, groundHeight, hostGame, joinGame };
 
 
 // ============================================================================ title
@@ -117,6 +120,10 @@ function showTitle() {
     b.onclick = () => begin(() => continueGame());
     menu.appendChild(b);
     menu.appendChild(el('div', 'saveinfo', `${esc(info.name)} · Level ${info.level} ${esc(RACE_BY_ID[info.race]?.name || '')} ${esc(CLASS_BY_ID[info.cls]?.name || '')}`));
+    // co-op: load this hero, then host or join from the Co-op window
+    const cp = el('button', '', 'Co-op · Play with friends');
+    cp.onclick = () => begin(() => { coopAfterLoad = true; continueGame(); });
+    menu.appendChild(cp);
   }
   const nb = el('button', info ? '' : 'primary', 'New Game · Roll the Fates');
   nb.onclick = () => begin(() => newGame());
@@ -267,6 +274,7 @@ function migrateChar(c) {
 
 // ============================================================================ world entry
 let loadingUI = null;
+let coopAfterLoad = false;
 function enterWorld(realm, x, z, after) {
   G.mode = 'loading';
   hideHud();
@@ -299,6 +307,7 @@ function enterWorld(realm, x, z, after) {
       refreshSkillbar();
       lastBiome = null; lastTown = null;
       after && after();
+      if (coopAfterLoad) { coopAfterLoad = false; setTimeout(() => { if (G.mode === 'play' && !G.menuOpen) openCoop(); }, 900); }
       return;
     }
     setTimeout(wait, 30);
@@ -349,12 +358,20 @@ function promptFor(f) {
   return it.label;
 }
 
+// co-op guests go where the party leader takes them
+function leaderOnly() {
+  if (!G.net || G.net.isHost) return false;
+  toast('Your party leader decides where the party goes.');
+  return true;
+}
+
 function interact(f) {
   if (!f || interactCooldown > 0) return;
   interactCooldown = 0.4;
   if (f.kind === 'npc') { talkTo(f.npc); return; }
   const it = f.it;
   const c = G.char;
+  if ((it.kind === 'dungeon' || it.kind === 'exit' || it.kind === 'gate') && leaderOnly()) return;
   switch (it.kind) {
     case 'waystone': {
       if (!c.discovered.waystones.includes(it.data.id)) {
@@ -421,19 +438,20 @@ function activateShrine(sh) {
   saveGame(0);
 }
 
-let fadeT = 0;
+// fade to black, run fn at the darkest point, fade back. Driven by the game loop so it also
+// completes in a co-op game running in a background tab.
+const FADE = 0.4;
+let fade = null;
 function transition(fn) {
-  R.fade = 0;
-  fadeT = 0.001;
-  const steps = 18;
-  let i = 0;
-  const iv = setInterval(() => {
-    i++;
-    R.fade = Math.min(1, i / (steps / 2));
-    if (i === Math.ceil(steps / 2)) { try { fn(); } catch (e) { console.error(e); } }
-    if (i > steps / 2) R.fade = Math.max(0, 1 - (i - steps / 2) / (steps / 2));
-    if (i >= steps) { clearInterval(iv); R.fade = 0; }
-  }, 45);
+  if (fade && !fade.fired) { try { fade.fn(); } catch (e) { console.error(e); } }
+  fade = { t: 0, fn, fired: false };
+}
+function stepTransition(dt) {
+  if (!fade) return;
+  fade.t += Math.min(dt, 0.1);
+  if (!fade.fired && fade.t >= FADE) { fade.fired = true; try { fade.fn(); } catch (e) { console.error(e); } }
+  R.fade = fade.t < FADE ? fade.t / FADE : Math.max(0, 1 - (fade.t - FADE) / FADE);
+  if (fade.t >= FADE * 2) { fade = null; R.fade = 0; }
 }
 
 function switchRealm(realm, x, z) {
@@ -454,6 +472,7 @@ function switchRealm(realm, x, z) {
 function fastTravel(w) {
   const p = G.player;
   if (!p || p.dead) return;
+  if (G.net && !G.net.isHost) { closeModal(); toast('Only the party leader can fast travel. Use Co-op › Go to leader to catch up.'); return; }
   if (G.time - p.lastCombatT < 3) { toast('You cannot fast travel in the middle of a fight.'); return; }
   const realm = w.realm || 'surface';
   closeModal();
@@ -480,6 +499,7 @@ bus.on('canvasRestored', () => {
   console.warn('graphics were reset by the browser: redrawn');
 });
 bus.on('recall', () => {
+  if (G.net && !G.net.isHost) { G.net.goToLeader(); return; }
   const c = G.char;
   const list = WAYSTONES.filter((w) => c.discovered.waystones.includes(w.id) && w.realm === (G.realm === 'dungeon' ? G.dungeon.returnRealm : G.realm));
   if (!list.length) { toast('You have not attuned any waystones.'); return; }
@@ -495,13 +515,33 @@ bus.on('kill', ({ victim }) => {
   if (!victim.isPlayer || deathShown) return;
   deathShown = true;
   G.char.deaths++;
-  setTimeout(() => showDeath(respawn), 2200);
+  const note = !G.net ? undefined : !G.net.isHost ? 'You will rise beside your party leader, lighter by a tenth of your gold.' : G.realm === 'dungeon' ? 'You will rise at the dungeon entrance, lighter by a tenth of your gold.' : undefined;
+  setTimeout(() => showDeath(respawn, note), 2200);
 });
+function revive(p) {
+  p.dead = false; p.deathT = 0; p.hp = p.maxHp; p.mana = p.maxMana; p.stamina = p.maxStamina;
+  p.status = {}; p.frozen = 0; p.stun = 0; p.root = 0;
+  p.st.dead = false;
+  p.invuln = 3;
+}
 function respawn() {
   deathShown = false;
   const c = G.char, p = G.player;
   const lost = Math.floor(c.gold * 0.1);
   c.gold -= lost;
+  // co-op: guests rise beside the party leader; a party in a dungeon rises at its entrance
+  const L = G.net && !G.net.isHost ? G.net.leader() : null;
+  const d = G.net && G.realm === 'dungeon' ? G.dungeon : null;
+  if ((L && !L.away && !L.dead) || d) {
+    transition(() => {
+      revive(p);
+      if (L && !L.away && !L.dead) p.pos.set(L.pos.x, L.pos.y, L.pos.z);
+      else p.pos.set(d.exit.x + d.tile * 0.8, d.floorY, d.exit.z + d.tile * 0.8);
+      snapCamera(p.pos);
+      if (lost) toast(`You lost ${lost} gold.`);
+    });
+    return;
+  }
   const realm = G.realm === 'dungeon' ? G.dungeon.returnRealm : G.realm;
   const from = G.realm === 'dungeon' ? G.dungeon.returnPos : p.pos;
   let dest = WAYSTONES.filter((w) => c.discovered.waystones.includes(w.id) && w.realm === realm).sort((a, b) => Math.hypot(a.x - from.x, a.z - from.z) - Math.hypot(b.x - from.x, b.z - from.z))[0];
@@ -509,16 +549,52 @@ function respawn() {
   transition(() => {
     if (G.realm === 'dungeon') exitDungeon();
     if (dest.realm && dest.realm !== G.realm) switchRealm(dest.realm, dest.x + 3, dest.z + 3);
-    p.dead = false; p.deathT = 0; p.hp = p.maxHp; p.mana = p.maxMana; p.stamina = p.maxStamina;
-    p.status = {}; p.frozen = 0; p.stun = 0; p.root = 0;
-    p.st.dead = false;
-    clearSpawns(true);
+    revive(p);
+    if (!G.net) clearSpawns(true);
     p.pos.set(dest.x + 3, groundHeight(dest.x + 3, dest.z + 3), dest.z + 3);
     snapCamera(p.pos);
-    p.invuln = 3;
     if (lost) toast(`You lost ${lost} gold.`);
   });
 }
+
+// ============================================================================ co-op
+// guests follow the host into dungeons, across realms and on fast travel (and to the leader on request)
+bus.on('netTravel', (tv) => {
+  const p = G.player;
+  if (!p || G.mode !== 'play') return;
+  const rk = tv.dg ? 'd:' + tv.dg.id : tv.realm;
+  const here = G.realm === 'dungeon' ? 'd:' + G.dungeon?.def.id : G.realm;
+  const sameDungeon = !!tv.dg && G.dungeon?.def.id === tv.dg.id && G.dungeon?.seed === tv.dg.seed;
+  if (!tv.join && rk === here && (!tv.dg || sameDungeon) && Math.hypot(tv.x - p.pos.x, tv.z - p.pos.z) < 40) return;
+  transition(() => {
+    if (p.mounted) p.toggleMount();
+    if (G.realm === 'dungeon' && !sameDungeon) exitDungeon();
+    if (tv.dg) {
+      if (G.realm !== 'dungeon') {
+        if (G.realm !== tv.dg.rr) switchRealm(tv.dg.rr, tv.dg.rx, tv.dg.rz);
+        const back = new Vec3(tv.dg.rx, 0, tv.dg.rz);
+        back.y = groundHeight(back.x, back.z);
+        const def = dungeonDef(tv.dg.id);
+        enterDungeon(def, back, tv.dg.seed);
+        if (!G.char.discovered.dungeons.includes(def.id)) G.char.discovered.dungeons.push(def.id);
+        banner(DUNGEONS_THEME_NAME(def), def.name, `Level ${def.level} · with your party`);
+        setMusic('dungeon');
+      }
+      p.pos.set(tv.x, G.dungeon.floorY, tv.z);
+    } else {
+      if (tv.realm !== G.realm) switchRealm(tv.realm, tv.x + 2, tv.z + 2);
+      p.pos.set(tv.x + 2, groundHeight(tv.x + 2, tv.z + 2), tv.z + 2);
+    }
+    snapCamera(p.pos);
+    lastBiome = null;
+  });
+});
+bus.on('netEnded', ({ why, wasGuest }) => {
+  if (why) toast(esc(why), '', 5000);
+  // a guest left in the host's dungeon walks back out into their own world
+  if (wasGuest && G.realm === 'dungeon') transition(() => { exitDungeon(); snapCamera(G.player.pos); lastBiome = null; });
+});
+bus.on('netNotice', (m) => toast(esc(m), '', 4000));
 
 // ============================================================================ event-driven UI
 bus.on('toast', (m) => toast(esc(m)));
@@ -608,13 +684,16 @@ function step(now) {
   G.realTime += rawDt;
   G.rawDt = rawDt;
   // hitstop / slow motion
+  // in co-op the world never stops: menus don't pause and hit-stop only slows it a little
+  bus.muted = 0;
   let scale = 1;
-  if (G.hitstop > 0) { G.hitstop -= rawDt; scale = 0.06; }
-  if (G.slowmo > 0) { G.slowmo -= rawDt; scale = Math.min(scale, 0.3); }
-  const paused = G.menuOpen && G.menuOpen !== 'dialogue' && G.mode === 'play';
+  if (G.hitstop > 0) { G.hitstop -= rawDt; scale = G.net ? 0.5 : 0.06; }
+  if (G.slowmo > 0) { G.slowmo -= rawDt; scale = Math.min(scale, G.net ? 0.6 : 0.3); }
+  const paused = !G.net && G.menuOpen && G.menuOpen !== 'dialogue' && G.mode === 'play';
   const dt = paused ? 0 : rawDt * scale;
   G.dt = dt;
   G.time += dt;
+  stepTransition(rawDt);
 
   try {
     pollGamepad(G.player && G.mode === 'play' ? worldToScreen({ x: G.player.pos.x, y: G.player.pos.y + 1, z: G.player.pos.z }) : null);
@@ -623,7 +702,7 @@ function step(now) {
     else if (G.mode === 'fate') { updateFate(rawDt); updateCamera(rawDt, false); updateAtmosphere(rawDt, new Vec3(-30000, 0, 0), 12, G.weather); updateVfx(rawDt); }
     else if (G.mode === 'prologue' || G.mode === 'loading') { updateCamera(rawDt, false); if (G.player) updateTerrain(rawDt, G.player.pos.x, G.player.pos.z); }
   } catch (e) { console.error(e); }
-  renderFrame(G.realTime);
+  if (!document.hidden) renderFrame(G.realTime);
   endFrameInput();
 }
 
@@ -664,6 +743,7 @@ function playFrame(dt, rawDt) {
     updateDungeon(dt);
     updateQuests(dt);
   }
+  if (G.net) G.net.tick(rawDt);
   updateRegion(rawDt);
   // combat & boss tracking
   let boss = null, inCombat = false;
@@ -705,6 +785,7 @@ function playFrame(dt, rawDt) {
   updateStreak(dt);
   updateTutorial(rawDt);
   updateHud(rawDt);
+  updateCoop(rawDt);
   // autosave
   saveT -= rawDt;
   if (saveT <= 0 && !p.dead) { saveT = 90; G.char.timeOfDay = atmo.timeOfDay; G.char.day = atmo.day; serializeFog(); saveGame(0); }
@@ -745,8 +826,7 @@ function handleHotkeys() {
     else if (input.down.has(key) && (p.cooldowns[id] || 0) <= 0) useAbility(p, id, true);
   }
   if (input.pressed.has('x')) useSignature(p);
-  if (input.pressed.has('z')) useConsumable('hp_potion');
-  if (input.pressed.has('v')) useConsumable('mana_potion');
+  for (const [k, id] of [['z', 'hp_potion'], ['v', 'mana_potion']]) if (input.pressed.has(k) && useConsumable(id)) G.net?.act(p, 'pot', { id });
   if (G.debug && input.pressed.has('backquote')) { gainXp(xpToNext(G.char.level)); }
 }
 
@@ -769,6 +849,14 @@ if (params.get('quick')) {
     if (params.get('dungeon')) { const d = dungeonDef(params.get('dungeon')); enterDungeon(d, G.player.pos.clone()); snapCamera(G.player.pos); }
     if (params.get('smoke')) import('./dev/smoke.js').then((m) => m.runSmoke(window.__dbg));
     if (params.get('tutorial')) setTimeout(() => startTutorial(), 500);
+    if (params.get('coop') === 'host') hostGame().then((s) => { window.__coop = s.code; toast(`Co-op room: <b>${s.code}</b>`); }, (e) => { window.__coopErr = e.message; toast(esc(e.message)); });
+    if (params.get('join')) joinGame(params.get('join')).then(() => { window.__coop = 'joined'; }, (e) => { window.__coopErr = e.message; toast(esc(e.message)); });
   });
 } else showTitle();
 requestAnimationFrame(frame);
+// A co-op game keeps running while its tab is in the background: browsers stop animation frames
+// and slow page timers there, but not a worker's clock.
+try {
+  const clock = new Worker(URL.createObjectURL(new Blob(['setInterval(() => postMessage(0), 33)'], { type: 'text/javascript' })));
+  clock.onmessage = () => { if (document.hidden && G.net) step(performance.now()); };
+} catch (e) { setInterval(() => { if (document.hidden && G.net) step(performance.now()); }, 50); }
