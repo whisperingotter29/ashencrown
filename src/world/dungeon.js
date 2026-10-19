@@ -181,7 +181,7 @@ export function enterDungeon(def, returnPos) {
   buildGeometry(d);
   populate(d, rng);
   atmo.indoor = true;
-  atmo.indoorCfg = { fog: theme.fog, ambient: '#c8b4a4', light: theme.light };
+  atmo.indoorCfg = { fog: theme.fog, ambient: theme.ambient || '#c8b4a4', light: theme.light };
   const ent = lay.entrance;
   const ex = OX + (ent.cx + 0.5) * tile, ez = OZ + (ent.cy + 0.5) * tile;
   G.player.pos.set(ex, 0, ez);

@@ -687,7 +687,7 @@ function playFrame(dt, rawDt) {
   const indoor = G.realm === 'dungeon';
   atmo.indoor = indoor || G.realm === 'deep';
   atmo.indoorCfg = G.realm === 'deep' ? deepCfg : indoor ? atmo.indoorCfg : null;
-  if (G.realm === 'dungeon' && G.dungeon) atmo.indoorCfg = { fog: G.dungeon.theme.fog, ambient: '#c8b4a4', light: G.dungeon.theme.light };
+  if (G.realm === 'dungeon' && G.dungeon) atmo.indoorCfg = { fog: G.dungeon.theme.fog, ambient: G.dungeon.theme.ambient || '#c8b4a4', light: G.dungeon.theme.light };
   updateWeather(rawDt, p.pos, G.realm !== 'surface');
   // sun shafts through the lens on clear surface days, warmer near dawn and dusk
   {
