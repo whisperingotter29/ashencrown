@@ -18,6 +18,9 @@ Up to four heroes play together. Open the menu (Esc) and choose **Co-op**:
   in single player. A guest's hits on enemies go to the host, who owns enemy health.
 - Loot is personal: when an enemy dies, each player nearby (within about 75 m) rolls their own drops
   and gets the XP. Chests in dungeons are per player too.
+- Enemies get tougher as the party grows: x1.5 health with two heroes, x2 with three and x2.5
+  with four.
+- The host spawns every player's quest prey at their hunting grounds, not just its own.
 - Menus don't pause the game while you are in a party.
 - A guest who falls rises beside the leader. A party member who falls in a dungeon rises at its
   entrance.

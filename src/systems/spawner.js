@@ -28,6 +28,8 @@ export function spawnEnemy(id, level, x, z, opts = {}) {
   if (!ENEMIES[id]) { console.warn('unknown enemy', id); return null; }
   // co-op guests see the host's enemies; only their own summons are theirs to make
   if (G.net?.role === 'guest' && !opts.ally) return null;
+  // a bigger party faces tougher enemies (x1.5 health for two heroes, x2.5 for four)
+  if (G.net?.players.size && !opts.ally) opts = { ...opts, hpMult: (opts.hpMult || 1) * (1 + 0.5 * G.net.players.size) };
   const e = new Enemy(id, level, x, z, opts);
   return addEntity(e);
 }
@@ -133,10 +135,12 @@ export function updateSpawner(dt) {
 // while the player is nearby, so "kill 5 looters" always has looters where the marker points.
 const huntCd = new Map();
 function updateHunts(p) {
-  for (const h of activeKillObjectives()) {
+  const hunts = activeKillObjectives().map((h) => ({ h, hero: p }));
+  if (G.net) hunts.push(...G.net.partnerHunts());      // co-op partners' quests too
+  for (const { h, hero } of hunts) {
     const g = h.ground;
-    if (g.realm !== G.realm) continue;
-    const d = Math.hypot(g.x - p.pos.x, g.z - p.pos.z);
+    if (g.realm !== G.realm || hero.away) continue;
+    const d = Math.hypot(g.x - hero.pos.x, g.z - hero.pos.z);
     if (d > 110) continue;
     const tag = 'hunt:' + h.quest + ':' + h.obj;
     const alive = G.entities.filter((e) => !e.dead && !e.removed && e.questTag === tag).length;

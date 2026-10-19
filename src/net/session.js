@@ -13,6 +13,7 @@ import { dealDamage, killEntity, clearCombat, ghostly } from '../systems/combat.
 import { atmo } from '../world/atmosphere.js';
 import { weatherTable, setWeatherTable } from '../world/weather.js';
 import { adoptDungeonBoss, applyMazeGrid } from '../world/dungeon.js';
+import { activeKillObjectives } from '../systems/quests.js';
 
 export const MAX_PLAYERS = 4;
 const ST_DT = 1 / 20;      // hero state reports
@@ -71,6 +72,12 @@ class Session {
     return list.sort((a, b) => a.pid - b.pid);
   }
   leader() { return this.isHost ? G.player : this.players.get(1)?.ghost || null; }
+  // host: partners' quest hunting grounds, for the spawner
+  partnerHunts() {
+    const out = [];
+    for (const pl of this.players.values()) for (const h of pl.hunts || []) if (h?.ground) out.push({ h: { ...h, quest: `p${pl.pid}:${h.quest}` }, hero: pl.ghost });
+    return out;
+  }
 
   // ------------------------------------------------------------------------- sending
   sendTo(pl, msg) { if (this.isHost) this.hub.send(pl.peer, msg); }
@@ -86,7 +93,9 @@ class Session {
   // who resolves a hit: 0 = someone else's game, 1 = this one, 2 = a partner's replayed hit (show only)
   vetDamage(src, tgt, amount, o) {
     if (tgt.isRemote) return 0;
-    if (bus.muted || ghostly(src)) return this.applying ? 1 : 2;
+    // a partner's replayed hit is for show; the host still ticks the burns and poisons their real
+    // hits left on its enemies
+    if (bus.muted || ghostly(src)) return this.applying || (this.isHost && o.kind === 'dot' && !bus.muted) ? 1 : 2;
     if (tgt.netPuppet) {
       if (!localSource(src)) return 2;
       if (o.kind !== 'dot') {
@@ -162,9 +171,13 @@ class Session {
       if ((this.esT -= dt) <= 0) { this.esT = ES_DT; this.syncEnemies(); }
       if ((this.wT -= dt) <= 0) { this.wT = W_DT; this.toAll(this.worldMsg()); }
       this.watchTravel();
-    } else if (this.hits.length) {
-      this.link.send({ t: 'hi', h: this.hits });
-      this.hits = [];
+    } else {
+      if (this.hits.length) { this.link.send({ t: 'hi', h: this.hits }); this.hits = []; }
+      // the host keeps this player's quest prey around their hunting grounds too
+      if ((this.huntT = (this.huntT || 0) - dt) <= 0) {
+        this.huntT = 3;
+        this.link.send({ t: 'hg', h: activeKillObjectives().map((h) => ({ quest: h.quest, obj: h.obj, enemy: h.enemy, left: h.left, ground: { x: h.ground.x, z: h.ground.z, realm: h.ground.realm } })) });
+      }
     }
   }
 
@@ -260,6 +273,7 @@ class Session {
       case 'hi': this.applyHits(pl, m.h); break;
       case 'rs': pl.known.clear(); pl.rows.clear(); break;
       case 'rq': this.sendTo(pl, { ...this.travelMsg(), near: true }); break;
+      case 'hg': pl.hunts = Array.isArray(m.h) ? m.h.slice(0, 12) : []; break;
       case 'ch': bus.emit('netChat', { pid: pl.pid, name: pl.name, text: String(m.m).slice(0, 160) }); this.toAll(m, pl); break;
     }
   }
