@@ -7,6 +7,8 @@
 //   rot       bubbling orbs, drips, toxic mist
 // 3D cues: hoops and orbits are squashed ellipses with front/back depth, domes expand around
 // impacts, shafts rise from rune circles, sparks are stretched along their velocity.
+// Colours come from the element palettes in elements.js (master ramps); the magic layer posterizes
+// everything into flat bands, so recipes only need to place light, not shade it.
 import { addMagic, gpart, gburst, quad, shade, crystal, K, PASS, mx, my, mxw, myw, ground, col, UPX, magic } from './magic.js';
 import { PALETTE, paletteOf, elementOf, ELEM_CODE } from './elements.js';
 import { requestLight } from './renderer.js';
@@ -17,17 +19,17 @@ const clamp01 = (v) => (v < 0 ? 0 : v > 1 ? 1 : v);
 const easeOut = (t) => 1 - (1 - t) ** 3;
 const rnd = (a, b) => a + Math.random() * (b - a);
 const TAU = Math.PI * 2;
-const WHITE = [255, 255, 255];
 const lightCss = new Map();
 const css = (c) => { let s = lightCss.get(c); if (!s) { s = `rgb(${c[0] | 0},${c[1] | 0},${c[2] | 0})`; lightCss.set(c, s); } return s; };
 
 // what the ground is multiplied by under each element (darkening pass): scorch, frost, blight...
+// (scorch and blight lean plum, like every shadow in the palette)
 const TINT = {
-  fire: [120, 72, 50], frost: [170, 212, 255], lightning: [96, 102, 150], void: [58, 22, 96], rot: [96, 130, 70], nature: [110, 140, 84],
-  blood: [110, 22, 28], water: [140, 185, 230], sand: [190, 160, 110], earth: [130, 104, 80], sound: [170, 120, 190], physical: [110, 100, 92], custom: [100, 90, 110],
+  fire: [116, 62, 66], frost: [168, 196, 240], lightning: [104, 84, 150], void: [66, 26, 100], rot: [100, 118, 78], nature: [96, 132, 112],
+  blood: [112, 30, 44], water: [128, 168, 214], sand: [186, 150, 118], earth: [128, 96, 88], sound: [168, 112, 168], physical: [108, 94, 104], custom: [100, 84, 112],
 };
 const ZONE_DARK = { fire: 0.22, frost: 0.55, lightning: 0.4, void: 0.75, rot: 0.55, nature: 0.45, blood: 0.55, water: 0.45, sand: 0.35, earth: 0.35, sound: 0.3, custom: 0.35 };
-const SHADOW = [60, 52, 72];
+const SHADOW = [62, 44, 80];
 
 // lingering mark on the ground: charred for fire, frosted for ice, blighted for rot...
 export function scorchFx(x, z, radius, elOrColor, dur = 2.4, strength = 0.65) {
@@ -56,10 +58,11 @@ function seg(ax, ay, bx, by, wa, wb, aa, ab, c1, c2) {
   const wm = Math.max(wa, wb);
   quad((ax + bx) / 2, (ay + by) / 2, L / 2 + wm, wm * 1.7, Math.atan2(dy, dx), K.TRAIL, 1, c1, c2, wa, wb, aa, ab, 0, 0, PASS.max);
 }
-function boltSeg(ax, ay, bx, by, core, glow, a, c1) {
+// bolt segment: a pale core (c1) inside a coloured glow (c2: violet for lightning)
+function boltSeg(ax, ay, bx, by, core, glow, a, c1, c2 = c1) {
   const dx = bx - ax, dy = by - ay, L = Math.hypot(dx, dy);
   if (L < 0.01) return;
-  quad((ax + bx) / 2, (ay + by) / 2, L / 2 + glow, glow, Math.atan2(dy, dx), K.BOLT, a, c1, c1, core, 0, 0, 0, 0, 0, PASS.max);
+  quad((ax + bx) / 2, (ay + by) / 2, L / 2 + glow, glow, Math.atan2(dy, dx), K.BOLT, a, c1, c2, core, 0, 0, 0, 0, 0, PASS.max);
 }
 
 // ================================================================== projectiles
@@ -119,7 +122,7 @@ export function orbFx(p, size) {
       } else if (el === 'frost') {
         quad(x, y, r * 2.4, r * 2.4, 0, K.MIST, 0.45, P.c1, P.c2, 0, 0, 0, 0, 0, seed);
       } else if (el === 'lightning') {
-        for (const a of arcs) for (let i = 0; i < a.length - 1; i++) boltSeg(x + a[i][0] * r, y + a[i][1] * r, x + a[i + 1][0] * r, y + a[i + 1][1] * r, 1.2, Math.max(3, r * 0.3), 0.9, P.c2);
+        for (const a of arcs) for (let i = 0; i < a.length - 1; i++) boltSeg(x + a[i][0] * r, y + a[i][1] * r, x + a[i + 1][0] * r, y + a[i + 1][1] * r, 1.2, Math.max(3, r * 0.3), 0.9, P.c1, P.c2);
         quad(x, y, r * 2.4, r * 2.4, 0, K.GLOW, 0.3, P.c2, P.deep, 0.15, 3);
       }
       // lightning: white arcs over a deep violet-blue body so it doesn't wash out to white
@@ -393,7 +396,7 @@ export function pillarFx(x, y, z, o = {}) {
 // Fractal bolt with branches (midpoint displacement); flickers and re-strikes once.
 export function boltFx(ax, ay, az, bx, by, bz, o = {}) {
   const { P } = resolve(o.color || 'lightning');
-  const c1 = o.color && !elementOf(o.color) ? col(o.color) : P.c1;
+  const c1 = o.color && !elementOf(o.color) ? col(o.color) : P.c1, c2 = o.color && !elementOf(o.color) ? paletteOf(o.color).deep : P.c2;
   const dur = o.dur || 0.18, width = o.width || 1;
   const gA = ground(ax, az), gB = ground(bx, bz);
   // world-pixel coordinates (camera independent)
@@ -430,7 +433,7 @@ export function boltFx(ax, ay, az, bx, by, bz, o = {}) {
       const core = Math.max(1, Math.max(1.3, UPX * 0.07) * width), glow = Math.max(3, Math.max(4, UPX * 0.3) * width);   // art px: keep a 1px core
       for (const p of paths) {
         const pts = p.pts;
-        for (let i = 0; i < pts.length - 1; i++) boltSeg(toX(pts[i][0]), toY(pts[i][1]), toX(pts[i + 1][0]), toY(pts[i + 1][1]), core * p.w, glow * p.w, flick * p.a, c1);
+        for (let i = 0; i < pts.length - 1; i++) boltSeg(toX(pts[i][0]), toY(pts[i][1]), toX(pts[i + 1][0]), toY(pts[i + 1][1]), core * p.w, glow * p.w, flick * p.a, c1, c2);
       }
       const X = toX(B[0]), Y = toY(B[1]);
       quad(X, Y, glow * 4, glow * 4, 0, K.GLOW, flick * 0.8, P.hot, c1, 0.8, 3);
@@ -522,10 +525,11 @@ export function zoneFx(h) {
       const X = mx(h.x), Y = my(h.z, 0), r = h.radius * UPX;
       const fade = Math.min(1, h.life * 1.5) * Math.min(1, f.t * 4);
       if (el !== 'holy') shade(X, Y, r * 1.05, r * 1.05, TINT[el] || TINT.custom, (ZONE_DARK[el] ?? 0.35) * fade, true, seed, 2);
-      quad(X, Y, r * 1.08, r * 1.08, 0, K.GLOW, 0.32 * fade, P.c2, P.deep, 0, 2.2);
-      quad(X, Y, r, r, 0, K.RING, 0.4 * fade, P.c1, P.c2, 0.22, 0.8, 1.5, 0.2, 1, seed);
+      // zones stay see-through: their fills sit in the dithered haze bands, only rims go solid
+      quad(X, Y, r * 1.08, r * 1.08, 0, K.GLOW, 0.24 * fade, P.c2, P.deep, 0, 2.2);
+      quad(X, Y, r, r, 0, K.RING, 0.45 * fade, P.c1, P.c2, 0.16, 0.8, 1.5, 0.12, 1, seed);
       if (el === 'holy') quad(X, Y, r * 0.95, r * 0.95, 0, K.CIRCLE, 0.7 * fade, P.c1, P.c2, 1, f.t * 0.8 + seed, seed);
-      else if (el === 'void') quad(X, Y, r * 0.95, r * 0.95, 0, K.VORTEX, 0.8 * fade, P.c1, P.c2, 4, -f.t * 3 + seed, 0.12, 0, 0, seed);
+      else if (el === 'void') quad(X, Y, r * 0.95, r * 0.95, 0, K.VORTEX, 0.5 * fade, P.c1, P.c2, 4, -f.t * 3 + seed, 0.12, 0, 0, seed);
       else if (el === 'fire') quad(X, Y, r * 0.9, r * 0.9, 0, K.GLOW, 0.35 * fade * (0.85 + 0.15 * Math.sin(f.t * 13)), P.c1, P.c2, 0, 2.5);
       else if (el === 'frost') quad(X, Y, r * 0.95, r * 0.95, seed, K.MIST, 0.45 * fade, P.c1, P.c2, 0, 0, 0, 0, 0, seed);
     },
@@ -743,9 +747,9 @@ export function killFx(victim, streak = 1) {
   const y = victim.pos.y + (victim.height || 1.8) * 0.5;
   const big = victim.boss || victim.elite;
   const heat = Math.min(1, streak / 60);
-  const c1 = heat > 0.5 ? '#fff0c0' : '#ffffff', c2 = heat > 0.5 ? '#ff7a30' : '#ffc070';
+  const c1 = heat > 0.5 ? '#fff0b0' : '#fff4dc', c2 = heat > 0.5 ? '#ec7a2a' : '#f8b848';
   flareFx(x, y, z, { size: big ? 2.2 : 1.1 + heat * 0.6, color: c1, color2: c2, dur: big ? 0.3 : 0.18, star: true });
-  gburst(x, y, z, { count: big ? 34 : 12 + Math.round(heat * 10), speed: big ? 13 : 9, kind: 'spark', size: 0.08, color: '#ffffff', color2: c2, life: 0.32, gravity: -9, drag: 2.2, hot: 1, up: 0.6 });
+  gburst(x, y, z, { count: big ? 34 : 12 + Math.round(heat * 10), speed: big ? 13 : 9, kind: 'spark', size: 0.08, color: c1, color2: c2, life: 0.32, gravity: -9, drag: 2.2, hot: 1, up: 0.6 });
   ringFx(x, gy, z, { radius: big ? 4.5 : 1.8 + heat, color: c1, color2: c2, dur: 0.26, th: 0.16, noise: 0.25, r0: 0.2 });
   if (big) shellFx(x, y, z, { radius: 3.2, color: c1, color2: c2, dur: 0.3 });
   soulFx(x, y, z, big ? 14 : 2 + Math.min(6, Math.floor(streak / 8)));
@@ -758,7 +762,7 @@ export function soulFx(x, y, z, n = 4) {
     const a = Math.random() * TAU, s = rnd(3, 7);
     motes.push({ x, y, z, vx: Math.cos(a) * s, vy: rnd(2, 6), vz: Math.sin(a) * s, t: -i * 0.03, done: false, h: [] });
   }
-  const P = PALETTE.holy, cyan = col('#9ff0ff');
+  const P = PALETTE.void, trail = P.c2;
   return addMagic({
     update(f, dt) {
       f.t += dt;
@@ -789,9 +793,9 @@ export function soulFx(x, y, z, n = 4) {
         if (m.done || m.t < 0) continue;
         for (let i = 0; i < m.h.length - 1; i++) {
           const [ax, ay, az] = m.h[i], [bx, by, bz] = m.h[i + 1];
-          seg(mx(bx), my(bz, by - ground(bx, bz)), mx(ax), my(az, ay - ground(ax, az)), s * 0.5 * (1 - (i + 1) / 6), s * 0.5 * (1 - i / 6), 0.8 * (1 - (i + 1) / 6), 0.8 * (1 - i / 6), P.hot, cyan);
+          seg(mx(bx), my(bz, by - ground(bx, bz)), mx(ax), my(az, ay - ground(ax, az)), s * 0.5 * (1 - (i + 1) / 6), s * 0.5 * (1 - i / 6), 0.8 * (1 - (i + 1) / 6), 0.8 * (1 - i / 6), P.c1, trail);
         }
-        quad(mx(m.x), my(m.z, m.y - ground(m.x, m.z)), s * 2.2, s * 2.2, 0, K.GLOW, 0.9, P.hot, cyan, 0.8, 4);
+        quad(mx(m.x), my(m.z, m.y - ground(m.x, m.z)), s * 2.2, s * 2.2, 0, K.GLOW, 0.9, P.hot, trail, 0.8, 4);
       }
     },
   });
@@ -804,9 +808,9 @@ export function hitFx(x, y, z, dx, dz, color = '#fff4d0', crit = false) {
   const L = Math.hypot(dx, dz) || 1;
   const dir = { x: dx / L, y: 0.25, z: dz / L };
   const gy = ground(x, z);
-  flareFx(x, y, z, { size: crit ? 1.1 : 0.55, color: '#ffffff', color2: color, dur: crit ? 0.16 : 0.09, star: crit });
-  gburst(x, y, z, { count: crit ? 12 : 5, speed: crit ? 14 : 10, kind: 'spark', size: 0.07, color: '#ffffff', color2: color, life: 0.2, gravity: -10, drag: 3, hot: 1, dir, cone: 0.7, stretch: 0.035 });
-  if (crit) ringFx(x, gy, z, { radius: 1.6, color: '#ffffff', color2: color, dur: 0.2, th: 0.14, noise: 0.15, r0: 0.2 });
+  flareFx(x, y, z, { size: crit ? 1.1 : 0.55, color: '#fff4dc', color2: color, dur: crit ? 0.16 : 0.09, star: crit });
+  gburst(x, y, z, { count: crit ? 12 : 5, speed: crit ? 14 : 10, kind: 'spark', size: 0.07, color: '#fff4dc', color2: color, life: 0.2, gravity: -10, drag: 3, hot: 1, dir, cone: 0.7, stretch: 0.035 });
+  if (crit) ringFx(x, gy, z, { radius: 1.6, color: '#fff4dc', color2: color, dur: 0.2, th: 0.14, noise: 0.15, r0: 0.2 });
 }
 
 // a flourish at the hand whenever an ability fires: makes every key press feel loud
@@ -822,7 +826,7 @@ export function abilityFlourish(p, elOrColor, big = false) {
 // A light pillar over dropped gear, coloured and sized by rarity (rare and up), with a slow ring
 // at its base and motes drifting up. Lives as long as the pickup is on the ground.
 export function lootBeamFx(pk, colorHex, rarityIndex) {
-  const c = col(colorHex), hot = [255, 255, 255];
+  const c = col(colorHex), hot = col('#fff4dc');
   const H = 4 + rarityIndex * 2.2, seed = Math.random();
   const gy = ground(pk.x, pk.z);
   if (rarityIndex >= 4) {
@@ -834,7 +838,7 @@ export function lootBeamFx(pk, colorHex, rarityIndex) {
     update(f, dt) {
       f.t += dt;
       acc += dt * (2 + rarityIndex * 2);
-      while (acc > 1) { acc -= 1; gpart({ x: pk.x + rnd(-0.3, 0.3), y: gy + 0.2, z: pk.z + rnd(-0.2, 0.2), gy, vy: rnd(1.5, 3), life: rnd(0.8, 1.4), size: rnd(0.08, 0.14), size1: 0.02, color: '#ffffff', color2: colorHex, kind: 'glow', hot: 1, drag: 0.3 }); }
+      while (acc > 1) { acc -= 1; gpart({ x: pk.x + rnd(-0.3, 0.3), y: gy + 0.2, z: pk.z + rnd(-0.2, 0.2), gy, vy: rnd(1.5, 3), life: rnd(0.8, 1.4), size: rnd(0.08, 0.14), size1: 0.02, color: '#fff4dc', color2: colorHex, kind: 'glow', hot: 1, drag: 0.3 }); }
       return !pk.gone && !!G_pickupAlive(pk);
     },
     draw(f) {

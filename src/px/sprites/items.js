@@ -1,7 +1,12 @@
 // Ground pickups: dropped weapons show their real sprite, armour gets a small piece icon in its
 // material and rarity colours, plus coins, materials, potions and tomes. Pivot at the base.
 // Drawn natively at the art-pixel density: ramps of 3-4 shades, 1px glints and outlines.
-import { Pix, C, light, dark, mixc } from '../pix.js';
+// Colours come from the master palette (src/px/palette.js): every base colour is snapped to its
+// nearest swatch, ramps are hue-shifted (cream-leaning lights, plum-leaning shadows), outlines are
+// violet-black ink and glints are cream.
+import { Pix, C, light, dark, mixc, OUTLINE } from '../pix.js';
+import { RAMPS, CREAM, CREAM_HI, INK } from '../palette.js';
+import { pal, rarityPal } from '../../render/elements.js';
 import { weaponSprite, shieldSprite, tomeSprite } from './weapons.js';
 import { weaponSpec, shieldSpec, materialColor, rarityTrim } from '../gearLook.js';
 import { RARITY, MATERIALS_LIST, CONSUMABLES } from '../../data/items.js';
@@ -9,8 +14,9 @@ import { TOMES } from '../../data/tomes.js';
 
 const cache = new Map();
 function mk(w, h) { const p = new Pix(w, h); p.ox = Math.floor(w / 2); p.oy = h - 1; return p; }
-const WHITE = [255, 255, 255, 255];
-const OUT = [22, 16, 24, 255];
+const WHITE = C(CREAM_HI);      // 1px glints: warm cream, not white
+const OUT = OUTLINE;
+const VOID = C(INK);
 
 export function pickupSprite(kind, data) {
   const key = kind + ':' + (kind === 'item' ? [data.slot, data.type, data.base, data.weight, data.material, data.rarity, data.element, data.tome, data.set, data.legendary].join('|') : kind === 'gold' ? '' : data.id);
@@ -30,7 +36,7 @@ function paint(p, x, y, rows, pal) {
   }
 }
 // colour ramp for a base colour: hi2 / hi / base / lo / lo2
-const ramp = (c) => { c = C(c); return { h2: light(c, 1.5), h: light(c, 1.22), b: c, l: dark(c, 0.74), l2: dark(c, 0.52) }; };
+const ramp = (c) => { c = C(pal(c)); return { h2: light(c, 1.5), h: light(c, 1.22), b: c, l: dark(c, 0.74), l2: dark(c, 0.52) }; };
 // shade a filled region by position: lit toward the top-left, shadow toward the bottom-right
 function shadeBody(p, x0, y0, w, h, r, k = 1) {
   for (let y = y0; y < y0 + h; y++) for (let x = x0; x < x0 + w; x++) {
@@ -49,17 +55,17 @@ function hasPix(p) { for (let i = 3; i < p.d.length; i += 4) if (p.d[i]) return 
 const COIN = ['.aaaa.', 'abbbbc', 'bbbbcc', 'dccccd', '.dddd.'];
 function goldPile() {
   const p = mk(18, 12), e = mk(18, 12);
-  const g = C('#f0c040'), pal = { a: light(g, 1.42), b: g, c: dark(g, 0.8), d: dark(g, 0.5) };
+  const g = C(RAMPS.gold[4]), pal = { a: C(RAMPS.gold[5]), b: g, c: C(RAMPS.gold[3]), d: C(RAMPS.gold[2]) };
   // back row, a short stack in the middle, then the front row (each later coin overlaps)
   for (const [x, y] of [[2, 3], [10, 2], [6, 1], [12, 5], [1, 6], [6, 4], [7, 7], [12, 7]]) paint(p, x, y, COIN, pal);
-  for (const [x, y] of [[7, 4], [3, 6], [8, 7], [13, 5], [7, 1]]) { p.set(x, y, WHITE); e.set(x, y, [255, 240, 160, 255]); }
+  for (const [x, y] of [[7, 4], [3, 6], [8, 7], [13, 5], [7, 1]]) { p.set(x, y, WHITE); e.set(x, y, C(RAMPS.gold[5])); }
   p.outline(OUT);
   return { pix: p, emis: e };
 }
 
 // ------------------------------------------------------------------ consumables
 function flask(c, round = true) {
-  const p = mk(11, 16), e = mk(11, 16), L = ramp(c), glass = C('#c8d8e0'), gl = ramp(glass), cork = ramp('#8a6a40');
+  const p = mk(11, 16), e = mk(11, 16), L = ramp(c), gl = ramp(RAMPS.steel[5]), cork = ramp(RAMPS.wood[4]);
   paint(p, 3, 0, ['.hbb.', 'hbbbl'], { h: cork.h, b: cork.b, l: cork.l });
   paint(p, 4, 2, ['gbl', 'gbl', 'gbl'], { g: WHITE, b: gl.b, l: gl.l });
   if (round) {
@@ -80,10 +86,10 @@ function flask(c, round = true) {
   return { pix: p, emis: e };
 }
 function consumable(id) {
-  const c = CONSUMABLES[id]?.color || '#e04040';
-  if (id === 'waystone_shard') return crystal('#80c0ff', true);
+  const c = CONSUMABLES[id]?.color || RAMPS.red[4];
+  if (id === 'waystone_shard') return crystal(RAMPS.frost[3], true);
   if (id === 'roasted_meat') {
-    const p = mk(15, 11), m = ramp('#a06040'), bone = ramp('#e8e0d0');
+    const p = mk(15, 11), m = ramp(RAMPS.clay[3]), bone = ramp(CREAM);
     p.ellipse(9, 5, 5.6, 4.2, m.b);
     shadeBody(p, 3, 1, 12, 9, m);
     p.set(6, 3, m.h2); p.set(7, 2, m.h2); p.set(10, 4, m.l2); p.set(8, 6, m.l2);
@@ -108,18 +114,18 @@ function crystal(col, emissive = false) {
   return { pix: p, emis: emissive ? e : null };
 }
 function material(id) {
-  const col = MATERIALS_LIST[id]?.color || '#c0c0c0', r = ramp(col);
+  const col = pal(MATERIALS_LIST[id]?.color || RAMPS.steel[5]), r = ramp(col);
   let p;
   if (id === 'ore' || id === 'stone') {
     p = mk(14, 11);
-    const rock = ramp(mixc(C(col), '#5a5a60', 0.45));
+    const rock = ramp(mixc(C(col), RAMPS.stone[2], 0.45));
     p.ellipse(7, 6, 6.4, 4.6, rock.b); p.ellipse(4.5, 4.2, 3.2, 2.4, rock.b); p.ellipse(10, 4.6, 3, 2.6, rock.b);
     shadeBody(p, 0, 1, 14, 10, rock);
     for (const [x, y] of [[4, 4], [8, 6], [10, 3], [6, 8]]) { p.set(x, y, r.h2); p.set(x + 1, y, r.l); }
     p.set(3, 3, WHITE);
   } else if (id === 'wood') {
     p = mk(16, 9);
-    const bark = ramp(col), end = ramp(mixc(C(col), '#e0b070', 0.55));
+    const bark = ramp(col), end = ramp(mixc(C(col), RAMPS.sand[4], 0.55));
     p.rrect(0, 1, 13, 7, bark.b, 1);
     for (let x = 1; x < 12; x++) { p.set(x, 1, bark.h); p.set(x, 7, bark.l2); if (x % 4 === 1) p.set(x, 3, bark.l); if (x % 5 === 3) p.set(x, 5, bark.l); }
     p.ellipse(13, 4.5, 2.6, 3.6, end.b); p.ellipse(13, 4.5, 1.4, 2, end.h); p.set(13, 4, end.l);
@@ -154,7 +160,7 @@ function material(id) {
     p.set(3, 3, WHITE);
   } else if (id === 'herb') {
     p = mk(13, 14);
-    const leaf = ramp('#4a9a3a');
+    const leaf = ramp(RAMPS.green[4]);
     p.line(6, 13, 6, 4, leaf.l);
     p.ellipse(4, 5, 2.8, 1.6, leaf.b); p.ellipse(9, 7, 2.8, 1.6, leaf.b); p.ellipse(6.5, 2, 1.8, 2.2, leaf.b); p.ellipse(4, 9.5, 2.4, 1.4, leaf.b);
     for (const [x, y] of [[3, 4], [8, 6], [6, 1], [3, 9]]) p.set(x, y, leaf.h2);
@@ -186,27 +192,27 @@ function material(id) {
 
 // ------------------------------------------------------------------ armour icons
 function armorIcon(data) {
-  const col = C(data.weight ? materialColor(data) : '#d8b050'), T = C(rarityTrim(data));
-  const M = ramp(col), R = ramp(T), gold = ramp('#d8b050');
+  const col = C(pal(data.weight ? materialColor(data) : RAMPS.gold[3])), T = C(pal(rarityTrim(data)));
+  const M = ramp(col), R = ramp(T), gold = ramp(RAMPS.gold[3]);
   const p = mk(18, 18), e = mk(18, 18);
   const w = data.weight;
   switch (data.slot) {
     case 'helm': {
       if (data.legendary === 'ashencrown' || data.legendary === 'hollowcrown') {
-        const g = ramp(data.legendary === 'ashencrown' ? '#ffc040' : '#a070ff');
+        const g = ramp(data.legendary === 'ashencrown' ? RAMPS.gold[4] : RAMPS.aether[4]);
         p.rect(2, 8, 14, 6, g.b);
         for (const x of [2, 8, 14]) p.poly([[x, 8], [x + 1, 2.5], [x + 2, 8]], g.b);
         shadeBody(p, 2, 2, 14, 12, g);
         for (let x = 3; x < 15; x++) p.set(x, 9, g.h2);
-        p.disc(9, 11, 1.6, '#ff4030'); p.set(8, 10, WHITE); e.disc(9, 11, 1.6, '#ff4030');
-        for (const x of [4, 13]) { p.set(x, 11, '#60c0ff'); e.set(x, 11, '#60c0ff'); }
+        p.disc(9, 11, 1.6, '#cc4a5a'); p.set(8, 10, WHITE); e.disc(9, 11, 1.6, '#cc4a5a');
+        for (const x of [4, 13]) { p.set(x, 11, RAMPS.frost[3]); e.set(x, 11, RAMPS.frost[3]); }
         break;
       }
       if (w === 'cloth') {
         // hood: a soft cowl with a dark opening
         p.ellipse(9, 8, 7, 7, M.b); p.rect(2, 8, 14, 8, M.b);
         shadeBody(p, 2, 1, 14, 15, M);
-        p.ellipse(9, 10, 4, 4.4, '#140e14'); p.rect(5, 10, 8, 5, '#140e14');
+        p.ellipse(9, 10, 4, 4.4, VOID); p.rect(5, 10, 8, 5, VOID);
         p.line(4, 15, 14, 15, R.b); p.line(5, 3, 7, 2, M.h2);
         break;
       }
@@ -214,7 +220,7 @@ function armorIcon(data) {
       shadeBody(p, 2, 2, 14, 14, M);
       p.ellipse(6.5, 5.5, 2.2, 1.4, M.h2); p.set(5, 5, WHITE);
       if (w === 'leather') p.rect(3, 9, 12, 1, M.l2);
-      else { p.rect(3, 9, 12, 2, '#140e14'); p.rect(8, 9, 2, 5, M.b); p.set(8, 9, M.h); }   // visor slit + nose guard
+      else { p.rect(3, 9, 12, 2, VOID); p.rect(8, 9, 2, 5, M.b); p.set(8, 9, M.h); }   // visor slit + nose guard
       if (w === 'mail') for (let y = 11; y < 15; y++) for (let x = 3 + (y & 1); x < 15; x += 2) p.set(x, y, M.l);
       p.rect(2, 15, 14, 2, R.b); p.rect(2, 15, 14, 1, R.h); p.set(9, 2, R.h2);
       break;
@@ -223,7 +229,7 @@ function armorIcon(data) {
       if (w === 'cloth') {
         p.poly([[3, 2], [7, 1], [11, 1], [15, 2], [16.5, 17], [1.5, 17]], M.b);
         shadeBody(p, 1, 1, 16, 16, M);
-        p.poly([[7, 1], [9, 6], [11, 1]], '#1a1018'); p.line(9, 6, 9, 16, M.l);
+        p.poly([[7, 1], [9, 6], [11, 1]], VOID); p.line(9, 6, 9, 16, M.l);
         p.rect(3, 9, 12, 2, R.b); p.rect(3, 9, 12, 1, R.h);
         break;
       }
@@ -281,7 +287,7 @@ function armorIcon(data) {
     }
     default: {
       // charm / pouch: a tied leather bag with a rarity-coloured knot
-      const bag = ramp('#8a6a40');
+      const bag = ramp(RAMPS.wood[4]);
       p.ellipse(9, 11, 6, 5.4, bag.b); p.poly([[6, 4], [12, 4], [11, 7], [7, 7]], bag.b);
       shadeBody(p, 3, 4, 12, 13, bag);
       p.rect(6, 6, 6, 1, R.b); p.set(9, 6, R.h2); p.set(6, 9, bag.h2);
@@ -297,7 +303,7 @@ function build(kind, data) {
   if (kind === 'mat') return material(data.id);
   if (kind === 'cons') return consumable(data.id);
   // ---- items
-  if (data.tome) { const t = tomeSprite(TOMES[data.tome]?.color || '#6a2a20', '#ffe0a0'); return { pix: t.pix, emis: t.emis }; }
+  if (data.tome) { const t = tomeSprite(pal(TOMES[data.tome]?.color || RAMPS.red[3]), CREAM); return { pix: t.pix, emis: t.emis }; }
   if (data.slot === 'mainhand' && data.type) {
     const w = weaponSprite({ ...weaponSpec(data), draw: 0 });
     return { pix: lay(w.pix), emis: w.emis ? lay(w.emis) : null };
@@ -324,4 +330,5 @@ function lay(src) {
   t.ox = Math.floor(t.w / 2); t.oy = t.h - 1;
   return t;
 }
-export const rarityColor = (r) => (RARITY[r] || RARITY.common).color;
+// harmonised rarity colour (master palette) for an item rarity id
+export const rarityColor = (r) => rarityPal(RARITY[r] ? r : 'common');

@@ -7,6 +7,8 @@ import { drawText, textWidth, fontFor, REGULAR, BIG, TINY } from '../src/px/font
 import { pickupSprite } from '../src/px/sprites/items.js';
 import { spikeSprite, totemSprite, iceSprite } from '../src/px/sprites/fx.js';
 import { MATERIALS_LIST, CONSUMABLES } from '../src/data/items.js';
+import { palLight } from '../src/render/elements.js';
+import { INK } from '../src/px/palette.js';
 
 const out = process.argv[2] || '.';
 mkdirSync(out, { recursive: true });
@@ -42,12 +44,12 @@ function sheet(rows, gap = 4) {
   return S;
 }
 
-// ---- font
-const OUT = [24, 12, 20];
+// ---- font (coloured the way floating combat text is: palette fill, ink ring)
+const OUT = C(INK);
 function textPix(text, col, size = 1, outline = OUT) {
   const F = fontFor(text, size);
   const p = new Pix(textWidth(text, F) + 4, F.h + F.desc + 5);
-  const c = C(col), hi = light(c, 1.25), lo = dark(c, 0.8);
+  const c = C(typeof col === 'string' ? palLight(col, 0.7) : col), hi = light(c, 1.3), lo = dark(c, 0.8);
   const fn = (gx, gy, H) => (gy < Math.round(H * 0.3) ? hi : gy >= Math.round(H * 0.78) ? lo : c);
   drawText({ px: (x, y, cc) => p.set(x, y, [cc[0], cc[1], cc[2], 255]) }, 2, 2, text, typeof col === 'string' ? fn : col, F, outline);
   return p;

@@ -29,6 +29,11 @@ vec2 lens(vec2 u) {
   return q / w * zoom + .5;
 }
 vec3 tap(vec2 s, float lod) { return textureLod(src, s, lod).rgb; }
+float gkey(vec3 c) {
+  float mx = max(c.r, max(c.g, c.b)), mn = min(c.r, min(c.g, c.b));
+  float sat = mx > 0. ? (mx - mn) / mx : 0.;
+  return max(dot(c, vec3(.299, .587, .114)), mx * (.55 + .45 * sat) * step(.45, sat));
+}
 void main() {
   vec2 s = lens(uv);
   // tilt-shift: soft far band at the top, a lighter one at the very bottom
@@ -39,11 +44,13 @@ void main() {
     vec2 d = (s - .5) * aberr * .012;
     col = vec3(tap(s + d, b).r, tap(s, b).g, tap(s - d, b).b);
   } else col = texelFetch(src, ivec2(uv * res), 0).rgb;
-  // bloom: bright, wide glow taken from small mip levels
+  // bloom: a soft halo from small mip levels around the brightest pixels. The key is the brighter
+  // of luminance and saturation-weighted value, so violet aether and ember glows catch it as well
+  // as pale cores, while dusty mid-tone ground never does
   vec3 b1 = tap(s, 3.5), b2 = tap(s, 5.);
-  float l1 = dot(b1, vec3(.299, .587, .114)), l2 = dot(b2, vec3(.299, .587, .114));
-  vec3 br = b1 * max(l1 - .8, 0.) * 1.5 + b2 * max(l2 - .72, 0.) * 0.9;
-  col += min(br, vec3(.18)) * bloom;
+  float k1 = gkey(b1), k2 = gkey(b2);
+  vec3 br = b1 * max(k1 - .72, 0.) * 1.6 + b2 * max(k2 - .62, 0.) * 0.9;
+  col += min(br, vec3(.2)) * bloom;
   // sun shafts slanting in from the top left, slowly breathing
   if (rays > .001) {
     vec2 r = uv * vec2(res.x / res.y, 1.);

@@ -1,6 +1,11 @@
 // GPU magic layer. Spells, impacts, auras and lightning are drawn here with WebGL2 shaders on the
-// world's pixel grid (one magic pixel per art pixel, values snapped to dithered steps), then
-// blown up with the world and added on top, so spell effects share the game's pixel density.
+// world's pixel grid (one magic pixel per art pixel), then blown up with the world and laid on top,
+// so spell effects share the game's pixel density.
+//
+// The light is accumulated additively into an offscreen buffer, then a posterize pass turns it into
+// flat palette bands (docs/ART_STYLE.md): a dithered haze, a saturated deep edge, the main colour,
+// a light band that leans warm (violet -> pink, orange -> amber) and a pale hot core. The result is
+// painted over the frame like opaque pixel art instead of being added as soft light.
 //
 // Every visual is an instanced quad with a "kind" picked in the fragment shader: soft glows,
 // velocity-stretched sparks, noisy flames, ground rings, faceted shards, shaded orbs, lightning
@@ -9,6 +14,7 @@
 // everything else is additive.
 import { view } from '../px/view.js';
 import { PPU, C } from '../px/pix.js';
+import { pal } from './elements.js';
 import { G } from '../game.js';
 
 export const K = { GLOW: 0, SPARK: 1, FLAME: 2, RING: 3, SHARD: 4, ORB: 5, BOLT: 6, BEAM: 7, CIRCLE: 8, SHAFT: 9, VORTEX: 10, SHELL: 11, MIST: 12, STAR: 13, ARC: 14, TRAIL: 15, SHADE: 16, SCORCH: 17 };
@@ -39,13 +45,15 @@ in vec2 vUv; in vec2 vPx;
 flat in vec4 v1; flat in vec4 v2; flat in vec4 v3; flat in vec4 v4; flat in vec2 vHalf;
 out vec4 outC;
 uniform int uMode;
-vec2 uv; float d; float seed; float T; float u; vec3 C1; vec3 C2; vec4 P;
+vec2 uv; float d; float seed; float T; float u; vec3 C1; vec3 C2; vec4 P; float PXU;
+// PXU: one art pixel in quad-uv units, from the quad's own size (screen-space derivatives vary
+// between GPUs; this keeps 1-2 px lines exactly 1-2 px everywhere)
 
 float hash(vec2 p) { vec3 p3 = fract(vec3(p.xyx) * .1031); p3 += dot(p3, p3.yzx + 33.33); return fract((p3.x + p3.y) * p3.z); }
 float vnoise(vec2 p) { vec2 i = floor(p), f = fract(p); vec2 w = f * f * (3. - 2. * f);
   return mix(mix(hash(i), hash(i + vec2(1, 0)), w.x), mix(hash(i + vec2(0, 1)), hash(i + vec2(1, 1)), w.x), w.y); }
 float fbm(vec2 p) { float v = 0., a = .5; for (int i = 0; i < 4; i++) { v += a * vnoise(p); p = p * 2.03 + vec2(5.3, 1.7); a *= .5; } return v / .9375; }
-float lineAt(float x, float w) { float aa = fwidth(x); return 1. - smoothstep(w, w + aa * 1.3, abs(x)); }
+float lineAt(float x, float w) { return 1. - step(w + PXU * .5, abs(x)); }
 
 vec3 kGlow() {
   float k = P.y > 0. ? P.y : 4.;
@@ -53,13 +61,14 @@ vec3 kGlow() {
   float core = exp(-d * d * k * 7.) * P.x;
   return mix(C2, C1, exp(-d * d * k * 2.)) * g + vec3(core);
 }
+// streak: a chunky sliver, thickest toward the head, with a hot pale core along its middle
 vec3 kSpark() {
   float t = uv.x * .5 + .5;
-  float w = mix(.15, 1., pow(t, .6));
+  float w = mix(.35, 1., pow(t, .5));
   float ac = uv.y / w;
-  float g = exp(-ac * ac * 4.5) * smoothstep(0., .4, t) * (1. - smoothstep(.86, 1., t));
-  float hot = exp(-ac * ac * 22.) * smoothstep(.35, .95, t) * (1. - smoothstep(.93, 1., t)) * P.x;
-  return C1 * g * mix(.3, 1., t) + mix(C1, vec3(1.), .75) * hot;
+  float g = exp(-ac * ac * 2.6) * smoothstep(0., .3, t) * (1. - smoothstep(.9, 1., t));
+  float hot = exp(-ac * ac * 9.) * smoothstep(.25, .8, t) * (1. - smoothstep(.95, 1., t)) * P.x;
+  return C1 * g * mix(.45, 1.05, t) + mix(C1, vec3(1.), .75) * hot;
 }
 vec3 kFlame() {
   float n = fbm(uv * 1.6 + vec2(seed * 7.1, seed * 3.3 + T * P.y));
@@ -75,7 +84,7 @@ vec3 kFlame() {
 vec3 kRing() {
   float th = max(P.x, .02);
   float k = (d - (1. - th)) / th;
-  float aa = fwidth(d);
+  float aa = PXU;
   float band = pow(clamp(k, 0., 1.), 2.2) * (1. - smoothstep(1. - aa * 1.2, 1., d)) * step(0., k);
   float ang = atan(uv.y, uv.x);
   float nb = mix(1., smoothstep(.2, .8, fbm(vec2(ang * 3.2 + seed * 10., d * 2.5 - T * P.z))), P.y);
@@ -83,29 +92,28 @@ vec3 kRing() {
   float fill = P.w * (1. - smoothstep(0., 1., d)) * .35;
   return C1 * band * nb * 1.25 + mix(C1, vec3(1.), .6) * rim * nb + C2 * fill;
 }
-// faceted crystal. Solid pass: the coloured body (normal blending); light pass: edges, ridge,
-// a travelling glint and a soft halo (additive)
+// angled shard: a sheared parallelogram (long flat edges, pointed ends). Solid pass: the body in
+// flat bands (deep edge, main, lit upper facet, hot core stripe); light pass: a pale core and a
+// travelling glint, plus a thin halo the posterize pass turns into a dithered fringe
+vec2 shQ() { return vec2(uv.x + uv.y * .85, uv.y); }
+float shE(vec2 q) { return max(abs(q.x) / .9, abs(q.y) / .46); }
 vec4 shardSolid() {
-  float e = abs(uv.x) + abs(uv.y) * 1.05;
-  float aa = fwidth(e);
-  float inside = 1. - smoothstep(.8 - aa, .8, e);
-  float top = uv.y < 0. ? 1. : 0.;
-  float front = uv.x > 0. ? 1. : 0.;
-  vec3 lit = mix(C2, C1, .75), mid = mix(C2, C1, .25), dk = C2 * .55;
-  vec3 c = mix(mix(dk, mid, front), mix(mid, lit, front), top);
-  c *= .85 + .3 * (1. - abs(uv.x));
-  float a = inside * .94;
-  return vec4(c * a, a);
+  vec2 q = shQ();
+  float e = shE(q);
+  if (e > 1.) return vec4(0.);
+  vec3 c = q.y < 0. ? mix(C2, C1, .6) : C2 * .82;
+  if (e > .78) c = C2 * .62;
+  if (abs(q.y) < .13 && abs(q.x) < .62) c = mix(C1, vec3(1.), .55);
+  return vec4(c * .97, .97);
 }
 vec3 kShard() {
-  float e = abs(uv.x) + abs(uv.y) * 1.05;
-  float aa = fwidth(e);
-  float inside = 1. - smoothstep(.8 - aa, .8, e);
-  float ridge = exp(-pow(uv.y / max(fwidth(uv.y) * 1.2, .03), 2.)) * step(abs(uv.x), .78);
-  float border = 1. - smoothstep(0., aa * 1.8, abs(e - .78));
-  float gl = exp(-pow((uv.x - (fract(T * 1.4 + seed) * 2.4 - 1.2)) * 5., 2.));
-  vec3 halo = C2 * exp(-max(e - .8, 0.) * 9.) * .45 * (1. - inside) * (1. - smoothstep(.95, 1., max(abs(uv.x), abs(uv.y))));
-  return mix(C1, vec3(1.), .55) * (ridge * inside * .3 * step(uv.y, 0.) + border * .45 + gl * inside * .55) + halo;
+  vec2 q = shQ();
+  float e = shE(q);
+  float inside = step(e, 1.);
+  float core = step(abs(q.y), .12) * step(abs(q.x), .55);
+  float gl = exp(-pow((q.x - (fract(T * 1.4 + seed) * 2.4 - 1.2)) * 4., 2.));
+  vec3 halo = C2 * exp(-max(e - 1., 0.) * 7.) * .38 * (1. - inside);
+  return mix(C1, vec3(1.), .6) * inside * (core * .5 + gl * .35) + halo;
 }
 vec3 kOrb() {
   float r = P.y > 0. ? P.y : .5;
@@ -120,7 +128,7 @@ vec3 kOrb() {
     float fres = pow(1. - n.z, 2.);
     float spec = pow(max(dot(reflect(-L, n), vec3(0., 0., 1.)), 0.), 24.);
     vec2 sp = n.xy / (n.z + .55);
-    float edge = 1. - smoothstep(1. - fwidth(dl) * 1.5, 1., dl);
+    float edge = step(dl, 1.);
     vec3 b;
     if (el == 1) {
       float f = fbm(sp * 2.2 + vec2(T * 1.8 + seed, -T * 2.8));
@@ -160,8 +168,8 @@ float capsule(float L) { return length(vec2(max(abs(vPx.x) - L, 0.), vPx.y)); }
 vec3 kBolt() {
   float dist = capsule(max(vHalf.x - vHalf.y, 0.));
   float g = exp(-pow(dist / vHalf.y, 2.) * 3.2);
-  float core = 1. - smoothstep(P.x * .5, P.x * .5 + 1.2, dist);
-  return C1 * g + mix(C1, vec3(1.), .85) * core;
+  float core = 1. - step(P.x * .5 + .5, dist);
+  return C2 * g + mix(C1, vec3(1.), .5) * core;
 }
 vec3 kBeam() {
   float dist = capsule(max(vHalf.x - vHalf.y, 0.));
@@ -173,7 +181,7 @@ vec3 kBeam() {
   return C2 * g * .85 + C1 * streak * g + vec3(1.) * core;
 }
 vec3 kCircle() {
-  float aa = fwidth(d);
+  float aa = PXU;
   float ang = atan(uv.y, uv.x);
   float rot = P.y;
   float a01 = fract((ang + 3.14159265) / 6.2831853 + .75);
@@ -211,7 +219,7 @@ vec3 kCircle() {
   c += lineAt(d - .3, lw) * smoothstep(.4, .8, P.x);
   c += lineAt(d - .74, lw * .6) * smoothstep(.3, .7, P.x) * .6;
   float glow = exp(-pow((d - .9) / .09, 2.)) * .4 + (1. - smoothstep(0., 1., d)) * .12;
-  return mix(C1, vec3(1.), .35) * min(c, 1.2) + C2 * glow;
+  return C1 * min(c, 1.) * .92 + C2 * glow;
 }
 vec3 kShaft() {
   float ax = abs(uv.x);
@@ -235,7 +243,7 @@ vec3 kVortex() {
 }
 vec3 kShell() {
   if (d > 1.) return vec3(0.);
-  float aa = fwidth(d);
+  float aa = PXU;
   float rim = pow(d, P.x > 0. ? P.x : 5.) * (1. - smoothstep(1. - aa * 1.5, 1., d));
   float n = fbm(uv * 3. + seed + T * .5);
   float spec = exp(-pow(length(uv - vec2(-.35, -.42)) / .22, 2.)) * .45;
@@ -260,16 +268,20 @@ vec3 kArc() {
   if (span <= .001) return vec3(0.);
   float t = (rel - P.z) / span;
   if (t < 0. || t > 1.) return vec3(0.);
-  float th = P.w * pow(t, .5);
-  float k = (1. - d) / max(th, .001);
+  // facets: every ~0.32 rad the rim is a straight chord, and the thickness steps per facet, so
+  // the crescent reads as a run of angled parallelogram chunks
+  float stp = .32, fi = floor(rel / stp), mid = (fi + .5) * stp;
+  float dp = d * cos(rel - mid) / cos(stp * .5);
+  float tq = clamp((floor(t * 7.) + 1.) / 7., 0., 1.);
+  float th = P.w * pow(tq, .55);
+  float k = (1. - dp) / max(th, .001);
   float n = fbm(vec2(rel * 6. + seed, d * 5. - T * 3.));
-  if (k < 0.) return C2 * exp(-pow((d - 1.) / .05, 2.)) * t * .5;
+  if (k < 0.) return C2 * step(dp, 1.05) * t * .4;
   if (k > 1.) return vec3(0.);
-  float prof = (1. - k) * (1. - k);
-  float lines = smoothstep(.55, .85, fbm(vec2(rel * 16. + seed * 3., k * 2.2)));
-  vec3 c = mix(C2, C1, 1. - k) * (.5 + .6 * n + .5 * lines) * prof * smoothstep(0., .35, t);
-  c += mix(C1, vec3(1.), .7) * smoothstep(.8, 1., 1. - k) * smoothstep(.4, 1., t) * .9;
-  c += C1 * exp(-pow((t - 1.) * 14., 2.)) * (1. - k) * .8;
+  // bands from the rim inward: hot pale edge, light, the colour, a deep inner lip
+  vec3 c = k < .28 ? mix(C1, vec3(1.), .55) * 1.2 : k < .55 ? C1 : k < .82 ? C2 * .95 : C2 * .55;
+  c *= smoothstep(0., .2, t) * (.9 + .2 * n);
+  c += mix(C1, vec3(1.), .7) * step(.93, t) * (1. - k);
   return c;
 }
 vec3 kTrail() {
@@ -288,7 +300,7 @@ const float BAY[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 
 float bay() { ivec2 q = ivec2(gl_FragCoord.xy) & 3; return (BAY[q.y * 4 + q.x] + .5) / 16.; }
 vec3 steps(vec3 c) { float b = bay(); return floor(c * 10. + b) / 10.; }
 void main() {
-  uv = vUv; d = length(uv); seed = v1.w; u = v2.w; T = v3.w; C1 = v2.rgb; C2 = v3.rgb; P = v4;
+  uv = vUv; d = length(uv); seed = v1.w; u = v2.w; T = v3.w; C1 = v2.rgb; C2 = v3.rgb; P = v4; PXU = 1. / max(1., min(vHalf.x, vHalf.y));
   int kind = int(v1.y + .5);
   if (uMode == 1) {
     // darkening pass (composited with multiply): C1 is the tint the ground is multiplied by
@@ -320,8 +332,51 @@ void main() {
     case 14: c = kArc(); break;
     default: c = kTrail(); break;
   }
-  c = steps(clamp(c * v1.z, 0., 1.));
+  c = clamp(c * v1.z, 0., 1.);
   outC = vec4(c, max(c.r, max(c.g, c.b)));
+}`;
+
+// Posterize: the accumulated light -> flat palette bands. Value and whiteness pick the band; the
+// pixel's own hue picks the colour, shifted the way the master ramps shift (shadows toward plum
+// violet, highlights toward warm cream; blues lighten toward pale ice instead).
+const VS2 = `#version 300 es
+layout(location=0) in vec2 corner;
+void main() { gl_Position = vec4(corner, 0., 1.); }`;
+const FS2 = `#version 300 es
+precision highp float;
+uniform sampler2D uSrc;
+out vec4 o;
+const float BAY[16] = float[16](0., 8., 2., 10., 12., 4., 14., 6., 3., 11., 1., 9., 15., 7., 13., 5.);
+vec3 rgb2hsv(vec3 c) {
+  vec4 K = vec4(0., -1. / 3., 2. / 3., -1.);
+  vec4 p = mix(vec4(c.bg, K.wz), vec4(c.gb, K.xy), step(c.b, c.g));
+  vec4 q = mix(vec4(p.xyw, c.r), vec4(c.r, p.yzx), step(p.x, c.r));
+  float d = q.x - min(q.w, q.y), e = 1e-10;
+  return vec3(abs(q.z + (q.w - q.y) / (6. * d + e)), d / (q.x + e), q.x);
+}
+vec3 hsv2rgb(vec3 c) { vec3 p = abs(fract(c.xxx + vec3(1., 2. / 3., 1. / 3.)) * 6. - 3.); return c.z * mix(vec3(1.), clamp(p - 1., 0., 1.), c.y); }
+float toward(float h, float t, float a) { float d = t - h; d -= floor(d + .5); return fract(h + sign(d) * min(abs(d), a)); }
+void main() {
+  ivec2 ip = ivec2(gl_FragCoord.xy);
+  vec3 c = texelFetch(uSrc, ip, 0).rgb;
+  float v = max(c.r, max(c.g, c.b));
+  if (v < .075) { o = vec4(0.); return; }
+  float w = min(c.r, min(c.g, c.b)) / v;
+  vec3 hsv = rgb2hsv(c);
+  float h = hsv.x, s = hsv.y;
+  float heat = v + .25 * w;
+  float b = (BAY[(ip.y & 3) * 4 + (ip.x & 3)] + .5) / 16.;
+  bool ice = h > .48 && h < .7;
+  vec3 col;
+  if (heat < .5) {
+    // haze: a sparse then a checker dither of the deep edge colour, then the edge solid
+    if (heat < .17 && b > .25) { o = vec4(0.); return; }
+    if (heat < .31 && b > .5) { o = vec4(0.); return; }
+    col = hsv2rgb(vec3(toward(h, .79, .05), clamp(s * 1.25 + .05, 0., .88), .7));
+  } else if (heat < .985) col = hsv2rgb(vec3(h, clamp(s * 1.08, 0., .9), .94));
+  else if (heat < 1.16) col = ice ? hsv2rgb(vec3(toward(h, .53, .02), s * .5, .97)) : hsv2rgb(vec3(toward(h, .122, .09), s * .55, 1.));
+  else col = ice ? hsv2rgb(vec3(h, s * .16, 1.)) : hsv2rgb(vec3(toward(h, .122, .16), s * .22, 1.));
+  o = vec4(col, 1.);
 }`;
 
 // ------------------------------------------------------------------ GL setup
@@ -363,7 +418,22 @@ function setup(cv) {
       gl.vertexAttribDivisor(1 + i, 1);
     }
     gl.bindVertexArray(null);
-    Object.assign(M, { ok: true, cv, gl, prog, vao, ibuf: ib, uRes: gl.getUniformLocation(prog, 'uRes'), uMode: gl.getUniformLocation(prog, 'uMode'), W: 0, H: 0 });
+    // posterize pass: a full-screen quad reading the accumulated light from a texture
+    const prog2 = gl.createProgram();
+    gl.attachShader(prog2, sh(gl.VERTEX_SHADER, VS2)); gl.attachShader(prog2, sh(gl.FRAGMENT_SHADER, FS2));
+    gl.linkProgram(prog2);
+    if (!gl.getProgramParameter(prog2, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog2));
+    const vao2 = gl.createVertexArray();
+    gl.bindVertexArray(vao2);
+    gl.bindBuffer(gl.ARRAY_BUFFER, qb);
+    gl.enableVertexAttribArray(0); gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+    gl.bindVertexArray(null);
+    const tex = gl.createTexture();
+    gl.bindTexture(gl.TEXTURE_2D, tex);
+    for (const [k, v] of [[gl.TEXTURE_MIN_FILTER, gl.NEAREST], [gl.TEXTURE_MAG_FILTER, gl.NEAREST], [gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE], [gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE]]) gl.texParameteri(gl.TEXTURE_2D, k, v);
+    const fbo = gl.createFramebuffer();
+    Object.assign(M, { ok: true, cv, gl, prog, vao, ibuf: ib, uRes: gl.getUniformLocation(prog, 'uRes'), uMode: gl.getUniformLocation(prog, 'uMode'), W: 0, H: 0,
+      prog2, vao2, tex, fbo, uSrc: gl.getUniformLocation(prog2, 'uSrc'), texW: 0, texH: 0 });
     return true;
   } catch (e) {
     console.warn('magic layer unavailable', e);
@@ -386,10 +456,11 @@ export const myw = (wy) => ((wy - view.y0) * S + OY) * F;
 
 // ------------------------------------------------------------------ instance queue
 const cache = new Map();
+// hex -> [r,g,b], snapped to the master palette (other modules pass their own colours)
 export const col = (c) => {
   if (Array.isArray(c)) return c;
   let v = cache.get(c);
-  if (!v) { v = C(c); cache.set(c, v); }
+  if (!v) { v = C(pal(c)); cache.set(c, v); }
   return v;
 };
 // push one quad. c1/c2: [r,g,b] 0..255. pass: 'add' | 'max'
@@ -489,7 +560,7 @@ function drawParts() {
         const vx = p.vx * UPX, vy = (p.vz - p.vy) * UPX;
         const v = Math.hypot(vx, vy);
         const len = Math.max(sz * 1.2, v * p.stretch + sz);
-        quad(x - vx / Math.max(v, 1e-3) * len * 0.7, y - vy / Math.max(v, 1e-3) * len * 0.7, len, Math.max(1.2, sz * 0.45), Math.atan2(vy, vx), K.SPARK, a, c1, p.c2, p.hot);
+        quad(x - vx / Math.max(v, 1e-3) * len * 0.7, y - vy / Math.max(v, 1e-3) * len * 0.7, len, Math.max(1.6, sz * 0.5), Math.atan2(vy, vx), K.SPARK, a, c1, p.c2, p.hot);
         break;
       }
       case K.SHARD: {
@@ -575,15 +646,33 @@ export function drawMagic(ctx, ox, oy) {
     ctx.globalCompositeOperation = 'source-over';
     ctx.drawImage(M.cv, 0, 0, W, H, ox, oy, W * sc, H * sc);
   }
-  // 3) light pass: ribbons (MAX) then everything else (additive)
+  // 3) light pass: ribbons (MAX) then everything else (additive), accumulated offscreen, then
+  //    posterized into flat palette bands and painted over the frame
   if (M.add.n || M.max.n) {
+    if (M.texW !== W || M.texH !== H) {
+      gl.bindTexture(gl.TEXTURE_2D, M.tex);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA8, W, H, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
+      gl.bindFramebuffer(gl.FRAMEBUFFER, M.fbo);
+      gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, M.tex, 0);
+      M.texW = W; M.texH = H;
+    }
+    gl.bindFramebuffer(gl.FRAMEBUFFER, M.fbo);
     gl.clearColor(0, 0, 0, 0);
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.uniform1i(M.uMode, 0);
     gl.blendFunc(gl.ONE, gl.ONE);
     run(M.max, gl.MAX);
     run(M.add, gl.FUNC_ADD);
-    ctx.globalCompositeOperation = 'lighter';
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+    gl.disable(gl.BLEND);
+    gl.clear(gl.COLOR_BUFFER_BIT);
+    gl.useProgram(M.prog2);
+    gl.bindVertexArray(M.vao2);
+    gl.activeTexture(gl.TEXTURE0);
+    gl.bindTexture(gl.TEXTURE_2D, M.tex);
+    gl.uniform1i(M.uSrc, 0);
+    gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+    ctx.globalCompositeOperation = 'source-over';
     ctx.drawImage(M.cv, 0, 0, W, H, ox, oy, W * sc, H * sc);
   }
   gl.bindVertexArray(null);
