@@ -915,7 +915,7 @@ export default {
   // carries the lanterns of the crews it ate, staked into its plates like trophies; they swing as
   // it moves and they are its weak points.
   mine_horror: {
-    view: 'side', box: [70, 40], pivot: 0.6, idle: 6, run: 4, idleFps: 5, scale: 0.78,
+    view: 'side', box: [66, 44], pivot: 0.6, idle: 6, run: 4, idleFps: 5, scale: 0.92,
     draw(F, o, P) {
       const { u, ox, oy } = F;
       const fur = cols('#140f1c', '#1d1426', '#2e2238', '#433452', '#5e4c6e'), furD = fur.map((c) => dark(c, 0.85));
@@ -931,19 +931,20 @@ export default {
       const L = layer(F);
       // ---- centipede spine: neck -> tail, undulating
       const N = 9, wave = (i) => (idle ? sin(t + i * 0.12) * 0.5 : run ? sin(t * 2 + i * 0.25) * 0.9 : 0);
-      const spine = bez([U(3, -11 - rear * 0.5), U(-7, -6.6), U(-20, -5.6), U(-31, -9.6)], N - 1).map(([x, y], i) => [x, y + wave(i) * u]);
+      const spine = bez([U(2.4, -13 - rear * 0.5), U(-7, -6.4), U(-19, -5.4), U(-29, -9.6)], N - 1).map(([x, y], i) => [x, y + wave(i) * u]);
       const rad = (i) => (4.6 - i * 0.32) * u;
       // far legs, all segments
       const segLegs = (far) => {
         const Lg = layer(F), Rm = far ? iron.map((c) => dark(c, 0.8)) : iron;
         for (let i = 0; i < N; i++) {
-          const [cx, cy] = spine[i], r = rad(i), hip = [cx + (far ? 1 : -0.4) * u, cy + r * 0.6];
-          let foot = [cx + (far ? 1.6 : -0.8) * u + 1.4 * u, oy];
-          if (run) { const [dx, lift] = stride(t * 2 + i * 0.22 + (far ? 0.5 : 0), 3 * u, 1.2 * u); foot = [foot[0] + dx, oy - lift]; }
+          const [cx, cy] = spine[i], r = rad(i), hip = [cx + (far ? 1.2 : -0.2) * u, cy + r * 0.55];
+          let foot = [cx + (far ? 2.2 : -1.6) * u + (i % 2 ? 0.8 : -0.4) * u, oy];
+          if (run) { const [dx, lift] = stride(t * 2 + i * 0.22 + (far ? 0.5 : 0), 3 * u, 1.4 * u); foot = [foot[0] + dx, oy - lift]; }
           else if (idle) foot = [foot[0] + sin(t + i * 0.3) * 0.4 * u, oy];
-          const kn = [lerp(hip[0], foot[0], 0.3) + 1.4 * u, Math.min(hip[1], foot[1]) - 0.4 * u + (foot[1] - hip[1]) * 0.3];
-          tube(Lg, [hip, kn], [0.8 * u, 0.6 * u], Rm);
+          const kn = [hip[0] + (far ? 2.4 : 2) * u, lerp(hip[1], foot[1], 0.35) - 0.8 * u];
+          tube(Lg, [hip, kn], [0.75 * u, 0.6 * u], Rm);
           tube(Lg, [kn, foot], [0.6 * u, 0.3 * u], Rm);
+          Lg.set(R(kn[0]), R(kn[1] - 0.4 * u), Rm[4]);
         }
         put(L, Lg, !far);
       };
@@ -967,7 +968,7 @@ export default {
       horn(Pk, [pk[0] - 4 * u, pk[1] - 8 * u], [pk[0] - 5.6 * u, pk[1] - 7.6 * u], [pk[0] - 6.6 * u, pk[1] - 6 * u], 1.2 * u, iron);
       put(L, Pk, true);
       const lamps = [];
-      [1, 3, 7].forEach((i, k) => {
+      [1, 3, 6, 8].forEach((i, k) => {
         const [cx, cy] = spine[i], r = rad(i), base = [cx + 0.4 * u, cy - r * 0.8];
         const top = [base[0] - 1.2 * u + k * 0.4 * u, base[1] - (4.6 - k * 0.6) * u];
         const Lp = layer(F);
@@ -977,19 +978,19 @@ export default {
         const hook = [top[0] + 1.6 * u, top[1] - 0.4 * u], lc = [hook[0] + Math.sin(sw) * 2.2 * u, hook[1] + Math.cos(sw) * 2.2 * u];
         Lp.line(hook[0], hook[1], lc[0], lc[1] - 1.2 * u, iron[2]);
         // the lantern: brass cap, iron cage, glowing glass
-        Lp.rect(R(lc[0] - 1.1 * u), R(lc[1] - 1.4 * u), R(2.2 * u), R(0.6 * u), brass[3]);
-        Lp.rect(R(lc[0] - 1 * u), R(lc[1] - 0.9 * u), R(2 * u), R(2.6 * u), iron[2]);
-        Lp.rect(R(lc[0] - 1.1 * u), R(lc[1] + 1.6 * u), R(2.2 * u), R(0.5 * u), brass[2]);
+        Lp.poly([[lc[0] - 1.4 * u, lc[1] - 1.1 * u], [lc[0] + 1.4 * u, lc[1] - 1.1 * u], [lc[0], lc[1] - 2.2 * u]], brass[3]);
+        Lp.rect(R(lc[0] - 1.3 * u), R(lc[1] - 1.1 * u), R(2.6 * u), R(3.2 * u), iron[2]);
+        Lp.rect(R(lc[0] - 1.5 * u), R(lc[1] + 2 * u), R(3 * u), R(0.6 * u), brass[2]);
         put(L, Lp, true);
         lamps.push(lc);
       });
       segLegs(false);
       // ---- the mole: shoulders and neck in velvet fur
-      const hx = U(12.4, -17.4 - rear)[0], hy = U(12.4, -17.4 - rear)[1];
+      const hx = U(12, -22.4 - rear)[0], hy = U(12, -22.4 - rear)[1];
       const farArm = () => {
-        const A = layer(F), sh = U(6.4, -11 - rear * 0.6);
-        const palm = wind ? U(13, -24) : strike ? U(19, -4) : hurt ? U(9, -6) : U(11 + (run ? sin(t * 2) * 1.6 : 0), -1.6 - (run ? Math.max(0, sin(t * 2)) * 1.6 : 0));
-        const el = ik(sh, palm, 5.6 * u, 6 * u, 1);
+        const A = layer(F), sh = U(6.4, -13.4 - rear * 0.6);
+        const palm = wind ? U(14, -28) : strike ? U(19, -4) : hurt ? U(9, -6) : U(11 + (run ? sin(t * 2) * 1.6 : 0), -1.6 - (run ? Math.max(0, sin(t * 2)) * 1.6 : 0));
+        const el = ik(sh, palm, 6.6 * u, 6.6 * u, 1);
         tube(A, [sh, el, palm], [2.6 * u, 1.8 * u], furD, { fur: 3 });
         blob(A, [[palm[0] + 0.6 * u, palm[1] - 0.4 * u, 2.4 * u, 1.6 * u]], flesh.map((c) => dark(c, 0.8)));
         for (let k = 0; k < 4; k++) { const r0 = [palm[0] + 2 * u, palm[1] - 1.2 * u + k * 0.8 * u]; horn(A, r0, [r0[0] + 1.8 * u, r0[1] - 0.2 * u], [r0[0] + 3 * u, r0[1] + 1.2 * u], 0.9 * u, claw.map((c) => dark(c, 0.8))); }
@@ -997,7 +998,7 @@ export default {
       };
       farArm();
       const Bd = layer(F);
-      blob(Bd, [[...U(3.4, -11 - rear * 0.5), 6.2 * u, 5.8 * u], [...U(7.6, -14.6 - rear * 0.8), 4.6 * u, 4.6 * u]], fur, { fur: 5 });
+      blob(Bd, [[...U(3.4, -11.4 - rear * 0.5), 6.4 * u, 6.2 * u], [...U(6.8, -16.4 - rear * 0.8), 5 * u, 5.2 * u], [...U(9.4, -20 - rear), 3.8 * u, 3.8 * u]], fur, { fur: 5 });
       // velvet sheen: a soft lit crescent across the shoulders
       for (let a = 3.6; a < 4.9; a += 0.03) over(Bd, U(3.4, -11 - rear * 0.5)[0] + Math.cos(a) * 4.8 * u, U(3.4, -11 - rear * 0.5)[1] + Math.sin(a) * 4.4 * u, fur[4]);
       put(L, Bd, true);
@@ -1012,11 +1013,12 @@ export default {
       const nb = [hx + 5.4 * u, hy + 0.2 * u], spin = (idle || run ? P.i : 0) * 0.25 + (wind ? 0.5 : 0);
       const Ns = layer(F);
       for (let k = 0; k < 11; k++) {
-        const a = -1.75 + (k / 10) * 3.5, wr = sin(t * 2 + k * 0.37) * (hurt ? 0.5 : 0.18), l = (2.4 + (k % 2) * 0.7) * u * (hurt ? 1.25 : 1);
-        horn(Ns, nb, [nb[0] + Math.cos(a + wr) * l * 0.6, nb[1] + Math.sin(a + wr) * l * 0.6], [nb[0] + Math.cos(a + wr * 2) * l, nb[1] + Math.sin(a + wr * 2) * l], 1.1 * u, flesh, { pow: 0.4 });
+        const a = -1.95 + (k / 10) * 3.9, wr = sin(t * 2 + k * 0.37) * (hurt ? 0.5 : 0.2), l = (3.6 + (k % 2) * 1.1) * u * (hurt ? 1.25 : 1);
+        horn(Ns, nb, [nb[0] + Math.cos(a + wr) * l * 0.6, nb[1] + Math.sin(a + wr) * l * 0.6], [nb[0] + Math.cos(a + wr * 2) * l, nb[1] + Math.sin(a + wr * 2) * l], 1.3 * u, flesh, { pow: 0.3 });
+        over(Ns, nb[0] + Math.cos(a + wr * 2) * l * 0.92, nb[1] + Math.sin(a + wr * 2) * l * 0.92, flesh[4]);
       }
       put(L, Ns, true);
-      const Dr = layer(F), dl = (strike ? 8.4 : 6.4) * u, dw = 2.2 * u;
+      const Dr = layer(F), dl = (strike ? 7 : 5.2) * u, dw = 1.8 * u;
       Dr.poly([[nb[0], nb[1] - dw], [nb[0] + dl, nb[1]], [nb[0], nb[1] + dw]], flesh[3]);
       for (let k = 0; k < 6; k++) {
         const f = ((k + spin * 2) % 6) / 6, x0 = nb[0] + f * dl * 0.92;
@@ -1026,9 +1028,9 @@ export default {
       }
       put(L, Dr, true);
       // near arm: a shovel hand with long cream claws
-      const A = layer(F), sh = U(5, -9.6 - rear * 0.6);
-      const palm = wind ? U(11, -25) : strike ? U(20.4, -2.6) : hurt ? U(8, -4) : U(9.4 + (run ? -sin(t * 2) * 1.6 : 0), -1.6 - (run ? Math.max(0, -sin(t * 2)) * 1.6 : 0));
-      const el = ik(sh, palm, 5.6 * u, 6 * u, 1);
+      const A = layer(F), sh = U(5.4, -12.4 - rear * 0.6);
+      const palm = wind ? U(12, -29) : strike ? U(20.4, -2.6) : hurt ? U(8, -4) : U(9.4 + (run ? -sin(t * 2) * 1.6 : 0), -1.6 - (run ? Math.max(0, -sin(t * 2)) * 1.6 : 0));
+      const el = ik(sh, palm, 6.6 * u, 6.6 * u, 1);
       tube(A, [sh, el, palm], [2.9 * u, 2 * u], fur, { fur: 4 });
       blob(A, [[palm[0] + 0.6 * u, palm[1] - 0.4 * u, 2.6 * u, 1.8 * u]], flesh);
       for (let k = 0; k < 4; k++) { const r0 = [palm[0] + 2.2 * u, palm[1] - 1.3 * u + k * 0.85 * u]; horn(A, r0, [r0[0] + 2 * u, r0[1] - 0.2 * u], [r0[0] + 3.4 * u, r0[1] + 1.3 * u], 1 * u, claw); }
@@ -1041,7 +1043,8 @@ export default {
       // the lanterns' glass: warm light, the weak points (they gutter when it is hurt)
       lamps.forEach((lc, k) => {
         const flick = hurt ? 0 : (idle ? P.i + k : 0) % 3 === 0 ? 1 : 0;
-        glow(F, lc[0], lc[1] + 0.4 * u, 0.85 * u, hurt ? '#c2401c' : '#f8b848', { core: flick ? '#fff4dc' : '#fff0b0', halo: !hurt });
+        glow(F, lc[0], lc[1] + 0.5 * u, 1.05 * u, hurt ? '#c2401c' : '#f8b848', { core: flick ? '#fff4dc' : '#fff0b0', halo: !hurt });
+        for (const Ld of [F.p]) Ld.line(lc[0], lc[1] - 1 * u, lc[0], lc[1] + 2 * u, iron[1]);
       });
       F.mouth = [nb[0] + dl, nb[1]];
     },

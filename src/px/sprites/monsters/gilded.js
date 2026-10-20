@@ -65,6 +65,7 @@ export const assign = {
   plague_rat: { design: 'rat_king', name: 'Rat King' },
   ghoul: { design: 'lantern_ghoul', name: 'Ghoul' },
   wraith: { design: 'candle_wraith', name: 'Candle Wraith' },
+  bone_warden: { design: 'bone_warden', name: 'The Bone Warden' },
 };
 
 export default {
@@ -764,6 +765,162 @@ export default {
       }
       if (w2 || w1) { const mw = Math.max(2, R((w2 ? 1.6 : 1) * u)), mh = Math.max(1, R((w2 ? 1.2 : 0.6) * u)), mx = R(fx0 - mw / 2), my = R(fy0 - fh * 0.16); F.p.rect(mx, my, mw, mh, VOID); for (let yy = my; yy < my + mh; yy++) for (let xx = mx; xx < mx + mw; xx++) F.e.clear(xx, yy); }
       wisp(F, fx0, fy0 - fh * 0.45, fw * 1.1, fh * 0.7, AEf[3], 0.3, 120);
+    },
+  },
+  // The Bone Warden (bone_warden): the ossuary's keeper, built from the bones it guards like a
+  // chapel's bone chandelier. A ring of candle-bearing skulls turns slowly about its head, a bronze
+  // bell with a skull for a clapper hangs in a ribcage of femurs and tolls as it moves, skulls cap
+  // its shoulders and knees. It carries a halberd of a spine with a shoulder-blade axe.
+  bone_warden: {
+    view: 'front', box: [36, 46], pivot: 0.5, idle: 6, idleFps: 5, scale: 0.9,
+    draw(F, o, P) {
+      const { u } = F, X = UX(F), Y = UY(F);
+      const Bn = pal5('sand', 5), Bd = Bn.map((c) => dark(c, 0.8)), Bz = pal5('gold', 4), Fe = pal5('steel', 4), Wx = ramp('#ecdcb4'), V = pal5('teal', 5);
+      const t = P.t, idle = P.act === 'idle', run = P.act === 'run', w1 = P.atk === 1, w2 = P.atk === 2, hurt = P.hurt;
+      const sway = run ? sin(t) * 0.7 : idle ? sin(t) * 0.25 : 0;
+      const sink = w2 ? 1.8 : w1 ? -0.6 : hurt ? 0.7 : run ? -Math.abs(sin(t)) * 0.6 : idle ? sin(t * 2) * 0.2 : 0;
+      const lean = (w1 ? -0.8 : w2 ? 1 : hurt ? -1.1 : 0) + sway * 0.5;
+      const by = (y) => y + sink, bx = (x, k = 1) => x + lean * k;
+      const L = layer(F);
+      // ---------------- the chandelier crown: ring, skulls, candles; back half first
+      const hx = bx(0, 1.2), hy = by(-33.4) + (hurt ? -0.4 : 0);
+      const ccx = hx + sway * 0.4, ccy = hy - 4.2, crx = 8.6, cry = 2.1, spin = (idle ? t : run ? t * 0.5 : 0) * (TAU / 6);
+      const ring = (front) => {
+        const Rg = layer(F);
+        for (let a = 0; a < TAU; a += 0.02) { const z = Math.sin(a); if ((z >= 0) !== front) continue; const x = X(ccx + Math.cos(a) * crx), y = Y(ccy + z * cry); Rg.rect(R(x), R(y), 1, Math.max(2, R(0.7 * u)), z > 0.3 ? Fe[3] : Fe[1]); }
+        put(L, Rg, false);
+        const sk = [];
+        for (let k = 0; k < 6; k++) { const a = (k / 6) * TAU + spin + 0.26, z = Math.sin(a); if ((z >= 0) !== front) continue; sk.push([Math.cos(a), z, k]); }
+        sk.sort((p, q) => p[1] - q[1]);
+        for (const [c, z, k] of sk) {
+          const Sk = layer(F), r = (1.45 + z * 0.3) * u, x = X(ccx + c * crx), y = Y(ccy + z * cry) - r * 0.6;
+          skull(Sk, x, y, r, z < 0 ? Bd : Bn);
+          Sk.rect(R(x - 0.35 * u), R(y - r - 1.8 * u), Math.max(2, R(0.7 * u)), R(1.9 * u), Wx[z < 0 ? 2 : 3]);
+          Sk.set(R(x - 0.35 * u), R(y - r - 1.8 * u), Wx[4]);
+          put(L, Sk, true);
+          cands.push([x, y - r - 1.8 * u, k, z]);
+        }
+      };
+      const cands = [];
+      ring(false);
+      // ---------------- legs: femur bundles, skull kneecaps, broad bone feet
+      const leg = (s) => {
+        const Lg = layer(F), hip = [bx(s * 3.4, 0.3), by(-11.6)];
+        const lift = run ? Math.max(0, sin(t + (s > 0 ? 0.5 : 0))) * 2.4 : 0;
+        const ft = [s * 4.6 + (w2 ? s * 0.8 : 0) + (run ? sin(t + (s > 0 ? 0.5 : 0)) * 0.6 * s : 0), -lift];
+        const kn = [lerp(hip[0], ft[0], 0.5) + s * 0.6, lerp(hip[1], ft[1], 0.52)];
+        tube(Lg, PU(F, [hip, kn]), [1.5 * u, 1.2 * u], Bn);
+        tube(Lg, PU(F, [[hip[0] - s * 1.1, hip[1] + 0.6], [kn[0] - s * 1, kn[1]]]), [0.9 * u, 0.8 * u], Bd);
+        tube(Lg, PU(F, [kn, [ft[0] - s * 0.4, ft[1] - 1.4]]), [1.1 * u, 0.9 * u], Bn);
+        tube(Lg, PU(F, [[kn[0] + s * 0.9, kn[1] + 0.6], [ft[0] + s * 0.6, ft[1] - 1.4]]), [0.6 * u, 0.5 * u], Bd);
+        slab(Lg, PU(F, [[ft[0] - 2.4, ft[1] - 1.8], [ft[0] + 2.4, ft[1] - 1.8], [ft[0] + 3, ft[1]], [ft[0] - 3, ft[1]]]), Bn);
+        for (let k = -1; k <= 1; k++) Lg.line(X(ft[0] + k * 1.4), Y(ft[1] - 0.4), X(ft[0] + k * 1.6), Y(ft[1]), Bn[1]);
+        put(L, Lg, true);
+        skull(L, X(kn[0]), Y(kn[1] - 0.6), 1.55 * u, Bn);
+      };
+      leg(-1); leg(1);
+      // ---------------- pelvis basin and the stacked spine
+      const Pv = layer(F);
+      blob(Pv, [[X(bx(-2.6, 0.4)), Y(by(-13)), 3.2 * u, 2.2 * u], [X(bx(2.6, 0.4)), Y(by(-13)), 3.2 * u, 2.2 * u], [X(bx(0, 0.4)), Y(by(-12)), 1.6 * u, 1.8 * u]], Bn);
+      Pv.ellipse(X(bx(-2.4, 0.4)), Y(by(-12.6)), 1 * u, 0.9 * u, VOID); Pv.ellipse(X(bx(2.4, 0.4)), Y(by(-12.6)), 1 * u, 0.9 * u, VOID);
+      for (let k = 0; k < 4; k++) blob(Pv, [[X(bx(0, 0.5 + k * 0.1)), Y(by(-14.6 - k * 1.1)), 1.1 * u, 0.6 * u]], k % 2 ? Bd : Bn);
+      put(L, Pv, true);
+      // ---------------- the ribcage: a dark cavity, the bell hanging in it, femur ribs over it
+      const rcx = bx(0, 0.8), rcy = by(-22.4);
+      const Cv = layer(F);
+      Cv.ellipse(X(rcx), Y(rcy), 6.6 * u, 6.4 * u, C('#2a1838'));
+      Cv.ellipse(X(rcx), Y(rcy + 1), 5.2 * u, 4.6 * u, C('#351135'));
+      put(L, Cv, true);
+      const ba = idle ? sin(t) * 0.22 : run ? sin(t) * 0.4 : w1 ? -0.45 : w2 ? 0.65 : hurt ? 0.5 : 0;
+      const hang = [rcx, rcy - 5.4], bp = (x, y) => { const [a, b] = rot(x, y, ba); return [hang[0] + a, hang[1] + b]; };
+      const Bl = layer(F);
+      for (let k = 0; k < 3; k++) { const p0 = bp(0, k * 0.6); Bl.rect(R(X(p0[0])), R(Y(p0[1])), 1, 2, Fe[k % 2 ? 1 : 3]); }
+      // clapper: a small skull swinging further than the bell
+      const cl = [hang[0] + Math.sin(ba * 1.6) * 7.6, hang[1] + Math.cos(ba * 1.6) * 7.6];
+      const bell = [bp(-1.4, 1.6), bp(1.4, 1.6), bp(1.8, 2.4), bp(2.2, 5), bp(3.2, 6.8), bp(-3.2, 6.8), bp(-2.2, 5), bp(-1.8, 2.4)];
+      slab(Bl, PU(F, bell), Bz, { wide: true });
+      blob(Bl, [[...PU(F, [bp(0, 2)])[0], 1.7 * u, 1.1 * u]], Bz);
+      // bands round the waist and the lip, a green bloom of verdigris
+      for (const yy of [3.4, 6.2]) { const a0 = PU(F, [bp(-3, yy)])[0], a1 = PU(F, [bp(3, yy)])[0]; for (let s2 = 0; s2 <= 1; s2 += 0.05) over(Bl, lerp(a0[0], a1[0], s2), lerp(a0[1], a1[1], s2), Bz[4]); }
+      spots(Bl, ...PU(F, [bp(1, 4.8)])[0], 1.4 * u, 1 * u, 3, 0.6 * u, V[2], 8);
+      const lip = PU(F, [bp(0, 6.9)])[0];
+      Bl.ellipse(lip[0], lip[1], 3 * u, 0.7 * u, C('#4a1420'));
+      put(L, Bl, true);
+      skull(L, X(cl[0]), Y(cl[1]), 1.1 * u, Bn);
+      // ribs: curved femurs wrapping from the breastbone round the cavity, knuckled ends
+      const Rb = layer(F);
+      for (let k = 0; k < 6; k++) {
+        const y0 = rcy - 5.6 + k * 2.1, w = 6.9 - Math.abs(k - 2.2) * 0.55;
+        for (const s of [-1, 1]) {
+          tube(Rb, PU(F, bez([[rcx + s * 0.9, y0], [rcx + s * (w + 0.6), y0 - 0.4], [rcx + s * (w - 1.4), y0 + 2.6]], 12)), [0.75 * u, 0.55 * u], k % 2 ? Bd : Bn);
+          blob(Rb, [[X(rcx + s * (w - 1.4)), Y(y0 + 2.6), 0.7 * u, 0.6 * u]], Bn);
+        }
+      }
+      slab(Rb, PU(F, [[rcx - 0.9, rcy - 6.2], [rcx + 0.9, rcy - 6.2], [rcx + 0.7, rcy - 1.6], [rcx, rcy - 0.8], [rcx - 0.7, rcy - 1.6]]), Bn);
+      put(L, Rb, true);
+      // ---------------- arms: the free one hangs with bone claws
+      const arm = (s, hand) => {
+        const Lg = layer(F), sh = [bx(s * 8.2, 1), by(-27.2)], el = ik(sh, hand, 6.6, 6.6, s > 0 ? 1 : -1);
+        tube(Lg, PU(F, [sh, el]), [1.3 * u, 1 * u], Bn);
+        tube(Lg, PU(F, [el, hand]), [1 * u, 0.8 * u], Bn);
+        tube(Lg, PU(F, [[el[0] + s * 0.6, el[1] + 0.4], [hand[0] + s * 0.6, hand[1] - 0.4]]), 0.45 * u, Bd);
+        blob(Lg, [[X(el[0]), Y(el[1]), 1.2 * u, 1 * u]], Bn);
+        blob(Lg, [[X(hand[0]), Y(hand[1]), 1.3 * u, 1.1 * u]], Bn);
+        put(L, Lg, true);
+        return hand;
+      };
+      const lh = w1 ? [bx(-11.2), by(-30)] : w2 ? [bx(-9), by(-17)] : hurt ? [bx(-11), by(-22)] : [bx(-9.6) + (run ? -sin(t) * 0.8 : 0), by(-15.6) + (idle ? sin(t) * 0.3 : 0)];
+      arm(-1, lh);
+      for (let k = 0; k < 3; k++) horn(L, [X(lh[0] - 0.6 + k * 0.6), Y(lh[1] + 0.6)], [X(lh[0] - 0.8 + k * 0.7), Y(lh[1] + 2)], [X(lh[0] - 0.2 + k * 0.6), Y(lh[1] + 3)], 0.6 * u, Bn);
+      // ---------------- shoulders: a skull on each
+      for (const s of [-1, 1]) skull(L, X(bx(s * 8.4)), Y(by(-28.4)), 2.3 * u, Bn);
+      // ---------------- the head: a great skull under its crown of skulls
+      const Nk = layer(F);
+      for (let k = 0; k < 2; k++) blob(Nk, [[X(lerp(rcx, hx, 0.4 + k * 0.3)), Y(by(-29.4 - k * 1.1)), 1.1 * u, 0.6 * u]], Bd);
+      put(L, Nk, true);
+      const op = (w1 ? 1.6 : w2 ? 2.2 : hurt ? 1.2 : idle && P.i === 3 ? 0.8 : 0) * u;
+      const eyes = skull(L, X(hx), Y(hy), 3.5 * u, Bn, { open: op, wink: hurt ? 1 : 0 });
+      // iron crown rods from the ring down to the temples
+      for (const s of [-1, 1]) L.line(X(hx + s * 2.6), Y(hy - 2.2), X(ccx + s * 4.4), Y(ccy + 1.7), Fe[2]);
+      ring(true);
+      // garlands of finger bones swinging from the ring to the shoulders
+      for (const s of [-1, 1]) {
+        const a = [X(ccx + s * crx * 0.8), Y(ccy + cry * 0.6)], b = [X(bx(s * 8.4)), Y(by(-30.6))], m = [lerp(a[0], b[0], 0.5) + sway * u * 0.5, Math.max(a[1], b[1]) + 2.4 * u];
+        const pts = bez([a, m, b], 9);
+        pts.forEach(([x, y], i) => { if (i % 2 === 0) L.ellipse(x, y, 0.55 * u, 0.4 * u, i % 4 ? Bd[3] : Bn[4]); else L.set(R(x), R(y), Fe[1]); });
+      }
+      // ---------------- the spine halberd, gripped in the near hand
+      let g = [bx(10.6), by(-15.4)], ha = 0.05 + (run ? sin(t) * 0.05 : 0);
+      if (w1) { g = [bx(9.4), by(-29.6)]; ha = 0.5; }
+      if (w2) { g = [bx(3.2), by(-17.4)]; ha = -2.3; }
+      if (hurt) { g = [bx(11.4), by(-17)]; ha = 0.28; }
+      const dr = [Math.sin(ha), -Math.cos(ha)], pr = [Math.cos(ha), Math.sin(ha)], at = (d, p = 0) => [g[0] + dr[0] * d + pr[0] * p, g[1] + dr[1] * d + pr[1] * p];
+      const Hb = layer(F);
+      tube(Hb, PU(F, [at(-14.2), at(17)]), 0.5 * u, Bd);
+      for (let d = -13.6; d < 16.4; d += 1.3) { const q = at(d); blob(Hb, [[X(q[0]), Y(q[1]), 0.85 * u, 0.85 * u]], Math.round(d / 1.3) % 2 ? Bn : Bd); }
+      // the axe: a shoulder blade; the back hook: a jawbone; the tip: a rib spike
+      slab(Hb, PU(F, [at(12.8, 0.4), at(18, 0.4), at(19.4, 3.4), at(16.6, 5.4), at(13.4, 4.8)]), Bn, { wide: true });
+      Hb.line(...PU(F, [at(14, 1.4)])[0], ...PU(F, [at(17.6, 2.4)])[0], Bn[1]);
+      horn(Hb, PU(F, [at(15.2, -0.4)])[0], PU(F, [at(15.8, -2.6)])[0], PU(F, [at(14, -3.4)])[0], 1.2 * u, Bn);
+      horn(Hb, PU(F, [at(16.6)])[0], PU(F, [at(18.6, -0.3)])[0], PU(F, [at(21.4)])[0], 1.3 * u, Bn);
+      put(L, Hb, true);
+      arm(1, g);
+      for (let k = 0; k < 3; k++) L.line(X(g[0] - 1.1), Y(g[1] - 0.6 + k * 0.6), X(g[0] + 1.1), Y(g[1] - 0.6 + k * 0.6), Bn[1]);
+      put(F.p, L, false);
+      // ---------------- light: candle flames, ember eyes, the glow inside the bell
+      for (const [x, y, k, z] of cands) {
+        if (hurt && k === 1) { F.p.set(R(x), R(y - 2), C('#827d82')); F.p.set(R(x + 1), R(y - 4), C('#66626a')); continue; }
+        flame(F, x, y, (1.7 + (idle ? sin(t * 2 + k * 0.3) * 0.25 : 0)) * u * (z < 0 ? 0.85 : 1), 1.1 * u, t + k * 0.17);
+      }
+      const ec = hurt ? HURT : '#f8b848';
+      for (const [ex, ey] of eyes) dot(F, ex - 0.4 * u, ey - 0.3 * u, ec, Math.max(2, R(0.8 * u)), Math.max(2, R(0.8 * u)));
+      dot(F, eyes[1][0] - 0.4 * u + 1, eyes[1][1] - 0.3 * u, '#fff0b0');
+      wisp(F, lip[0], lip[1] + 0.4 * u, 3 * u, 1.6 * u, '#ec7a2a', 0.5, 150);
+      dot(F, lip[0] - 1.5 * u, lip[1], '#f8b848', R(3 * u), 1);
+      // the toll: rings of sound spreading from the bell on the slam
+      if (w2 || hurt) for (const rr of [5.4, 7.6]) for (let a = -0.9; a <= 0.9; a += 0.05) for (const s of [-1, 1]) { const x = lip[0] + s * Math.cos(a) * rr * u, y = lip[1] - 2 * u + Math.sin(a) * rr * u * 0.8; if (bayer(R(x), R(y)) < 0.7) F.e.set(R(x), R(y), C('#f8b848')); }
+      // the slam: shards of the floor kicked up where the axe lands
+      if (w2) { const q = PU(F, [at(18.6, 3)])[0]; for (let k = 0; k < 6; k++) F.p.rect(R(q[0] + (k - 3) * 1.4 * u), R(q[1] - (k % 3) * 1.1 * u - 2), 2, 2, Bn[k % 2 ? 1 : 3]); }
     },
   },
 };

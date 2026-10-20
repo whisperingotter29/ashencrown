@@ -1112,17 +1112,17 @@ export default {
       const LEG = P5(['#1d0814', '#2a0e18', '#3e1c22', '#55323d', '#7b576f']), LEGd = LEG.map((c) => dark(c, 0.8));
       const G = pal5('gold', 5), Gd = pal5('gold', 4), SILK = pal5('rose', 4), SILKd = pal5('rose', 3);
       const LAC = P5(['#2a0e18', '#4a1420', '#60282c', '#8a3434', '#b04a3e']);
-      const bx = ox - 1 * u + (a1 ? -1.2 * u : a2 ? 1.6 * u : hurt ? -1 * u : 0), by = oy - 6.6 * u + (idle ? sin(t) * 0.25 * u : 0) + (a1 ? 0.6 * u : 0) + (run ? -Math.abs(sin(t * 2)) * 0.4 * u : 0);
+      const bx = ox - 1 * u + (a1 ? -1.2 * u : a2 ? 1.6 * u : hurt ? -1 * u : 0), by = oy - 8.6 * u + (idle ? sin(t) * 0.25 * u : 0) + (a1 ? 0.6 * u : 0) + (run ? -Math.abs(sin(t * 2)) * 0.4 * u : 0);
       const L = layer(F);
       // ---- legs: four a side, knees high
       const legs = (far) => {
         const Lg = layer(F), Rl = far ? LEGd : LEG;
         for (let k = 0; k < 4; k++) {
-          const hip = [bx + (k - 1.5) * 3.6 * u + (far ? 1.2 * u : 0), by + (far ? -0.6 : 1.8) * u];
+          const hip = [bx + (k - 1.5) * 3.6 * u + (far ? 1.2 * u : 0), by + (far ? -0.6 : 2.2) * u];
           const ph = run ? t + (k % 2 ? 0.5 : 0) + (far ? 0.25 : 0) : 0;
           const [dx, lift] = run ? stride(ph, 3.6 * u, 1.8 * u) : [idle ? sin(t + k * 0.3) * 0.3 * u : 0, 0];
-          const foot = [hip[0] + (k - 1.5) * 4.6 * u + dx, oy - lift - (far ? 0.6 * u : 0)];
-          const knee = [lerp(hip[0], foot[0], 0.5), hip[1] - (far ? 4.4 : 3) * u - lift * 0.4];
+          const foot = [hip[0] + (k - 1.5) * 5.4 * u + dx + (k < 2 ? -1 : 1) * 1.2 * u, oy - lift - (far ? 0.6 * u : 0)];
+          const knee = [lerp(hip[0], foot[0], 0.55), hip[1] - (far ? 4.2 : 2.4) * u - lift * 0.4];
           tube(Lg, [hip, knee], [1.2 * u, 1.0 * u], Rl, { rings: R(2.4 * u), ringC: Rl[0] });
           tube(Lg, [knee, foot], [1.0 * u, 0.4 * u], Rl);
           Lg.set(R(knee[0]), R(knee[1] - 0.8 * u), Rl[4]);
@@ -1138,23 +1138,25 @@ export default {
       const lift2 = a1 ? -1.8 * u : a2 ? 3.2 * u : 0;
       const poleR = [bx - 9 * u + pull * 0.6 + sway * 0.5, by - 19.5 * u + lift2 * 0.6], poleF = [bx + 4.2 * u + pull + sway, by - 20 * u + lift2];
       const root = [bx - 11.5 * u, by - 1 * u];
-      const tailFar = bez([root, [bx - 19 * u, by - 6 * u], [bx - 18 * u, by - 18 * u], [poleR[0] - 1.6 * u, poleR[1] - 1.6 * u]], 34);
-      const tailNear = bez([[root[0], root[1] + 1.2 * u], [bx - 24 * u, by - 10 * u], [bx - 12 * u, by - 30 * u + lift2 * 0.5], [poleF[0] - 1.6 * u, poleF[1] - 2.2 * u]], 44);
+      const tailFar = bez([root, [bx - 16 * u, by - 3 * u], [bx - 15.5 * u, by - 17 * u], [poleR[0] - 1.6 * u, poleR[1] - 1.6 * u]], 34);
+      const tailNear = bez([[root[0], root[1] + 1.2 * u], [bx - 25 * u, by - 9 * u], [bx - 14 * u, by - 31 * u + lift2 * 0.5], [poleF[0] - 1.6 * u, poleF[1] - 2.2 * u]], 44);
       const sting = (Lr, end, prev, Rm) => {
         const a = Math.atan2(end[1] - prev[1], end[0] - prev[0]);
-        blob(Lr, [[end[0], end[1], 1.9 * u, 1.7 * u]], Rm);
+        blob(Lr, [[end[0], end[1], 1.6 * u, 1.4 * u]], Rm);
         horn(Lr, [end[0] + Math.cos(a) * 1 * u, end[1] + Math.sin(a) * 1 * u], [end[0] + Math.cos(a) * 2.8 * u, end[1] + Math.sin(a) * 2.8 * u + 0.8 * u], [end[0] + Math.cos(a) * 2.2 * u + 1 * u, end[1] + 2.6 * u], 1.5 * u, BONEP);
         // the jewelled ring at the sting that the canopy hangs from
         Lr.ring(end[0] + Math.cos(a) * 2.2 * u + 1 * u, end[1] + 2.8 * u, 0.9 * u, G[3], Math.max(1, R(0.45 * u)));
       };
       const Tf = layer(F);
-      tube(Tf, tailFar, (q) => (2.3 - q * 1.0) * u, SHd, { rings: R(3 * u), ringC: SHd[0] });
+      tube(Tf, tailFar, (q) => (1.7 - q * 0.6) * u, SHd, { rings: R(2.6 * u), ringC: SHd[0] });
       sting(Tf, tailFar[34], tailFar[30], SHd);
       put(L, Tf, true);
       // ---- body: long carapace plates, gold-edged
       const B = layer(F);
       blob(B, [[bx + 5.6 * u, by - 0.4 * u, 5.4 * u, 4 * u], [bx + 0.4 * u, by - 1 * u, 5.6 * u, 4.4 * u], [bx - 4.8 * u, by - 0.8 * u, 5.2 * u, 4 * u], [bx - 9.2 * u, by - 0.4 * u, 3.8 * u, 3.2 * u]], SH, { tex: 4 });
-      for (let k = 0; k < 4; k++) { const x0 = R(bx + (-7.2 + k * 4.8) * u); for (let y = R(by - 6 * u); y < by + 3.5 * u; y++) for (let d = 0; d < 2; d++) { const x = x0 + d + R((y - by) * 0.12); if (B.a(x, y)) B.set(x, y, d ? SH[0] : G[2]); } }
+      for (let k = 0; k < 4; k++) { const x0 = R(bx + (-7.2 + k * 4.8) * u); for (let y = R(by - 6 * u); y < by + 4.5 * u; y++) for (let d = 0; d < 2; d++) { const x = x0 + d + R((y - by) * 0.12); if (B.a(x, y)) B.set(x, y, d ? SH[0] : RIM[3]); } }
+      // a jewelled stud on each plate
+      for (let k = 0; k < 4; k++) { const x = bx + (-9.4 + k * 4.8) * u, y = by - 2.6 * u; B.rect(R(x), R(y), Math.max(2, R(0.8 * u)), Math.max(2, R(0.8 * u)), G[3]); B.set(R(x), R(y), G[4]); }
       put(L, B, true);
       // ---- the palanquin on her back: lacquered box, gilt rails, a cushion, a heap of eggs
       const pk = [bx - 3 * u, by - 4.8 * u], pw = 7 * u;
@@ -1180,7 +1182,7 @@ export default {
       });
       // ---- the near tail, over the palanquin
       const T2 = layer(F);
-      tube(T2, tailNear, (q) => (2.6 - q * 1.1) * u, SH, { rings: R(3 * u), ringC: SH[0] });
+      tube(T2, tailNear, (q) => (2.0 - q * 0.8) * u, SH, { rings: R(2.8 * u), ringC: SH[0] });
       for (let k = 4; k < 44; k += 5) over(T2, tailNear[k][0] - 0.8 * u, tailNear[k][1] - 1 * u, RIM[3]);
       sting(T2, tailNear[44], tailNear[40], SH);
       put(F.p, T2, true);
@@ -1190,20 +1192,17 @@ export default {
       const Cn = layer(F), sag = (a2 ? 1 : 2.4) * u + (idle ? sin(t) * 0.3 * u : 0), vh = 2.8 * u;
       const val = [];
       for (let k = 0; k <= 20; k++) { const f = k / 20; val.push([lerp(hA[0], hB[0], f), lerp(hA[1], hB[1], f) + Math.sin(f * Math.PI) * sag]); }
-      // curtains: from each hook down to the palanquin rail, gathered at a gold tie
-      const curtain = (h, foot, sg) => {
-        const tie = [lerp(h[0], foot[0], 0.6) - sg * 0.6 * u, lerp(h[1], foot[1], 0.6)];
-        const pts = [[h[0] - sg * 0.4 * u, h[1]], [h[0] + sg * 3.2 * u, h[1] + 1 * u], [tie[0] + sg * 0.9 * u, tie[1]], [foot[0] + sg * 2.2 * u + (idle ? sin(t + (sg > 0 ? 0.5 : 0)) * 0.5 * u : 0), foot[1]], [foot[0] - sg * 1.2 * u, foot[1]], [tie[0] - sg * 0.6 * u, tie[1]]];
-        slab(Cn, pts, SILK, { wide: true });
-        Cn.line(h[0] + sg * 1.4 * u, h[1] + 1 * u, tie[0], tie[1], SILK[1]);
-        Cn.rect(R(tie[0] - 0.8 * u), R(tie[1] - 0.4 * u), R(1.8 * u), Math.max(2, R(0.8 * u)), G[3]);
+      // short tails of silk hanging from each hook, blowing back
+      const tail = (h, sg) => {
+        const bl = (idle ? sin(t + (sg > 0 ? 0 : 0.5)) * 0.8 : run ? -1.4 : a2 ? -1.8 : 0) * u;
+        slab(Cn, [[h[0] - 1.2 * u, h[1]], [h[0] + 1.2 * u, h[1]], [h[0] + 1 * u + bl, h[1] + 6.5 * u], [h[0] - 0.2 * u + bl, h[1] + 7.4 * u], [h[0] - 1.4 * u + bl, h[1] + 6.2 * u]], SILKd, { wide: true });
+        Cn.rect(R(h[0] - 1 * u), R(h[1] + 1.2 * u), R(2 * u), Math.max(2, R(0.7 * u)), G[3]);
       };
-      curtain(hA, [pk[0] - pw + 1 * u, pk[1] - 3 * u], 1);
-      curtain(hB, [pk[0] + pw - 1 * u, pk[1] - 3 * u], -1);
-      const vp = [...val.map(([x, y]) => [x, y - vh * 0.4]), ...val.slice().reverse().map(([x, y], k) => [x, y + vh * 0.6 + (k % 4 < 2 ? 0.8 * u : 0)])];
+      tail(hA, 1); tail(hB, -1);
+      const vp = [...val.map(([x, y]) => [x, y - vh * 0.4]), ...val.slice().reverse().map(([x, y], k) => [x, y + vh * 0.6 + Math.abs(Math.sin(k / 20 * Math.PI * 5)) * 1.2 * u])];
       slab(Cn, vp, SILK, { wide: true });
       put(F.p, Cn, true);
-      for (let k = 1; k < 20; k += 3) { const [x, y] = val[k]; F.p.rect(R(x), R(y + vh * 0.6 + 0.8 * u), Math.max(1, R(0.5 * u)), R(1.6 * u), G[2]); F.p.set(R(x), R(y + vh * 0.6 + 2.4 * u), G[4]); }
+      for (let k = 2; k < 20; k += 4) { const [x, y] = val[k]; F.p.line(x, y + vh * 0.6 + 1.2 * u, x, y + vh * 0.6 + 2.6 * u, G[2]); F.p.rect(R(x - 0.4 * u), R(y + vh * 0.6 + 2.6 * u), Math.max(2, R(0.9 * u)), Math.max(2, R(1.1 * u)), G[3]); }
       for (let k = 0; k < 20; k += 2) F.p.set(R(val[k][0]), R(val[k][1] - vh * 0.4 + 1), G[4]);
       // ---- pincers: big gold-rimmed chelae
       const claw = (far) => {
@@ -1225,14 +1224,14 @@ export default {
       // ---- head and the crown carapace
       const hx = bx + 10.2 * u, hy = by - 1.4 * u;
       const Hd = layer(F);
-      blob(Hd, [[hx, hy, 3.2 * u, 2.8 * u]], SH);
+      blob(Hd, [[hx, hy, 3.8 * u, 3.2 * u]], SH);
       tube(Hd, [[hx + 2 * u, hy + 1.6 * u], [hx + 3.6 * u, hy + 3 * u + (a1 || a2 ? 1 * u : 0)]], [1 * u, 0.6 * u], RIM);
       // crown: a gold band with five points, gems on the points, tilted on the hit
       const ct = hurt ? -0.3 : 0, cr = (x, y) => { const [dx, dy] = rot(x * u, y * u, ct); return [hx + dx, hy + dy]; };
-      slab(Hd, [cr(-3, -2), cr(3, -2.4), cr(3.2, -0.8), cr(-3, -0.4)], G);
-      for (let k = 0; k < 5; k++) { const x = -2.6 + k * 1.35; slab(Hd, [cr(x - 0.6, -2.1), cr(x + 0.6, -2.2), cr(x + 0.1, -4.4 - (k === 2 ? 1.2 : 0))], G); }
+      slab(Hd, [cr(-3.4, -2.4), cr(3.4, -2.8), cr(3.6, -0.8), cr(-3.4, -0.4)], G, { wide: true });
+      for (let k = 0; k < 5; k++) { const x = -2.9 + k * 1.5; slab(Hd, [cr(x - 0.7, -2.5), cr(x + 0.7, -2.6), cr(x + 0.1, -5.2 - (k === 2 ? 1.6 : 0))], G); }
       put(F.p, Hd, true);
-      for (let k = 0; k < 5; k++) { const [gx, gy] = cr(-2.5 + k * 1.35, -3.4 - (k === 2 ? 1.2 : 0)); F.p.rect(R(gx - 0.4 * u), R(gy), Math.max(2, R(0.8 * u)), Math.max(2, R(0.8 * u)), k === 2 ? '#cc6a86' : k % 2 ? '#3973af' : '#a94a68'); F.p.set(R(gx - 0.4 * u), R(gy), WHITE); }
+      for (let k = 0; k < 5; k++) { const [gx, gy] = cr(-2.8 + k * 1.5, -3.8 - (k === 2 ? 1.4 : 0)); F.p.rect(R(gx - 0.4 * u), R(gy), Math.max(2, R(0.8 * u)), Math.max(2, R(0.8 * u)), k === 2 ? '#cc6a86' : k % 2 ? '#3973af' : '#a94a68'); F.p.set(R(gx - 0.4 * u), R(gy), WHITE); }
       const band = cr(-2.2, -1.4); for (let k = 0; k < 3; k++) F.p.rect(R(band[0] + k * 2 * u), R(band[1]), Math.max(1, R(0.6 * u)), Math.max(1, R(0.6 * u)), k === 1 ? '#3973af' : '#cc6a86');
       claw(false);
       legs(false);

@@ -58,12 +58,12 @@ function bubble(F, x, y, r, c = '#a8d0ec', glowIt = false) {
 }
 // a barnacle: a little cream volcano with a dark pore, at (x, y) of radius r
 function barnacle(L, x, y, r, seed = 1) {
-  const B = pal5('sand', 6);
-  L.disc(x, y, r, B[2]);
-  L.disc(x - r * 0.25, y - r * 0.25, r * 0.7, B[4]);
-  if (r >= 1.5) L.disc(x + r * 0.1, y, Math.max(0.6, r * 0.38), C('#2a1838'));
-  else L.set(R(x), R(y), C('#2a1838'));
-  if (hash2(seed, 3, 9) > 0.5 && r >= 1.5) L.set(R(x - r * 0.6), R(y + r * 0.3), B[1]);
+  const B = pal5('sand', 5).map((c) => mixc(c, PAL.stone[4], 0.25));
+  // a squat cone: shaded flank, lit left plates, a dark slit on top
+  L.poly([[x - r, y + r * 0.6], [x - r * 0.45, y - r * 0.7], [x + r * 0.45, y - r * 0.7], [x + r, y + r * 0.6]], B[2]);
+  L.poly([[x - r, y + r * 0.6], [x - r * 0.45, y - r * 0.7], [x - 0.1, y - r * 0.7], [x - r * 0.15, y + r * 0.6]], B[4]);
+  if (r >= 1.4) L.line(R(x - r * 0.3), R(y - r * 0.7), R(x + r * 0.3), R(y - r * 0.7), C('#4e4b53'));
+  if (hash2(seed, 3, 9) > 0.5 && r >= 1.5) L.line(R(x + r * 0.2), R(y - r * 0.3), R(x + r * 0.5), R(y + r * 0.5), B[1]);
   return L;
 }
 // a fringe of hanging kelp strands from (x, y) along a, swaying with phase t
@@ -1004,12 +1004,14 @@ export default {
           const [dx, lift] = stride(ph, 4 * u, 2 * u);
           const out = [-8, -3.5, 2, 7][k] * u;
           const foot = [hip[0] + out + dx + (A1 ? -1 * u : A2 ? 1 * u : 0), oy - lift];
-          const knee = ik(hip, foot, 6.6 * u, 7.6 * u, k < 2 ? 1 : -1);
-          const kn = [knee[0], knee[1] - 2 * u];
-          tube(Lg, [hip, kn], [1.6 * u, 1.3 * u], Rl, { tex: 3 });
-          tube(Lg, [kn, foot], [1.3 * u, 0.4 * u], Rl, { tex: 4 });
-          for (let f = 0.25; f < 0.8; f += 0.25) { const p = [lerp(kn[0], foot[0], f), lerp(kn[1], foot[1], f)]; Lg.set(R(p[0] + (k < 2 ? -1 : 1) * 1.2 * u), R(p[1]), Rl[3]); }
-          Lg.disc(kn[0], kn[1] - 0.4 * u, 0.6 * u, Rl[4]);
+          const knee = ik(hip, foot, 7 * u, 7.6 * u, k < 2 ? 1 : -1);
+          const kn = [knee[0], knee[1] - 2.6 * u];
+          const mid = [lerp(kn[0], foot[0], 0.45) + (k < 2 ? -0.8 : 0.8) * u, lerp(kn[1], foot[1], 0.45)];
+          tube(Lg, [hip, kn], [2.4 * u, 1.9 * u], Rl, { tex: 3 });
+          tube(Lg, [kn, mid], [1.9 * u, 1.5 * u], Rl, { tex: 4 });
+          tube(Lg, [mid, foot], [1.4 * u, 0.4 * u], Rl, { tex: 5 });
+          for (const j of [kn, mid]) { Lg.disc(j[0], j[1], 1 * u, Rl[1]); Lg.disc(j[0] - 0.4 * u, j[1] - 0.5 * u, 0.6 * u, Rl[4]); }
+          for (let f = 0.3; f < 0.8; f += 0.25) { const p = [lerp(mid[0], foot[0], f), lerp(mid[1], foot[1], f)]; horn(Lg, p, [p[0] + (k < 2 ? -0.8 : 0.8) * u, p[1] - 0.4 * u], [p[0] + (k < 2 ? -1.4 : 1.4) * u, p[1] - 1 * u], 0.8 * u, Rl); }
           Lg.set(R(foot[0]), R(foot[1] - 1), C(CREAM));
         }
         put(L, Lg, !far);
@@ -1073,20 +1075,22 @@ export default {
       slab(L2, [S(-16, -22.4), S(-13.2, -22.4), S(-13.4, -26.6), S(-15.8, -26.6)], pal5('stone', 4));
       slab(L2, [S(-16.4, -27.6), S(-12.8, -27.6), S(-14.6, -29.6)], GD);
       // the crown: a gold coronet sunk in barnacles on the deck
-      const cc = S(1.6, -15.6), ct = -0.18 + tip;
+      const cc = S(1.2, -15.8), ct = -0.16 + tip;
       const CQ = (x, y) => { const [a, b] = rot(x * u, y * u, ct); return [cc[0] + a, cc[1] + b]; };
       const Cr = layer(F);
-      const cpts = [CQ(-3.6, 1), CQ(-3.6, -1.6), CQ(-2.6, -3.6), CQ(-1.8, -1.8), CQ(-0.6, -4.6), CQ(0.6, -1.8), CQ(1.8, -4), CQ(2.6, -1.6), CQ(3.6, -3.2), CQ(3.6, 1)];
+      const cpts = [CQ(-4.6, 1), CQ(-4.6, -2.2), CQ(-3.4, -5), CQ(-2.2, -2.4), CQ(-0.6, -6.2), CQ(1, -2.4), CQ(2.4, -5.4), CQ(3.4, -2.2), CQ(4.8, -4.4), CQ(4.8, 1)];
       Cr.poly(cpts, GD[3]);
       cyl(Cr, GD, { wide: true });
-      Cr.line(...CQ(-3.6, -0.6), ...CQ(3.6, -0.6), GD[1]);
-      for (const [x, y] of [[-2.6, -3.6], [-0.6, -4.6], [1.8, -4], [3.6, -3.2]]) { Cr.disc(...CQ(x, y - 0.4), 0.6 * u, GD[4]); }
+      slab(Cr, [CQ(-4.8, -1.2), CQ(5, -1.2), CQ(5, 1.2), CQ(-4.8, 1.2)], GD);
+      for (const [x, y] of [[-3.4, -5], [-0.6, -6.2], [2.4, -5.4], [4.8, -4.4]]) { Cr.disc(...CQ(x, y - 0.5), 0.75 * u, GD[4]); Cr.set(...CQ(x - 0.2, y - 0.8).map(R), C(CREAM)); }
+      for (const x of [-3, 2.6]) Cr.disc(...CQ(x, 0), 0.7 * u, C('#a94a68'));
       put(L2, Cr, true);
-      for (let k = 0; k < 6; k++) barnacle(L2, ...CQ(-3.6 + k * 1.5 + (k % 2) * 0.4, 0.6 - (k % 3) * 0.9), (0.9 + (k % 3) * 0.35) * u, k + 3);
-      barnacle(L2, ...CQ(2.8, -2.2), 1.1 * u, 11);
+      // barnacles crusting up one side of the crown
+      for (let k = 0; k < 4; k++) barnacle(L2, ...CQ(-4.4 + k * 1.3, 1.2 - (k % 2) * 0.8 - k * 0.5), (1.3 - k * 0.15) * u, k + 3);
+      barnacle(L2, ...CQ(4.6, 0.8), 1.1 * u, 11);
       put(F.p, L2, true);
       // the crown's jewel and the lantern flame
-      glow(F, ...CQ(-0.6, -1.2), 0.8 * u, '#60e0c0');
+      glow(F, ...CQ(-0.2, 0), 0.9 * u, '#60e0c0');
       flame(F, ...S(-14.6, -23.2), (A1 || hurt ? 3.6 : 2.6 + (idle ? (P.i % 3) * 0.3 : 0)) * u, 2 * u, t, {});
       // the eyestalks, rising out of the broken bow: one tall, one short; glowing eyes
       const E = layer(F), look = A1 ? 0.8 : hurt ? -1 : 0, tw = idle && (P.i === 2 || P.i === 5) ? -1 * u : 0;
@@ -1107,8 +1111,8 @@ export default {
       // the crusher claw: resting on the ground before it; raised gaping; slammed down
       const L3 = layer(F);
       const sh = S(12, -3.2);
-      const wr = A1 ? [sh[0] + 4 * u, sh[1] - 13 * u] : A2 ? [sh[0] + 12 * u, oy - 5.4 * u] : hurt ? [sh[0] + 3 * u, sh[1] - 8 * u] : [sh[0] + 7 * u, oy - 7.6 * u + (idle ? sin(t) * 0.4 * u : run ? sin(t * 2) * 0.8 * u : 0)];
-      const ca = A1 ? -0.9 : A2 ? 0.45 : hurt ? -1.3 : -0.05;
+      const wr = A1 ? [sh[0] + 5 * u, sh[1] - 11 * u] : A2 ? [sh[0] + 12 * u, oy - 5.4 * u] : hurt ? [sh[0] + 3 * u, sh[1] - 8 * u] : [sh[0] + 7 * u, oy - 7.6 * u + (idle ? sin(t) * 0.4 * u : run ? sin(t * 2) * 0.8 * u : 0)];
+      const ca = A1 ? -0.45 : A2 ? 0.45 : hurt ? -1.3 : -0.05;
       const el = ik(sh, wr, 6 * u, 6 * u, A1 ? -1 : 1);
       tube(L3, [sh, el], [2.6 * u, 2.2 * u], CR, { tex: 2 });
       tube(L3, [el, wr], [2.2 * u, 2.4 * u], CR, { tex: 3 });

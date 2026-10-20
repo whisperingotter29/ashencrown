@@ -36,12 +36,13 @@ jobs:
         run: npm run dist:${{ matrix.target }}
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
-      - name: Upload downloads (zip / AppImage / tar.gz)
+      - name: Upload downloads (zip / dmg / AppImage / tar.gz)
         uses: actions/upload-artifact@v4
         with:
           name: AshenCrown-${{ matrix.target }}
           path: |
             desktop/release/*.zip
+            desktop/release/*.dmg
             desktop/release/*.AppImage
             desktop/release/*.tar.gz
           retention-days: 30

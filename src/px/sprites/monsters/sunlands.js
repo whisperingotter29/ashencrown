@@ -248,6 +248,20 @@ function seedGrid(x0, y0, x1, y1, step, seed, pals = GLASS_MIX, litP = 0.4, litT
   return out;
 }
 
+// a translucent after-image of a layer: every opaque pixel of src, tinted toward c, at alpha a,
+// dithered into a 2x2 checker so it reads as an effect (never outlined: alpha stays under 100)
+function echoOf(dst, src, dx, dy, c, a = 80) {
+  const cc = C(c);
+  for (let y = 0; y < src.h; y++) for (let x = 0; x < src.w; x++) {
+    if (src.a(x, y) < 100) continue;
+    const tx = x + R(dx), ty = y + R(dy);
+    if (dst.a(tx, ty) > 100 || ((tx >> 1) + (ty >> 1)) & 1) continue;
+    const i = (y * src.w + x) * 4;
+    dst.set(tx, ty, [R(lerp(src.d[i], cc[0], 0.5)), R(lerp(src.d[i + 1], cc[1], 0.5)), R(lerp(src.d[i + 2], cc[2], 0.5)), a]);
+  }
+  return dst;
+}
+
 // dissolve the bottom of a layer into a dithered fade between y0 (solid) and y1 (gone)
 function fadeOut(L, y0, y1) {
   for (let y = Math.max(0, R(y0)); y < L.h; y++) {
@@ -265,6 +279,7 @@ export const assign = {
   ash_lich: { design: 'ash_lich', name: 'The Ash Lich' },
   glass_wyrm: { design: 'glass_wyrm', name: 'The Glass Wyrm' },
   ozymar: { design: 'ozymar', name: 'Ozymar the Unburied' },
+  emperor_echo: { design: 'emperor_echo', name: 'Echo of Emperor Aurel' },
 };
 
 export default {
@@ -1151,6 +1166,137 @@ export default {
       if (hit) { plume(F, fistL[0] + 1 * u, Y(1.6), 6 * u, 3 * u, 0.2, SD, -0.3); plume(F, foreR[1][0] - 1 * u, Y(1.6), 6 * u, 3 * u, 0.6, SD, 0.3); }
       if (hurt) for (let j = 0; j < 4; j++) rock(F.p, hx + (5 + j * 1.6) * u, hy - (2 - j * 1.4) * u, 0.9 * u, 0.7 * u, ST, 90 + j);
       F.mouth = [fx, fy];
+    },
+  },
+  // Echo of Emperor Aurel (emperor_echo): what the vaults remember of the emperor. A gilded bust
+  // with blank burning eyes and a kintsugi crack across the cheek floats over his empty parade
+  // cuirass; behind his head hangs his own coin, an aureus struck with his profile, rayed like the
+  // sun. His gauntlets fight on their own with sword and eagle sceptre, and every move he makes
+  // leaves fading echoes of itself.
+  emperor_echo: {
+    view: 'front', box: [34, 42], pivot: 0.5, idle: 6, idleFps: 5, hover: true,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const t = P.t, idle = P.act === 'idle', run = P.act === 'run', wind = P.atk === 1, hit = P.atk === 2, hurt = P.hurt;
+      const G = pal5('gold', 5), Gd = G.map((c) => dark(c, 0.82)), SE = pal5('steel', 6), PL = pal5('plum', 5), EG = ['#9a6424', '#c99a3a', '#e8c35a', '#f6e39a', '#fff4dc'];
+      const lean = run ? -1.2 : hurt ? 1 : 0;
+      const bob = idle ? sin(t) * 0.5 : 0;
+      const X = (x, y = 0) => ox + (x + lean * (y - 8) / 25) * u, Y = (y) => oy - (y + bob) * u;
+      const L = layer(F);
+      // ---- the sun-coin halo: an aureus with his profile, rayed
+      const hcx = X(0, 30), hcy = Y(30.4), hr = 6.4 * u;
+      const Hl = layer(F);
+      const rayPh = (idle ? P.i / 6 : 0) * (TAU / 24);
+      for (let k = 0; k < 12; k++) {
+        const a = k / 12 * TAU + rayPh, w = 0.32, l = hr * (k % 2 ? 1.22 : 1.36) * (wind ? 1.08 : hurt ? 0.94 : 1);
+        Hl.poly([[hcx + Math.cos(a - w) * hr * 0.9, hcy + Math.sin(a - w) * hr * 0.9], [hcx + Math.cos(a) * l, hcy + Math.sin(a) * l], [hcx + Math.cos(a + w) * hr * 0.9, hcy + Math.sin(a + w) * hr * 0.9]], G[k % 2 ? 2 : 3]);
+      }
+      blob(Hl, [[hcx, hcy, hr, hr]], G, { matte: true });
+      Hl.ring(hcx, hcy, hr - 0.9 * u, Gd[1], 1);
+      // his own profile struck on the coin, facing left, and a ring of letters
+      const pf = [[0.9, -2.6], [-0.3, -2.4], [-1, -1.4], [-1.1, -0.6], [-1.7, 0.1], [-1.1, 0.4], [-1.2, 1], [-0.7, 1.6], [-0.6, 2.4], [1.6, 2.6], [2, 0.4], [1.8, -1.6]];
+      const prof = pf.map(([x, y]) => [hcx + (x - 3.2) * u * 0.9, hcy + y * u * 0.9]);
+      facetOn(Hl, prof, Gd[2]);
+      facetOn(Hl, prof.map(([x, y]) => [x - 1, y - 1]), G[4], G[3]);
+      for (let k = 0; k < 16; k++) { const a = k / 16 * TAU; if (Math.cos(a) < -0.5) continue; Hl.set(R(hcx + Math.cos(a) * (hr - 1.7 * u)), R(hcy + Math.sin(a) * (hr - 1.7 * u)), Gd[1]); }
+      put(L, Hl, true);
+      if (wind || hit) for (let k = 0; k < 12; k++) { const a = k / 12 * TAU + rayPh, l = hr * 1.3; F.e.line(hcx + Math.cos(a) * hr, hcy + Math.sin(a) * hr, hcx + Math.cos(a) * l, hcy + Math.sin(a) * l, C(EG[3])); }
+      // ---- the cloak behind the empty cuirass
+      drape(L, X(0, 20), Y(20.6), 12 * u, 19 * u, 15 * u, PL, { trim: G[3], phase: t, wave: 0.6 * u, folds: 4, lean: run ? 2.5 * u : idle ? sin(t) * 0.4 * u : 0, teeth: 4 });
+      // ---- pteruges: hanging strips, swaying, fading into light below
+      const Pt = layer(F);
+      for (let k = -4; k <= 4; k++) {
+        const sw = idle ? sin(t + k * 0.08) * 0.4 : run ? 1.2 : 0;
+        const x0 = X(k * 1.25, 11), x1 = X(k * 1.4 + sw, 6.4);
+        slab(Pt, [[x0 - 0.55 * u, Y(11)], [x0 + 0.55 * u, Y(11)], [x1 + 0.55 * u, Y(6.4)], [x1 - 0.55 * u, Y(6.4)]], k % 2 ? PL : PL.map((c) => dark(c, 0.86)));
+        Pt.rect(R(x1 - 0.5 * u), R(Y(7)), Math.max(2, R(u)), Math.max(1, R(0.5 * u)), G[3]);
+      }
+      put(L, Pt, true);
+      // ---- the cuirass: polished steel, embossed muscles, gold trim, empty at the neck
+      const Cu = layer(F);
+      blob(Cu, [[X(0, 17), Y(17), 6.2 * u, 4.6 * u], [X(0, 13), Y(13), 5.2 * u, 3.4 * u]], SE, { matte: true });
+      for (const side of [-1, 1]) for (let a = 0.2; a < 1.5; a += 0.04) over(Cu, X(side * 0.2, 16) + Math.sin(a) * 4.6 * u * side, Y(15.6) - Math.cos(a) * 1.4 * u + 1.4 * u, SE[1]);
+      Cu.line(X(0, 16), Y(19.8), X(0, 10.4), Y(10.4), SE[1]);
+      for (const y of [13.4, 11.8]) { Cu.line(X(-2.8, y), Y(y), X(-0.5, y), Y(y + 0.2), SE[1]); Cu.line(X(0.5, y), Y(y + 0.2), X(2.8, y), Y(y), SE[1]); }
+      facetOn(Cu, [[X(-5, 19), Y(19)], [X(-0.4, 19.6), Y(19.6)], [X(-0.4, 16), Y(16)], [X(-4.6, 16), Y(16)]], SE[4], SE[3]);
+      // neck hole: dark and empty; gold trim at the neckline and the waist
+      Cu.ellipse(X(0, 21), Y(20.8), 2.6 * u, 1.1 * u, C(VOID));
+      for (let a = 0; a < Math.PI; a += 0.03) over(Cu, X(0, 21) + Math.cos(a) * 2.9 * u, Y(20.8) + Math.sin(a) * 1.3 * u, G[3]);
+      for (let x = R(X(-5.2, 10)); x <= X(5.2, 10); x++) { over(Cu, x, Y(10.4), G[3]); over(Cu, x, Y(10.4) + 1, Gd[2]); }
+      put(L, Cu, true);
+      // shoulder guards
+      for (const side of [-1, 1]) { const S2 = layer(F); blob(S2, [[X(side * 6, 19.6), Y(19.6), 2.4 * u, 1.6 * u]], SE, { matte: true }); for (let x = R(X(side * 6, 19) - 2.3 * u); x <= X(side * 6, 19) + 2.3 * u; x++) over(S2, x, lowY2(S2, x), G[3]); put(L, S2, true); }
+      // ---- the bust: gilded, cut in a curve below the shoulders, floating free
+      const bx = X(0, 26) + (hurt ? 1 * u : 0), by = Y(26.4) + (wind ? -0.6 * u : hit ? 0.6 * u : 0);
+      const Bu = layer(F);
+      blob(Bu, [[bx, by - 0.2 * u, 5.8 * u, 2.6 * u]], G, { matte: true });
+      for (let y = R(by + 0.6 * u); y < by + 3 * u; y++) for (let x = R(bx - 6 * u); x <= bx + 6 * u; x++) if (((x - bx) / (6 * u)) ** 2 * 1.8 * u + (y - by) > 1.6 * u) Bu.clear(x, y);
+      tube(Bu, [[bx, by], [bx, by - 2.6 * u]], 1.5 * u, G);
+      // head
+      blob(Bu, [[bx, by - 4.6 * u, 3.1 * u, 3.6 * u], [bx, by - 2.6 * u, 2.2 * u, 1.8 * u]], G, { matte: true });
+      // hair in curls under the wreath
+      for (let k = 0; k < 7; k++) { const a = Math.PI + k / 6 * Math.PI; Bu.disc(bx + Math.cos(a) * 2.6 * u, by - 5.2 * u + Math.sin(a) * 2.6 * u, 0.75 * u, Gd[2]); Bu.set(R(bx + Math.cos(a) * 2.6 * u - 0.3 * u), R(by - 5.2 * u + Math.sin(a) * 2.6 * u - 0.3 * u), G[4]); }
+      // stern brow, nose, a set mouth
+      Bu.line(bx - 2.2 * u, by - 5.2 * u, bx - 0.4 * u, by - 4.8 * u, Gd[1], 2);
+      Bu.line(bx + 0.4 * u, by - 4.8 * u, bx + 2.2 * u, by - 5.2 * u, Gd[1], 2);
+      Bu.line(bx, by - 4.6 * u, bx - 0.4 * u, by - 3.2 * u, Gd[1]);
+      Bu.line(bx - 1 * u, by - 2.2 * u, bx + 1 * u, by - 2.3 * u, Gd[0]);
+      // kintsugi: a crack across the right cheek, mended with light
+      crack(Bu, bx + 0.6 * u, by - 3.4 * u, 0.4, 4 * u, EG[3], 5, F.e);
+      put(L, Bu, true);
+      // laurel wreath: two rows of leaves meeting at the brow
+      const Lw = layer(F), LV = pal5('moss', 5);
+      for (const side of [-1, 1]) for (let k = 0; k < 6; k++) {
+        const a = -Math.PI / 2 + side * (0.5 + k * 0.38), cx = bx + Math.cos(a) * 3.2 * u, cy = by - 4.8 * u + Math.sin(a) * 3.3 * u;
+        Lw.ellipse(cx, cy, 0.9 * u, 0.55 * u, LV[k % 2 ? 3 : 4]);
+        Lw.set(R(cx - 0.3 * u), R(cy - 0.2 * u), G[4]);
+      }
+      cyl(Lw, LV, {});
+      put(L, Lw, true);
+      // ---- the gauntlets: sword (screen left) and eagle sceptre (screen right)
+      const gl = idle ? [sin(t) * 0.5, cos(t) * 0.6] : [0, 0];
+      const swH = wind ? [X(-6, 33), Y(33)] : hit ? [X(5, 12), Y(12)] : hurt ? [X(-11.5, 13), Y(13)] : [X(-9.6 + gl[0], 15), Y(15 + gl[1])];
+      const swA = wind ? -1.9 : hit ? 2.35 : hurt ? -1.2 : -1.45;      // blade direction
+      const spH = wind ? [X(9.6, 25), Y(25)] : hit ? [X(10.6, 18), Y(18)] : hurt ? [X(12, 14), Y(14)] : [X(9.8 - gl[0], 14.4), Y(14.4 - gl[1])];
+      const gaunt = (Lr, h, side) => {
+        tube(Lr, [[h[0] + side * 1.8 * u, h[1] + 1.6 * u], [h[0] + side * 0.3 * u, h[1] + 0.4 * u]], [1.2 * u, 0.9 * u], SE);
+        Lr.ellipse(h[0] + side * 1.8 * u, h[1] + 1.6 * u, 1.2 * u, 0.7 * u, C(VOID));
+        blob(Lr, [[h[0], h[1], 1.3 * u, 1.1 * u]], SE, { matte: true });
+        for (let k = -1; k <= 1; k++) Lr.set(R(h[0] + k * 0.6 * u), R(h[1] - 0.6 * u), G[3]);
+      };
+      const W = layer(F);
+      // the sword: a long gold-hilted blade
+      const tip = [swH[0] + Math.cos(swA) * 13 * u, swH[1] + Math.sin(swA) * 13 * u], pom = [swH[0] - Math.cos(swA) * 2 * u, swH[1] - Math.sin(swA) * 2 * u];
+      const bl = [swH[0] + Math.cos(swA) * 1.4 * u, swH[1] + Math.sin(swA) * 1.4 * u];
+      shard(W, bl[0], bl[1], swA, 11.6 * u, 0.85 * u, SE);
+      tube(W, [pom, bl], 0.45 * u, G);
+      blob(W, [[pom[0], pom[1], 0.6 * u, 0.6 * u]], G);
+      const gx = -Math.sin(swA), gy = Math.cos(swA);
+      tube(W, [[bl[0] + gx * 1.8 * u, bl[1] + gy * 1.8 * u], [bl[0] - gx * 1.8 * u, bl[1] - gy * 1.8 * u]], 0.5 * u, G);
+      gaunt(W, swH, -1);
+      // the sceptre: an ivory rod, a gold eagle with spread wings on top
+      const spT = [spH[0], spH[1] - 9 * u], spB = [spH[0], spH[1] + 3.6 * u];
+      tube(W, [spB, spT], 0.45 * u, pal5('sand', 6), { rings: Math.max(3, R(2.4 * u)), ringC: G[3] });
+      blob(W, [[spT[0], spT[1], 0.9 * u, 0.7 * u]], G);
+      for (const d of [-1, 1]) horn(W, [spT[0], spT[1] - 0.6 * u], [spT[0] + d * 1.8 * u, spT[1] - 2.6 * u], [spT[0] + d * 2.6 * u, spT[1] - 1.2 * u], 1.3 * u, d < 0 ? G : Gd);
+      blob(W, [[spT[0] + 0.2 * u, spT[1] - 1.6 * u, 0.6 * u, 0.7 * u]], G);
+      W.set(R(spT[0] + 0.8 * u), R(spT[1] - 1.6 * u), Gd[0]);
+      gaunt(W, spH, 1);
+      put(L, W, true);
+      // ---- echoes: fading copies of the bust and the sword trail where they were
+      const E = layer(F);
+      const eo = idle ? 2.4 + sin(t) * 1 : run ? 4 : wind ? 1.6 : 3;
+      if (!hurt) { echoOf(E, Bu, -eo * u, 0.6 * u, EG[3], 90); echoOf(E, Bu, eo * u, 0.6 * u, EG[3], 60); }
+      if (hit) { echoOf(E, W, -3 * u, -6 * u, EG[3], 90); echoOf(E, W, -7 * u, -11 * u, EG[3], 55); }
+      if (run) echoOf(E, L, 3 * u, 0, EG[2], 50);
+      put(L, E, false);
+      put(F.p, L, false);
+      // ---- blank burning eyes; squeezed shut when hurt; the halo glints
+      if (hurt) { F.p.line(bx - 2 * u, by - 4.2 * u, bx - 0.6 * u, by - 4 * u, Gd[0], 2); F.p.line(bx + 0.6 * u, by - 4 * u, bx + 2 * u, by - 4.2 * u, Gd[0], 2); }
+      else for (const d of [-1, 1]) eyeGlow(F, bx + d * 1.25 * u - 0.6 * u, by - 4.5 * u, 1.2 * u, (wind ? 1 : 0.7) * u, EG[3]);
+      F.p.set(R(hcx - hr * 0.55), R(hcy - hr * 0.55), WHITE);
+      if (hit) for (const Lr of [F.p, F.e]) Lr.line(tip[0], tip[1], tip[0] - Math.cos(swA) * 4 * u, tip[1] - Math.sin(swA) * 4 * u, C(EG[4]), 2);
+      F.mouth = [tip[0], tip[1]];
     },
   },
 };

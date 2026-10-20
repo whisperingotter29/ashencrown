@@ -57,7 +57,8 @@
     "mac": {
       "target": [
         "dir",
-        "zip"
+        "zip",
+        "dmg"
       ],
       "icon": "build/icon.png",
       "category": "public.app-category.role-playing-games",

@@ -1095,7 +1095,7 @@ export default {
   // of many mouths, two tendrils hooked over the edges of the tear to haul itself through, two more
   // groping along the floor. Deep in its central maw a star-core pulses: the weak point.
   rift_spawn: {
-    view: 'front', box: [40, 38], pivot: 0.5, idleFps: 5, idle: 6,
+    view: 'front', box: [40, 46], pivot: 0.5, idleFps: 5, idle: 6,
     draw(F, o, P) {
       const { u, ox, oy } = F;
       const VB = [C('#2a1030'), C('#4a1a48'), C('#6a2a5e'), C('#8e4282'), C('#b46aa4')];
@@ -1104,12 +1104,12 @@ export default {
       const cx = ox, swell = a1 ? 1.08 : a2 ? 1.02 : hurt ? 0.9 : 1 + (idle ? sin(t) * 0.025 : 0);
       const by = oy - 11 * u + (run ? sin(t) * 0.6 * u : 0) + (hurt ? -1 * u : 0);
       // ------------------------------------------------ the rift: a jagged lens of torn light
-      const rTop = oy - 36 * u, rBot = oy - 3 * u, rW = (a1 ? 8 : hurt ? 9.5 : 7) * u;
+      const rTop = oy - 44 * u, rBot = oy - 4 * u, rW = (a1 ? 9.4 : hurt ? 10.5 : 8.4) * u;
       const rr = srand(77), edgeL = [], edgeR = [];
       const N = 18;
       for (let k = 0; k <= N; k++) {
-        const f = k / N, y = lerp(rTop, rBot, f), w = rW * Math.pow(Math.sin(f * Math.PI), 0.8);
-        const jl = (rr() - 0.5) * 2.2 * u * Math.sin(f * Math.PI), jr = (rr() - 0.5) * 2.2 * u * Math.sin(f * Math.PI);
+        const f = k / N, y = lerp(rTop, rBot, f), w = rW * Math.pow(Math.sin(Math.pow(f, 0.62) * Math.PI), 0.9);
+        const jl = (rr() - 0.5) * 3 * u * Math.sin(f * Math.PI), jr = (rr() - 0.5) * 3 * u * Math.sin(f * Math.PI);
         const sway = sin(t + f * 0.7) * 0.5 * u * Math.sin(f * Math.PI);
         edgeL.push([cx - w + jl + sway, y]); edgeR.push([cx + w + jr + sway, y]);
       }
@@ -1120,11 +1120,11 @@ export default {
       F.p.poly(lens(0), C('#140818')); RE.poly(lens(0), C('#2f0d48'));
       // inner swirl and the far stars inside the tear
       const In = layer(F); In.poly(lens(0), C('#140818'));
-      for (let s2 = 0; s2 < 1; s2 += 0.02) { const a = s2 * 9 + t * TAU * 0.5, rad = s2 * rW * 0.8; over(In, cx + Math.cos(a) * rad, by - 12 * u + Math.sin(a) * rad * 2, '#4a1664'); over(In, cx + Math.cos(a) * rad + 1, by - 12 * u + Math.sin(a) * rad * 2, '#2f0d48'); }
+      for (let s2 = 0; s2 < 1; s2 += 0.02) { const a = s2 * 9 + t * TAU * 0.5, rad = s2 * rW * 0.8; over(In, cx + Math.cos(a) * rad, by - 19 * u + Math.sin(a) * rad * 1.6, '#4a1664'); over(In, cx + Math.cos(a) * rad + 1, by - 19 * u + Math.sin(a) * rad * 1.6, '#2f0d48'); }
       put(F.p, In, false);
-      starfield({ p: F.p, e: RE }, cx, by - 13 * u, rW * 0.7, 13 * u, 16, 5, t, In, ['#f5afd6', '#c860f0', '#e6f4fc']);
+      starfield({ p: F.p, e: RE }, cx, by - 19 * u, rW * 0.7, 12 * u, 20, 5, t, In, ['#f5afd6', '#c860f0', '#e6f4fc']);
       // torn flaps curling out of the edges
-      for (const [k, side] of [[4, -1], [7, 1], [12, -1], [14, 1]]) {
+      for (const [k, side] of [[2, 1], [8, -1], [10, 1], [13, -1]]) {
         const [x, y] = side < 0 ? edgeL[k] : edgeR[k];
         const tip = [x + side * 2.4 * u, y - 1.6 * u + sin(t + k * 0.1) * 0.4 * u];
         for (const Lx of [F.p, RE]) Lx.poly([[x, y - 1 * u], tip, [x, y + 1.2 * u]], C(k % 2 ? '#f5afd6' : '#c860f0'));
@@ -1141,9 +1141,9 @@ export default {
       const lift = a1 ? -3 * u : a2 ? 0 : hurt ? -1 * u : sin(t) * 0.6 * u;
       const lash = a2 ? 6 * u : a1 ? -2 * u : 0;
       // upper pair: hooked over the edges of the tear, hauling
-      const gl = edgeL[6], gr = edgeR[5];
-      tend([cx - 4 * u, by - 4 * u], [gl[0] - 1.2 * u, gl[1] - 0.6 * u], [cx - 10 * u, by - 6 * u], 1.8, false);
-      tend([cx + 4 * u, by - 4.5 * u], [gr[0] + 1.2 * u, gr[1] - 0.6 * u], [cx + 10 * u, by - 7 * u], 1.8, false);
+      const gl = edgeL[5], gr = edgeR[4];
+      tend([cx - 5 * u, by - 4 * u], [gl[0] - 1.2 * u, gl[1] - 0.6 * u], [cx - 14 * u, by - 9 * u + lift * 0.3], 2.1, false);
+      tend([cx + 5 * u, by - 4.5 * u], [gr[0] + 1.2 * u, gr[1] - 0.6 * u], [cx + 14 * u, by - 10 * u + lift * 0.3], 2.1, false);
       // hooked tips curling over the rim
       for (const [g, sd] of [[gl, -1], [gr, 1]]) { const H2 = layer(F); horn(H2, [g[0] + sd * 1.2 * u, g[1] - 0.6 * u], [g[0] + sd * 0.6 * u, g[1] - 2.4 * u], [g[0] - sd * 1.4 * u, g[1] - 1.8 * u], 1.2 * u, VB); put(F.p, H2, true); put(FR, H2, false); }
       // ------------------------------------------------ the body: a lumpy mass squeezing out

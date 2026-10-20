@@ -23,7 +23,7 @@ npm install
 npm start              # builds the web game, opens it in the desktop app
 npm run dist:win       # release/win-unpacked + AshenCrown-<ver>-win-x64.zip
 npm run dist:linux     # release/linux-unpacked + .AppImage + .tar.gz (Steam Deck / Linux)
-npm run dist:mac       # release/mac-universal + .zip (must be run on a Mac)
+npm run dist:mac       # release/mac-universal + .zip + .dmg (must be run on a Mac)
 ```
 
 Windows and Linux builds can both be made on Windows or Linux. The `*-unpacked` folders are what
