@@ -173,6 +173,81 @@ function stoneHand(L, w, a, s, kind, Rm, Gm, mirror = 1) {
   return put(L, T, true);
 }
 
+// carved glyphs (our own little pictograms), n px tall at (x, y) top-left: 0 sun, 1 water, 2 eye,
+// 3 reed, 4 bird, 5 hand, 6 loop-cross, 7 steps. Strokes into L (and e when given).
+function glyph(L, e, x, y, n, kind, c) {
+  const cc = C(c), q = (a) => R(a * n);
+  const ln = (a, b, c2, d) => { L.line(x + q(a), y + q(b), x + q(c2), y + q(d), cc); if (e) e.line(x + q(a), y + q(b), x + q(c2), y + q(d), cc); };
+  const ring = (cx, cy, r) => { L.ring(x + cx * n, y + cy * n, r * n, cc, 1); if (e) e.ring(x + cx * n, y + cy * n, r * n, cc, 1); };
+  const dot = (a, b) => { L.set(x + q(a), y + q(b), cc); if (e) e.set(x + q(a), y + q(b), cc); };
+  switch (kind % 8) {
+    case 0: ring(0.5, 0.5, 0.48); dot(0.5, 0.5); break;
+    case 1: for (const yy of [0.25, 0.7]) { ln(0, yy, 0.25, yy - 0.2); ln(0.25, yy - 0.2, 0.5, yy); ln(0.5, yy, 0.75, yy - 0.2); ln(0.75, yy - 0.2, 1, yy); } break;
+    case 2: ln(0, 0.4, 0.5, 0.15); ln(0.5, 0.15, 1, 0.4); ln(0, 0.4, 0.5, 0.65); ln(0.5, 0.65, 1, 0.4); dot(0.5, 0.4); ln(0.3, 0.65, 0.2, 1); break;
+    case 3: ln(0.5, 0, 0.5, 1); ln(0.5, 0.2, 0.15, 0.05); ln(0.5, 0.45, 0.85, 0.3); ln(0.2, 1, 0.8, 1); break;
+    case 4: ln(0.2, 0.2, 0.45, 0.35); ln(0.45, 0.35, 0.45, 0.8); ln(0.45, 0.8, 1, 0.75); ln(0.45, 0.45, 0.9, 0.5); ln(0.3, 0.8, 0.3, 1); break;
+    case 5: ln(0, 0.8, 0.7, 0.8); ln(0.7, 0.8, 1, 0.5); ln(0.15, 0.8, 0.15, 0.2); ln(0.4, 0.8, 0.4, 0.1); ln(0.6, 0.8, 0.6, 0.25); break;
+    case 6: ring(0.5, 0.27, 0.25); ln(0.5, 0.52, 0.5, 1); ln(0.1, 0.62, 0.9, 0.62); break;
+    default: ln(0, 1, 0.33, 1); ln(0.33, 1, 0.33, 0.66); ln(0.33, 0.66, 0.66, 0.66); ln(0.66, 0.66, 0.66, 0.33); ln(0.66, 0.33, 1, 0.33); ln(1, 0.33, 1, 0);
+  }
+  return L;
+}
+
+// lowest opaque pixel of a column (or -1)
+const lowY2 = (L, x) => { for (let y = L.h - 1; y >= 0; y--) if (L.a(x, y) > 100) return y; return -1; };
+// ---- stained glass
+const GLASS = {
+  ruby: ['#4a1420', '#8a1e2c', '#c22a3c', '#e8506a', '#f48a9a'],
+  rose: ['#4a1a30', '#7a2f4a', '#a94a68', '#e48fb0', '#f4bccf'],
+  amber: ['#7a1e14', '#c2401c', '#ec7a2a', '#f8b848', '#fff0b0'],
+  violet: ['#2f0d48', '#4a1664', '#691fc4', '#a026ef', '#c860f0'],
+  blue: ['#120c30', '#172d64', '#243e7b', '#3973af', '#8cb8de'],
+};
+const LEAD = ['#140f1c', '#1a1f2c', '#2a3240', '#3e4a5a', '#6e7a9a'];
+const GLASS_MIX = ['ruby', 'ruby', 'rose', 'amber', 'ruby', 'violet', 'rose', 'ruby', 'rose', 'amber', 'ruby', 'blue'];
+const inPoly = (pts, x, y) => { let c = false; for (let i = 0, j = pts.length - 1; i < pts.length; j = i++) { const [xi, yi] = pts[i], [xj, yj] = pts[j]; if ((yi > y) !== (yj > y) && x < (xj - xi) * (y - yi) / (yj - yi) + xi) c = !c; } return c; };
+// Fill a shape with lead-lined panes (a Voronoi of seeds). Works in local units: toLocal(px, py)
+// maps a pixel centre to local coords, inside(lx, ly) tests the shape. seeds: [{ x, y, pal, lit }].
+// Writes into L (colour) and e (glow of lit panes, may be null). lead: line width in px; px: u.
+function stained(L, e, box, toLocal, inside, seeds, u, o = {}) {
+  const lead = (o.lead ?? 2) / u, glowK = o.glow ?? 0.55;
+  const [x0, y0, x1, y1] = box;
+  const id = new Int16Array(L.w * L.h).fill(-1);
+  for (let y = Math.max(0, Math.floor(y0)); y <= Math.min(L.h - 1, y1); y++) for (let x = Math.max(0, Math.floor(x0)); x <= Math.min(L.w - 1, x1); x++) {
+    const [lx, ly] = toLocal(x + 0.5, y + 0.5);
+    if (!inside(lx, ly)) continue;
+    let b1 = 1e9, b2 = 1e9, k1 = 0;
+    for (let k = 0; k < seeds.length; k++) { const dx = lx - seeds[k].x, dy = ly - seeds[k].y, d = dx * dx + dy * dy; if (d < b1) { b2 = b1; b1 = d; k1 = k; } else if (d < b2) b2 = d; }
+    const d1 = Math.sqrt(b1), d2 = Math.sqrt(b2);
+    if (d2 - d1 < lead) { L.set(x, y, LEAD[ly > seeds[k1].y ? 3 : 2]); continue; }
+    const sd = seeds[k1], G = GLASS[sd.pal];
+    // flat bands inside each pane: lit toward the top-left, dark toward the bottom-right
+    const rx = lx - sd.x, ry = ly - sd.y, l = -rx * 0.6 + ry * 0.8;
+    const ti = l > 0.75 ? 4 : l > 0.15 ? 3 : l > -0.7 ? 2 : 1;
+    L.set(x, y, G[ti]);
+    id[y * L.w + x] = k1;
+    if (e && sd.lit) e.set(x, y, C(G[Math.min(4, ti + 1)]).map((v, i) => (i === 3 ? 255 : v * glowK + 255 * (1 - glowK) * 0)));
+  }
+  // a lead border round the whole shape
+  for (let y = Math.max(0, Math.floor(y0)); y <= Math.min(L.h - 1, y1); y++) for (let x = Math.max(0, Math.floor(x0)); x <= Math.min(L.w - 1, x1); x++) {
+    if (id[y * L.w + x] < 0) continue;
+    const out = (xx, yy) => !L.a(xx, yy);
+    if (out(x - 1, y) || out(x, y - 1)) { L.set(x, y, LEAD[3]); if (e) e.clear(x, y); }
+    else if (out(x + 1, y) || out(x, y + 1) || out(x + 2, y) || out(x, y + 2)) { L.set(x, y, LEAD[1]); if (e) e.clear(x, y); }
+  }
+  return L;
+}
+// jittered seeds over a local rectangle
+function seedGrid(x0, y0, x1, y1, step, seed, pals = GLASS_MIX, litP = 0.4, litT = 0) {
+  const out = [];
+  let k = 0;
+  for (let y = y0; y <= y1; y += step * 0.85) for (let x = x0 + ((k & 1) ? step * 0.5 : 0); x <= x1; x += step, k++) {
+    const h = hash2(R(x * 10), R(y * 10), seed);
+    out.push({ x: x + (hash2(k, 1, seed) - 0.5) * step * 0.6, y: y + (hash2(k, 2, seed) - 0.5) * step * 0.6, pal: pals[Math.floor(h * pals.length) % pals.length], lit: ((h * 7 + litT) % 1) < litP });
+  }
+  return out;
+}
+
 // dissolve the bottom of a layer into a dithered fade between y0 (solid) and y1 (gone)
 function fadeOut(L, y0, y1) {
   for (let y = Math.max(0, R(y0)); y < L.h; y++) {
@@ -187,6 +262,9 @@ export const assign = {
   colossus_heart: { design: 'colossus_heart', name: 'Heart of Ozymar' },
   sand_king: { design: 'sand_king', name: 'The Sand-King' },
   obelisk_keeper: { design: 'obelisk_keeper', name: 'Obelisk Keeper' },
+  ash_lich: { design: 'ash_lich', name: 'The Ash Lich' },
+  glass_wyrm: { design: 'glass_wyrm', name: 'The Glass Wyrm' },
+  ozymar: { design: 'ozymar', name: 'Ozymar the Unburied' },
 };
 
 export default {
@@ -519,7 +597,7 @@ export default {
     draw(F, o, P) {
       const { u, ox, oy } = F;
       const t = P.t, idle = P.act === 'idle', run = P.act === 'run', wind = P.atk === 1, hit = P.atk === 2, hurt = P.hurt;
-      const S = pal5('stone', 5), Sd = S.map((c) => dark(c, 0.8)), G = pal5('gold', 5), Gd = G.map((c) => dark(c, 0.8)), H = pal5('sand', 5), Hd = H.map((c) => dark(c, 0.75));
+      const S = pal5('slate', 5), Sd = S.map((c) => dark(c, 0.78)), G = pal5('gold', 5), Gd = G.map((c) => dark(c, 0.86)), H = pal5('sand', 5), Hd = H.map((c) => dark(c, 0.88));
       const AE = ['#4a1664', '#691fc4', '#a026ef', '#c860f0', '#f5afd6'];
       const lean = run ? 1.6 : hurt ? -1.4 : 0;
       const rise = wind ? 3 : hit ? -2.4 : idle ? sin(t) * 0.4 : run ? 0.6 : 0;
@@ -529,7 +607,7 @@ export default {
       const kinds = ['open', 'fist', 'point', 'cup'];
       const hands = kinds.map((kind, k) => {
         let a = (k / 4 + 0.125 + (idle ? sin(t + k * 0.25) * 0.02 : run ? -0.04 : 0)) * TAU;
-        let hx = Math.cos(a) * 11.5, hy = 17 + Math.sin(a) * 3.2 + (idle ? sin(t * 2 + k * 0.3) * 0.5 : 0), depth = Math.sin(a);
+        let hx = Math.cos(a) * 10.5, hy = 18 + Math.sin(a) * 3.2 + (idle ? sin(t * 2 + k * 0.3) * 0.5 : 0), depth = Math.sin(a);
         let ang = Math.atan2(-1, Math.cos(a) * 0.3) + (hx > 0 ? 0.5 : -0.5);   // fingers up and outward
         if (wind) { hy += 10 + depth; hx *= 0.8; ang = hx > 0 ? -0.9 : -2.2; }
         if (hit) { hy = 2.2 + depth * 0.8; hx *= 0.9; ang = Math.PI / 2 + (hx > 0 ? -0.3 : 0.3); }
@@ -545,17 +623,11 @@ export default {
       hands.filter((h) => h.depth < 0).forEach(drawHand);
       // ---- the shaft: a basalt needle, front face lit, right face in shadow
       const B = layer(F);
-      const bw = 4.2, tw = 2.9, b0 = 4, b1 = 31;
+      const bw = 3.7, tw = 2.6, b0 = 3, b1 = 33;
       slab(B, [[X(bw, b0), Y(b0)], [X(bw + 1.6, b0 + 0.8), Y(b0 + 0.8)], [X(tw + 1.1, b1 + 0.4), Y(b1 + 0.4)], [X(tw, b1), Y(b1)]], Sd);
       slab(B, [[X(-bw, b0), Y(b0)], [X(bw, b0), Y(b0)], [X(tw, b1), Y(b1)], [X(-tw, b1), Y(b1)]], S, { wide: true });
-      // the chipped top corner
-      facet(B, [[X(-tw, b1), Y(b1) - 1], [X(-tw + 1.6, b1), Y(b1) - 1], [X(-tw, b1 - 2.4), Y(b1 - 2.4)]], [0, 0, 0, 0]);
-      for (let y = R(Y(b1)); y <= Y(b1 - 2.4); y++) for (let x = R(X(-tw - 0.5, b1)); x <= X(-tw + 1.8, b1); x++) {
-        const fy = (Y(b1 - 2.4) - y) / (2.4 * u), fx = (x - X(-tw, b1)) / (1.8 * u);
-        if (fx < fy) B.clear(x, y);
-      }
       // a carved inset panel down the face, for the glyph tears
-      const pt = 18.6, pb = 6.2;
+      const pt = 19.6, pb = 4.8;
       for (let y = R(Y(pt)); y <= Y(pb); y++) {
         const f = (Y(pb) - y) / (Y(pb) - Y(pt)), hw = lerp(bw - 1.3, tw + 0.2, (lerp(pb, pt, f) - b0) / (b1 - b0)) * u;
         const cx = X(0, lerp(pb, pt, f));
@@ -565,7 +637,6 @@ export default {
         }
       }
       // cracks in the basalt
-      crack(B, X(2, 10), Y(10), 1.2, 4 * u, S[0], 6);
       crack(B, X(-2.5, 27), Y(27), 2, 3 * u, S[0], 2);
       if (hurt) crack(B, X(1, 24), Y(24), 1.9, 7 * u, S[0], 13);
       put(L, B, true);
@@ -576,7 +647,7 @@ export default {
       facetOn(Pd, [[X(-tw, b1), Y(b1) - 1], [X(-0.3, b1 + 5), Y(b1 + 5)], [X(-0.3, b1), Y(b1) - 1]], G[4], G[3]);
       put(L, Pd, true);
       // the eye: a carved almond socket under a heavy lintel
-      const ex = X(0, 23), ey = Y(23);
+      const ex = X(0, 24.6), ey = Y(24.6);
       const open = hurt ? 0 : wind || hit ? 1 : idle && P.i === 4 ? 0.12 : run ? 0.6 : 0.5;
       const Ey = layer(F);
       const alm = (k, dy = 0) => { const pts = []; for (let j = 0; j <= 16; j++) { const f = j / 16, x = ex + (f - 0.5) * 6.4 * k * u, h = Math.sin(f * Math.PI) * 1.65 * k * u; pts.push([x, ey + h + dy]); } for (let j = 16; j >= 0; j--) { const f = j / 16, x = ex + (f - 0.5) * 6.4 * k * u, h = Math.sin(f * Math.PI) ** 0.8 * 1.9 * k * u; pts.push([x, ey - h + dy]); } return pts; };
@@ -607,20 +678,18 @@ export default {
       }
       // lintel brow, cracked on one side
       const Lt = layer(F);
-      slab(Lt, [[X(-4.4, 26), Y(25.2)], [X(4.6, 26), Y(25.7)], [X(4.3, 27), Y(27)], [X(-4.1, 27), Y(26.6)]], S, { wide: true });
-      facet(Lt, [[X(2.6, 26), Y(25.4)], [X(3.4, 27), Y(26.9)], [X(2.9, 26), Y(26.2)]], S[1]);
+      slab(Lt, [[X(-3.5, 27.6), Y(27.6)], [X(-0.4, 27.6), Y(27)], [X(3.6, 27.6), Y(28)], [X(3.4, 28.8), Y(29)], [X(-0.2, 28.8), Y(28.1)], [X(-3.3, 28.8), Y(28.7)]], S, { wide: true });
+      facet(Lt, [[X(2.2, 27.6), Y(27.7)], [X(3, 28.8), Y(28.9)], [X(2.6, 27.6), Y(28.3)]], S[1]);
       put(F.p, Lt, true);
-      // three tears of glyphs down the panel; a pulse of light runs down them
-      const pulse = idle ? P.i / 6 : run ? 0.3 : 0.9;
-      for (let c = -1; c <= 1; c++) for (let r2 = 0; r2 < 4; r2++) {
-        const y = 17.4 - r2 * 3, x = c * 1.9 - 0.6;
-        const lit = wind || hit || Math.abs((r2 / 4) - pulse) < 0.3 || (r2 + c) % 3 === 0;
-        const col = hurt ? S[1] : lit ? AE[3] : AE[0];
-        if (lit && !hurt) rune(F, X(x, y), Y(y), Math.max(2, R(1.3 * u)), col, 7 + c * 5 + r2);
-        else { const sc = C(col); const n = Math.max(2, R(1.3 * u)), xx = R(X(x, y)), yy = R(Y(y)); F.p.line(xx, yy, xx + n, yy + n, sc); F.p.line(xx + n, yy, xx, yy + n, sc); }
+      // a column of glyphs down the panel; a pulse of light runs down it like a tear
+      const pulse = idle ? P.i / 6 : run ? 0.3 : 0.9, gn = Math.max(5, R(2.6 * u));
+      for (let r2 = 0; r2 < 4; r2++) {
+        const y = 18.6 - r2 * 3.5;
+        const lit = wind || hit || Math.abs((r2 / 4) - pulse) < 0.22;
+        glyph(F.p, lit && !hurt ? F.e : null, R(X(0, y) - gn / 2), R(Y(y)), gn, [0, 2, 4, 6][r2], hurt ? S[0] : lit ? AE[3] : S[0]);
       }
       // tear grooves under the eye
-      for (const c of [-1.6, 0, 1.6]) { const x = R(ex + c * u); for (let y = R(ey + 1.9 * u); y < Y(19); y++) { F.p.set(x, y, C(hurt ? S[0] : AE[1])); if (wind || hit) F.e.set(x, y, C(AE[2])); } }
+      for (const c of [-1.6, 0, 1.6]) { const x = R(ex + c * u); for (let y = R(ey + 1.9 * u); y < Y(20); y++) { F.p.set(x, y, C(hurt ? S[0] : AE[1])); if (wind || hit) F.e.set(x, y, C(AE[2])); } }
       // the near hands
       const L2 = layer(F);
       hands.filter((h) => h.depth >= 0).forEach((h) => {
@@ -629,9 +698,459 @@ export default {
       });
       put(F.p, L2, false);
       // the beam's first flare on the strike
-      if (hit) { for (const Lr of [F.p, F.e]) { Lr.ellipse(ex, ey + 2.8 * u, 2.2 * u, 1 * u, C(AE[3])); Lr.ellipse(ex, ey + 2.8 * u, 1.2 * u, 0.6 * u, C(AE[4])); } }
-      if (hurt) for (let j = 0; j < 3; j++) rock(F.p, X(3 + j * 1.5, 26 - j * 2), Y(26 - j * 2), 0.8 * u, 0.6 * u, S, 70 + j);
+      if (hit) for (let k = 0; k < 8; k++) {
+        const a = k / 8 * TAU + 0.2, r0 = 2.6 * u, r1 = (k % 2 ? 4.6 : 6.4) * u;
+        for (const Lr of [F.p, F.e]) Lr.line(ex + Math.cos(a) * r0 * 1.3, ey + Math.sin(a) * r0 * 0.8, ex + Math.cos(a) * r1 * 1.3, ey + Math.sin(a) * r1 * 0.8, C(k % 2 ? AE[3] : AE[4]), 2);
+      }
+      if (hurt) for (let j = 0; j < 3; j++) rock(F.p, X(3.4 + j * 1.5, 28 - j * 2), Y(28 - j * 2), 0.8 * u, 0.6 * u, S, 70 + j);
       F.mouth = [ex, ey];
+    },
+  },
+  // The Ash Lich (ash_lich): a court sorcerer who had himself cremated and would not stop burning.
+  // His body is the iron brazier of his own pyre: the ribcage a curved grate full of fire, three
+  // tripod legs with claw feet dangling under a robe of ash that crumbles as it falls. The skull is
+  // lit from below by the fire; a crown of melted candles drips wax over one socket.
+  ash_lich: {
+    view: 'front', box: [32, 42], pivot: 0.5, idle: 6, idleFps: 6, hover: true,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const t = P.t, idle = P.act === 'idle', run = P.act === 'run', wind = P.atk === 1, hit = P.atk === 2, hurt = P.hurt;
+      const IR = pal5('steel', 4), IRd = IR.map((c) => dark(c, 0.78)), AS = pal5('stone', 5), BN = pal5('sand', 6), WX = pal5('red', 5);   // deep red wax
+      const BK = ramp('#3a2a2c');   // charred bone
+      const lean = run ? -1.4 : hurt ? 1.2 : 0;
+      const bob = idle ? sin(t) * 0.4 : 0;
+      const X = (x, y = 0) => ox + (x + lean * (y - 10) / 25) * u, Y = (y) => oy - (y + bob) * u;
+      const fireK = hurt ? 0.45 : wind ? 1.5 : hit ? 1.25 : 1;
+      const L = layer(F);
+      // ---- the mantle of ash: two tattered panels hanging open from the shoulders
+      for (const side of [-1, 1]) {
+        const M = layer(F), pts = [[X(side * 3.8, 23), Y(23.4)], [X(side * 7.6, 23), Y(23)], [X(side * 9.4, 20), Y(19.5)]];
+        const hemO = side * (11.2 + (run ? -1 : 0)), hemI = side * 4.4;
+        const n = 7;
+        for (let k = 0; k <= n; k++) {
+          const f = k / n, x = lerp(hemO, hemI, f), sway = idle ? sin(t + f * 0.6) * 0.5 : run ? 2 * f : 0;
+          const y = lerp(5, 9, f) + (k % 2 ? 1.6 + hash2(k, side + 3, 2) * 1.4 : 0);
+          pts.push([X(x + sway, y), Y(y)]);
+        }
+        pts.push([X(side * 3.6, 14), Y(14)]);
+        M.poly(pts, AS[3]);
+        cyl(M, AS, { wide: true });
+        // folds
+        for (let k = 1; k <= 3; k++) { const f = k / 4; M.line(X(side * lerp(4.8, 7.4, f), 22), Y(22), X(side * lerp(5, 10.6, f), 8), Y(8), AS[2]); }
+        // smouldering hem
+        for (let x = 0; x < M.w; x++) { const y = lowY2(M, x); if (y > 0 && hash2(x >> 1, 3, side + 5) > 0.55) { M.set(x, y, C(HOT[1])); F.e.set(x, y, C(HOT[1])); if (hash2(x, 4, 1) > 0.6) { M.set(x, y - 1, C(HOT[2])); F.e.set(x, y - 1, C(HOT[2])); } } }
+        put(L, M, true);
+      }
+      // ---- tripod legs: three iron legs with lion-claw feet, swinging under the grate
+      const legs = [[-3.6, 3, 0.2], [0.4, 2.2, 0.55], [3.8, 3.2, 0.85]];
+      for (const [lx, ly, ph] of legs) {
+        const sw = idle ? sin(t + ph) * 0.6 : run ? 1.6 : hurt ? -0.8 : 0;
+        const top = [X(lx * 0.45, 13), Y(13)], foot = [X(lx + sw, ly), Y(ly)];
+        const Lg = layer(F);
+        tube(Lg, bez([top, [lerp(top[0], foot[0], 0.3) + lx * 0.3 * u, lerp(top[1], foot[1], 0.5)], foot], 10), [0.8 * u, 0.55 * u], ph === 0.55 ? IRd : IR);
+        blob(Lg, [[lerp(top[0], foot[0], 0.45), lerp(top[1], foot[1], 0.45), 0.9 * u, 0.6 * u]], IR);
+        blob(Lg, [[foot[0], foot[1], 1.2 * u, 0.9 * u]], IR);
+        for (const d of [-1, 0, 1]) horn(Lg, [foot[0] + d * 0.7 * u, foot[1] + 0.3 * u], [foot[0] + d * 1.1 * u, foot[1] + 1 * u], [foot[0] + d * 1.3 * u, foot[1] + 1.4 * u], 0.6 * u, IRd);
+        put(L, Lg, true);
+      }
+      put(F.p, L, false);
+      // ---- the fire inside the grate (behind the bars)
+      const fx = X(0, 18);
+      for (const Lr of [F.p, F.e]) { Lr.ellipse(fx, Y(15.5), 4 * u, 2.6 * u, C(HOT[1])); Lr.ellipse(fx, Y(15.2), 3 * u, 1.6 * u, C(HOT[2])); }
+      flame(F, fx - 1.8 * u, Y(15), 7 * fireK * u, 3.6 * u, t, {});
+      flame(F, fx + 2 * u, Y(15), 6 * fireK * u, 3.2 * u, t + 0.4, {});
+      flame(F, fx, Y(14.6), 10 * fireK * u, 4.8 * u, t + 0.2, {});
+      // ---- the grate: an iron basket shaped like a ribcage, a spine down the middle
+      const G2 = layer(F);
+      const rimY = Y(23.2), botY = Y(13.2);
+      const ribX = (f, y) => { const k = (rimY - y) / (rimY - botY); return X(0, 18) + f * lerp(5.8, 2.4, k * k) * u; };
+      for (const f of [-1, 1]) { const pts = []; for (let y = rimY; y <= botY; y += 1) pts.push([ribX(f, y), y]); tube(G2, pts, Math.max(0.6, 0.5 * u), IR); }
+      for (let k = 0; k < 4; k++) {
+        const y = lerp(rimY + 1.8 * u, botY - 1.4 * u, k / 3.3);
+        for (const side of [-1, 1]) {
+          const pts = []; for (let f = 0; f <= 1.001; f += 0.1) pts.push([ribX(side * f, y), y - Math.sin(f * Math.PI * 0.9) * 1.1 * u + f * 0.8 * u]);
+          tube(G2, pts, Math.max(0.6, 0.48 * u), k % 2 ? IRd : IR);
+        }
+      }
+      tube(G2, [[X(0, 23), rimY], [X(0, 13), botY]], 0.65 * u, IR, { rings: Math.max(2, R(1.2 * u)), ringC: IR[0] });
+      blob(G2, [[X(0, 13), botY, 2.8 * u, 1.1 * u]], IR);
+      // rim: a heavy iron ring with spiked finials at the shoulders
+      const Rm = layer(F), rcx = X(0, 23);
+      Rm.ellipse(rcx, rimY, 6.6 * u, 1.6 * u, IR[3]);
+      for (let y = R(rimY - 0.9 * u); y <= rimY + 0.9 * u; y++) for (let x = R(rcx - 5.4 * u); x <= rcx + 5.4 * u; x++) if (((x + 0.5 - rcx) / (5.4 * u)) ** 2 + ((y + 0.5 - rimY + 0.1 * u) / (0.85 * u)) ** 2 <= 1) Rm.clear(x, y);
+      cyl(Rm, IR, {});
+      for (const side of [-1, 1]) {
+        horn(Rm, [rcx + side * 6 * u, rimY], [rcx + side * 7.4 * u, rimY - 1.4 * u], [rcx + side * 7.6 * u, rimY - 3.6 * u], 1.3 * u, IR);
+        horn(Rm, [rcx + side * 4 * u, rimY - 0.8 * u], [rcx + side * 4.6 * u, rimY - 2 * u], [rcx + side * 4.4 * u, rimY - 3 * u], 0.9 * u, IRd);
+      }
+      put(G2, Rm, true);
+      put(F.p, G2, true);
+      // ---- arms: charred bone in ash sleeves
+      const sL = [X(-6.4, 22), Y(22)], sR = [X(6.4, 22), Y(22)];
+      const castH = wind ? [X(-9.5, 32), Y(32)] : hit ? [X(-12.5, 21), Y(21)] : hurt ? [X(-10, 15), Y(15)] : [X(-10.4, 18.5), Y(18.5) + (idle ? sin(t) * 0.4 * u : 0)];
+      const offH = wind ? [X(10, 29), Y(29)] : hit ? [X(9.6, 17), Y(17)] : hurt ? [X(10.6, 16), Y(16)] : [X(9.6, 15), Y(15) + (idle ? cos(t) * 0.3 * u : 0)];
+      const arm = (sh, hand, side) => {
+        const A = layer(F);
+        const el = ik(sh, hand, 5 * u, 5.2 * u, side);
+        const dx = el[0] - sh[0], dy = el[1] - sh[1], l = Math.hypot(dx, dy) || 1, nx = -dy / l, ny = dx / l;
+        // the sleeve hangs open, wider at the cuff
+        const c0 = [el[0] - nx * 2.4 * u, el[1] - ny * 2.4 * u + 1.2 * u], c1 = [el[0] + nx * 2.2 * u, el[1] + ny * 2.2 * u + 1.8 * u];
+        const sp = [[sh[0] + nx * 1.6 * u, sh[1] + ny * 1.6 * u], [sh[0] - nx * 1.6 * u, sh[1] - ny * 1.6 * u]];
+        for (let k = 0; k <= 6; k++) { const f = k / 6, d = k % 2 ? 2.2 * u : 0; sp.push([lerp(c0[0], c1[0], f), lerp(c0[1], c1[1], f) + d]); }
+        const SL = AS.map((c) => dark(c, 0.78));
+        A.poly(sp, SL[3]);
+        cyl(A, SL, { wide: true });
+        for (let k = 1; k < 6; k += 2) { const f = k / 6; const x = lerp(c0[0], c1[0], f), y = lerp(c0[1], c1[1], f) + 2.2 * u; for (const Lr of [A, F.e]) Lr.set(R(x), R(y) - 1, C(HOT[1])); }
+        tube(A, [el, hand], [0.85 * u, 0.6 * u], BK);
+        for (let k = -1; k <= 1; k++) {
+          const a = Math.atan2(hand[1] - el[1], hand[0] - el[0]) + k * 0.5;
+          const tip = [hand[0] + Math.cos(a) * 2.4 * u, hand[1] + Math.sin(a) * 2.4 * u];
+          tube(A, [hand, [lerp(hand[0], tip[0], 0.5) + Math.cos(a + 1.2 * side) * 0.5 * u, lerp(hand[1], tip[1], 0.5) + Math.sin(a + 1.2 * side) * 0.5 * u], tip], [0.45 * u, 0.25 * u], BK);
+        }
+        blob(A, [[hand[0], hand[1], 1.1 * u, 1 * u]], BK);
+        put(F.p, A, true);
+        for (const Lr of [F.p, F.e]) Lr.set(R(hand[0]), R(hand[1]), C(HOT[3]));
+      };
+      arm(sR, offH, -1); arm(sL, castH, 1);
+      // ---- the skull, lit from below by its own fire
+      const hx = X(0, 28) + (hurt ? 1 * u : 0), hy = Y(27.8) + (hurt ? 0.4 * u : 0);
+      const Sk = layer(F);
+      tube(Sk, [[X(0, 23), rimY], [hx, hy + 2 * u]], 0.8 * u, IRd, { rings: Math.max(2, R(0.8 * u)) });
+      blob(Sk, [[hx, hy - 0.6 * u, 3.9 * u, 3.7 * u], [hx, hy + 1.6 * u, 2.8 * u, 2 * u]], BN, { tex: 3 });
+      for (let y = R(hy + 0.4 * u); y < hy + 4 * u; y++) for (let x = R(hx - 4 * u); x <= hx + 4 * u; x++) if (Sk.a(x, y)) Sk.set(x, y, mixc(Sk.get(x, y), C(HOT[2]), y > hy + 1.8 * u ? 0.5 : 0.3));
+      // brow ridge shadow, sockets (the right one bigger), nose
+      Sk.line(hx - 3 * u, hy - 1.7 * u, hx + 3 * u, hy - 1.9 * u, BN[2]);
+      Sk.ellipse(hx - 1.6 * u, hy - 0.3 * u, 1.3 * u, 1.2 * u, C(VOID));
+      Sk.ellipse(hx + 1.7 * u, hy - 0.3 * u, 1.5 * u, 1.4 * u, C(VOID));
+      Sk.poly([[hx - 0.5 * u, hy + 1.7 * u], [hx + 0.5 * u, hy + 1.7 * u], [hx, hy + 0.6 * u]], C(VOID));
+      put(F.p, Sk, true);
+      const jaw = wind ? 1.6 * u : hit ? 2 * u : idle && P.i === 3 ? 0.7 * u : 0.2 * u;
+      const Jw = layer(F);
+      blob(Jw, [[hx, hy + 3.2 * u + jaw, 2.3 * u, 1 * u]], BN.map((c) => mixc(c, C(HOT[2]), 0.4)));
+      teeth(Jw, [hx - 1.8 * u, hy + 2.6 * u + jaw], [hx + 1.8 * u, hy + 2.6 * u + jaw], 5, Math.max(1, 0.5 * u), -1, BONE);
+      put(F.p, Jw, true);
+      teeth(F.p, [hx - 1.9 * u, hy + 2.3 * u], [hx + 1.9 * u, hy + 2.3 * u], 6, Math.max(1, 0.6 * u), 1, BONE);
+      if (jaw > 0.5 * u) for (const Lr of [F.p, F.e]) Lr.ellipse(hx, hy + 2.7 * u + jaw * 0.5, 1.4 * u, jaw * 0.35, C(HOT[3]));
+      if (hurt) { F.p.line(hx - 2.6 * u, hy - 0.3 * u, hx - 0.7 * u, hy, C(HOT[0]), 2); F.p.line(hx + 0.7 * u, hy, hx + 2.8 * u, hy - 0.4 * u, C(HOT[0]), 2); }
+      else {
+        eyeGlow(F, hx - 2 * u, hy - 0.7 * u, 1 * u, 1 * u, HOT[3]);
+        eyeGlow(F, hx + 1.1 * u, hy - 0.8 * u, 1.3 * u, 1.3 * u, wind ? HOT[4] : HOT[3]);
+      }
+      // ---- crown of melted candles fused to the cranium, wax over the left socket
+      const cands = [[-2.6, 1.9, -0.35], [-0.85, 3.1, -0.08], [1.05, 3.9, 0.06], [2.9, 2.3, 0.42]];
+      const Cd = layer(F);
+      const tops = [];
+      for (const [cx, ch, tilt] of cands) {
+        const base = [hx + cx * u, hy - 3.4 * u + Math.abs(cx) * 0.35 * u];
+        const top = [base[0] + Math.sin(tilt) * ch * u, base[1] - Math.cos(tilt) * ch * u];
+        tops.push(top);
+        tube(Cd, [base, top], 0.72 * u, WX);
+        // a pooled lip of wax at the top and a drip running down
+        blob(Cd, [[top[0], top[1] + 0.2 * u, 0.85 * u, 0.4 * u]], WX);
+        Cd.rect(R(base[0] + (cx < 0 ? -0.8 : 0.3) * u), R(lerp(base[1], top[1], 0.6)), Math.max(1, R(0.45 * u)), Math.max(2, R(ch * 0.5 * u)), WX[4]);
+      }
+      tube(Cd, [[hx - 2.4 * u, hy - 3.2 * u], [hx - 2.1 * u, hy - 2 * u], [hx - 1.6 * u, hy - 1 * u]], [0.75 * u, 0.55 * u], WX);
+      blob(Cd, [[hx - 1.6 * u, hy - 0.9 * u, 0.6 * u, 0.6 * u]], WX);
+      put(F.p, Cd, true);
+      tops.forEach((top, k) => {
+        F.p.set(R(top[0]), R(top[1]) - 1, C('#3a2a24'));
+        if (!hurt) flame(F, top[0], top[1] - 1, (wind ? 3.8 : 2.6) * u, 1.5 * u, t + k * 0.23, {});
+        else for (let j = 0; j < 3; j++) F.p.set(R(top[0] + (j % 2)), R(top[1] - 2 - j * 1.5), AS[2]);   // snuffed: a wisp of smoke
+      });
+      // ---- the fireball: in the casting hand on the wind-up, thrown on the strike
+      if (wind) glow(F, castH[0], castH[1] - 2.2 * u, 2.2 * u, HOT[2], { core: HOT[4], halo: true });
+      if (hit) glow(F, castH[0] - 2.4 * u, castH[1], 2.8 * u, HOT[2], { core: HOT[4], halo: true });
+      // ---- falling ash: flakes drifting down from the mantle
+      for (let k = 0; k < 16; k++) {
+        const side = k % 2 ? 1 : -1, fxk = side * (4 + hash2(k, 3, 5) * 9), f = (hash2(k, 9, 5) + t * (run ? 0.5 : 1)) % 1;
+        const yy = 20 - f * 19, xx = fxk + Math.sin((f + k * 0.3) * TAU) * 0.8 + (run ? f * 4 : 0);
+        F.p.rect(R(X(xx, yy)), R(Y(yy)), 2, k % 3 ? 1 : 2, AS[k % 3 + 2]);
+        if (k % 5 === 0) { F.p.set(R(X(xx, yy)) + 1, R(Y(yy)), C(HOT[2])); F.e.set(R(X(xx, yy)) + 1, R(Y(yy)), C(HOT[2])); }
+      }
+      F.mouth = wind ? [castH[0], castH[1] - 2.2 * u] : hit ? [castH[0] - 2.4 * u, castH[1]] : [castH[0], castH[1]];
+    },
+  },
+  // The Glass Wyrm (glass_wyrm): the storm-glass of the Wastes, fused by lightning into the windows of
+  // a drowned cathedral and then into a serpent. Every segment is a leaded window lit from within;
+  // its head is the chapel itself: a pointed-arch snout, a rose window for an eye under a stone
+  // drip-mould, and a crocketed spire for a crest. Its teeth are clear glass shards.
+  glass_wyrm: {
+    view: 'side', box: [28, 30], pivot: 0.36, idle: 6, idleFps: 5, segR: 3.6, segTaper: 0.55,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const t = P.t, idle = P.act === 'idle', run = P.act === 'run', wind = P.atk === 1, hit = P.atk === 2, hurt = P.hurt;
+      // head pose: the neck pivot, the tilt (nose up), the jaw
+      const bob = idle ? sin(t) * 0.8 : run ? sin(t) * 0.9 : 0;
+      const nx = ox - 1 * u + (wind ? -2.5 * u : hit ? 3.5 * u : hurt ? -2 * u : 0), ny = oy - (4.6 + bob + (wind ? 3 : hit ? 1.2 : 0)) * u;
+      const tilt = wind ? 0.32 : hit ? -0.12 : hurt ? 0.22 : idle ? sin(t - 0.15) * 0.06 : run ? cos(t) * 0.05 : 0;
+      const jawA = wind ? 0.62 : hit ? 0.3 : hurt ? 0.25 : idle ? 0.05 + Math.max(0, sin(t + 0.1)) * 0.12 : 0.06;
+      const ca = Math.cos(tilt), sa = Math.sin(tilt);
+      const S = (lx, ly) => [nx + (lx * ca - ly * sa) * u, ny - (lx * sa + ly * ca) * u];
+      const toL = (px, py) => { const dx = (px - nx) / u, dy = -(py - ny) / u; return [dx * ca + dy * sa, -dx * sa + dy * ca]; };
+      const box = [0, 0, F.W - 1, F.H - 1];
+      const allLit = wind || hit;
+      const pulse = idle ? P.i / 6 : run ? P.i / 4 : 0.5;
+      // shapes in local units (y up), the snout a pointed gothic arch
+      const cran = [[-3.4, 4.8], [1.5, 6.8], [7.5, 5.8], [12.4, 3], [14.6, 0.6], [14.2, -0.3], [7, -0.5], [0.5, -1], [-3.6, 0.2]];
+      const hinge = [0.6, -0.6];
+      const jaw = [[-0.6, -0.6], [12.6, -0.5], [12.2, -1.6], [7, -2.8], [1, -3.1], [-1.6, -2]];
+      const cj = Math.cos(jawA), sj = Math.sin(jawA);
+      const jawLocal = (lx, ly) => { const dx = lx - hinge[0], dy = ly - hinge[1]; return [hinge[0] + dx * cj - dy * sj, hinge[1] + dx * sj + dy * cj]; };   // undo the jaw's drop
+      const jawS = (jx, jy) => { const dx = jx - hinge[0], dy = jy - hinge[1]; return S(hinge[0] + dx * cj + dy * sj, hinge[1] - dx * sj + dy * cj); };
+      const Lw = layer(F);
+      // ---- the spire crest (behind the cranium): crocketed, two lit lancets, a quatrefoil finial
+      const spireBase = [[-3, 5], [2.4, 6.4]], apex = [-1.6 + (run ? -cos(t) * 0.3 : 0), 20];
+      const Sp = layer(F);
+      const sp0 = S(spireBase[0][0], spireBase[0][1]), sp1 = S(spireBase[1][0], spireBase[1][1]), spA = S(apex[0], apex[1]);
+      slab(Sp, [sp0, sp1, spA], LEAD.map((c) => C(c)).map((c, i) => (i === 0 ? c : light(c, 1.25))), { wide: true });
+      // lancet windows
+      for (const [lx, w, h] of [[-1.1, 0.8, 7], [0.8, 0.7, 5.2]]) {
+        const b = [lx, 7.2 + (lx > 0 ? 0.3 : 0)];
+        const pts = [S(b[0] - w / 2, b[1]), S(b[0] + w / 2, b[1]), S(b[0] + w / 2, b[1] + h - w), S(b[0], b[1] + h), S(b[0] - w / 2, b[1] + h - w)];
+        Sp.poly(pts, C(GLASS.ruby[2]));
+        const lit2 = allLit || ((lx < 0 ? 0 : 0.5) + pulse) % 1 < 0.6;
+        facetOn(Sp, [pts[0], S(b[0], b[1]), S(b[0], b[1] + h - 0.3), pts[4]], GLASS.ruby[3]);
+        if (lit2) F.e.poly(pts, C(GLASS.ruby[3]));
+      }
+      // crockets: little hooks climbing both edges
+      for (let k = 1; k < 7; k++) {
+        const f = k / 7.4;
+        for (const [b, side] of [[spireBase[0], -1], [spireBase[1], 1]]) {
+          const x = lerp(b[0], apex[0], f), y = lerp(b[1], apex[1], f);
+          const r0 = S(x, y), r1 = S(x + side * 0.9, y + 0.5), r2 = S(x + side * 0.7, y + 1.1);
+          horn(Sp, r0, r1, r2, 0.75 * u, LEAD.map((c) => light(C(c), 1.3)));
+        }
+      }
+      put(Lw, Sp, true);
+      // finial: a quatrefoil of glass
+      const fin = S(apex[0], apex[1] + 0.9);
+      put(F.p, Lw, false);
+      const Lh = layer(F);
+      // ---- the mouth: molten light between the jaws, glass-shard teeth
+      const Mo = layer(F);
+      const mouthPoly = [S(-0.6, -0.6), S(12.6, -0.5), jawS(12.6, -0.5), jawS(-0.6, -0.6)];
+      Mo.poly(mouthPoly, C(MAW_D));
+      put(Lh, Mo, false);
+      if (jawA > 0.15) {
+        const mc = S(5.5, -0.8 - jawA * 3);
+        for (const Lr of [Lh, F.e]) { Lr.ellipse(mc[0], mc[1], 4.5 * u, jawA * 2.4 * u, C(GLASS.rose[2])); Lr.ellipse(mc[0] - 0.5 * u, mc[1], 2.6 * u, jawA * 1.4 * u, C(GLASS.rose[4])); }
+      }
+      // ---- lower jaw
+      const Jw = layer(F);
+      const jawSeeds = seedGrid(-1, -2.6, 12, -0.8, 2.9, 41, GLASS_MIX, 0.4, pulse);
+      stained(Jw, F.e, box, (px, py) => jawLocal(...toL(px, py)), (lx, ly) => inPoly(jaw, lx, ly), jawSeeds, u, { lead: 2 });
+      put(Lh, Jw, true);
+      // teeth: clear glass shards along both jaws
+      const TG = ['#7a2f4a', '#cc6a86', '#e8c8d0', '#f4dce4', '#fff4fb'].map((c) => C(c));
+      for (let k = 0; k < 6; k++) {
+        const x = 2.4 + k * 1.75;
+        const up = jawS(x, -0.7 - (k === 5 ? 0.3 : 0));
+        shard(Lh, up[0], up[1], -Math.PI / 2 - tilt - jawA * 0.3 + (k % 2 ? 0.15 : -0.1), (k % 2 ? 1.3 : 1.8) * u, 0.42 * u, TG);
+        const dn = S(x + 0.8, -0.4);
+        shard(Lh, dn[0], dn[1], Math.PI / 2 - tilt + (k % 2 ? -0.1 : 0.15), (k % 2 ? 1.9 : 1.4) * u, 0.42 * u, TG);
+      }
+      // ---- cranium
+      const Cr = layer(F);
+      const crSeeds = seedGrid(-3, 0.2, 14, 6.6, 3.1, 17, GLASS_MIX, 0.42, pulse);
+      stained(Cr, F.e, box, toL, (lx, ly) => inPoly(cran, lx, ly) && !((lx - 4.6) ** 2 + (ly - 2.8) ** 2 < 3.3 ** 2), crSeeds, u, { lead: 2 });
+      if (hurt) { crack(Cr, S(9, 2)[0], S(9, 2)[1], 2.6, 6 * u, '#fff4fb', 3); crack(Cr, S(1, 4)[0], S(1, 4)[1], 1, 4 * u, '#fff4fb', 8); }
+      put(Lh, Cr, true);
+      // ---- the rose window eye: a stone ring, radial tracery, petals, a glowing heart
+      const ec = S(4.6, 2.8), er = 3.15 * u;
+      const Ey = layer(F);
+      Ey.disc(ec[0], ec[1], er, C(LEAD[2]));
+      const spin = (idle ? P.i / 6 : run ? P.i / 4 : 0) * (TAU / 8) + (wind ? 0.2 : 0);
+      for (let y = R(ec[1] - er); y <= ec[1] + er; y++) for (let x = R(ec[0] - er); x <= ec[0] + er; x++) {
+        const dx = x + 0.5 - ec[0], dy = y + 0.5 - ec[1], d = Math.hypot(dx, dy) / er;
+        if (d > 0.84 || d < 0.38) continue;
+        const a = (Math.atan2(dy, dx) - spin + TAU * 2) % TAU, seg2 = Math.floor(a / (TAU / 8)), fa = (a / (TAU / 8)) % 1;
+        if (fa < 0.12 || fa > 0.88 || Math.abs(d - 0.62) < 0.035) continue;   // tracery
+        const G = GLASS[seg2 % 2 ? 'amber' : 'rose'], ti = (-dx * 0.6 - dy * 0.8) / er > 0.2 ? 3 : 2;
+        Ey.set(x, y, G[d > 0.62 ? ti : ti + 1]);
+        if (!hurt) F.e.set(x, y, C(G[d > 0.62 ? 2 : 3]));
+      }
+      Ey.ring(ec[0], ec[1], er, C(LEAD[3]), Math.max(1, R(0.35 * u)));
+      put(Lh, Ey, true);
+      put(F.p, Lh, false);
+      // the heart of the rose: a violet iris with a slit, squeezed dark when hurt
+      if (hurt) F.p.disc(ec[0], ec[1], er * 0.36, C(GLASS.violet[1]));
+      else {
+        glow(F, ec[0], ec[1], er * 0.36, wind ? GLASS.rose[3] : GLASS.violet[3], { core: '#fff4fb' });
+        F.p.rect(R(ec[0] + 0.2 * u), R(ec[1] - er * 0.3), Math.max(1, R(0.4 * u)), Math.max(2, R(er * 0.6)), C(VOID));
+      }
+      // drip-mould brow: a stone arch over the eye, pulled low into a scowl at the front
+      const Bw = layer(F);
+      tube(Bw, bez([S(1, 4.6), S(3, 7), S(6.6, 6.4), S(8.8, 3.6)], 18), [0.7 * u, 0.55 * u], LEAD.map((c) => light(C(c), 1.45)));
+      horn(Bw, S(8.4, 4), S(9.4, 3.4), S(9.6, 2.4), 0.9 * u, LEAD.map((c) => light(C(c), 1.45)));
+      put(F.p, Bw, true);
+      glow(F, fin[0], fin[1], 1 * u, GLASS.rose[2], { core: GLASS.rose[4] });
+      for (const [dx, dy] of [[-0.9, 0], [0.9, 0], [0, 0.9]]) { const q = S(apex[0] + dx, apex[1] + 0.9 + dy); glow(F, q[0], q[1], 0.6 * u, GLASS.ruby[3]); }
+      F.mouth = S(11, -1.2 - jawA * 2);
+    },
+    // one body segment: a round leaded window in a stone ring; every other one a rose window,
+    // the rest a mosaic of panes; a little crocketed pinnacle on top
+    seg(F, o, i, r, N) {
+      const { cx, cy } = F, p = F.p, u = F.u;
+      const T = blank(p);
+      T.disc(cx, cy, r, C(LEAD[2]));
+      const inner = r - Math.max(2, r * 0.14);
+      if (i % 2 === 0) {
+        const pals = ['ruby', i % 4 ? 'amber' : 'violet'];
+        for (let y = Math.floor(cy - inner); y <= cy + inner; y++) for (let x = Math.floor(cx - inner); x <= cx + inner; x++) {
+          const dx = x + 0.5 - cx, dy = y + 0.5 - cy, d = Math.hypot(dx, dy) / inner;
+          if (d > 1) continue;
+          const a = (Math.atan2(dy, dx) + TAU + i * 0.3) % TAU, sg = Math.floor(a / (TAU / 6)), fa = (a / (TAU / 6)) % 1;
+          if ((d > 0.3 && (fa < 0.1 || fa > 0.9)) || Math.abs(d - 0.3) < 0.08 || Math.abs(d - 0.7) < 0.05) { T.set(x, y, C(LEAD[1])); continue; }
+          const G = GLASS[d < 0.3 ? 'rose' : pals[sg % 2]], ti = (-dx * 0.6 - dy * 0.8) / inner > 0.25 ? 3 : 2;
+          T.set(x, y, G[ti]);
+          if ((sg + i) % 3 === 0 || d < 0.3) F.e.set(x, y, C(G[2]));
+        }
+      } else {
+        const seeds = [];
+        for (let k = 0; k < 7; k++) { const a = k / 6 * TAU + i, d = k ? 0.62 : 0; seeds.push({ x: Math.cos(a) * d, y: Math.sin(a) * d, pal: GLASS_MIX[(k * 3 + i) % GLASS_MIX.length], lit: (k + i) % 3 === 0 }); }
+        stained(T, F.e, [cx - inner - 1, cy - inner - 1, cx + inner + 1, cy + inner + 1], (px, py) => [(px - cx) / inner, -(py - cy) / inner], (lx, ly) => lx * lx + ly * ly <= 1, seeds, inner, { lead: Math.max(1.5, r * 0.08) });
+      }
+      // stone ring with a lit top-left
+      for (let y = Math.floor(cy - r); y <= cy + r; y++) for (let x = Math.floor(cx - r); x <= cx + r; x++) {
+        const dx = x + 0.5 - cx, dy = y + 0.5 - cy, d = Math.hypot(dx, dy);
+        if (d > r || d < inner) continue;
+        const l = (-dx * 0.6 - dy * 0.8) / r;
+        T.set(x, y, C(l > 0.45 ? LEAD[4] : l > -0.2 ? LEAD[3] : LEAD[2]));
+      }
+      T.set(R(cx - r * 0.45), R(cy - r * 0.62), WHITE);
+      put(p, T, false);
+      // pinnacle on top
+      if (r > 6) {
+        const P2 = blank(p), h = r * 0.7, w = r * 0.32, bx = cx - r * 0.1, by = cy - r * 0.88;
+        slab(P2, [[bx - w, by + 2], [bx + w, by + 2], [bx - w * 0.2, by - h]], LEAD.map((c) => light(C(c), 1.3)));
+        put(p, P2, true);
+        p.set(R(bx - w * 0.2), R(by - h) - 1, C(GLASS.rose[3])); F.e.set(R(bx - w * 0.2), R(by - h) - 1, C(GLASS.rose[3]));
+      }
+    },
+  },
+  // Ozymar the Unburied (ozymar): the colossus whose trunkless legs still stand somewhere in the
+  // dunes, rising chest-deep out of a moving sand-sea. Half his face has fallen away; behind it a
+  // furnace burns where the eye was, and the other half keeps its cold, sneering calm. There is a
+  // heart-shaped hole in his chest with the chains still hanging from it: his heart walks on its
+  // own (colossus_heart). One arm is whole; the other broke at the elbow, and its forearm floats on
+  // the sand that pours out of the stump.
+  ozymar: {
+    view: 'front', box: [36, 29], pivot: 0.5, idle: 6, idleFps: 4,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const t = P.t, idle = P.act === 'idle', run = P.act === 'run', wind = P.atk === 1, hit = P.atk === 2, hurt = P.hurt;
+      const ST = pal5('sand', 6), STd = ST.map((c) => dark(c, 0.86)), SD = pal5('sand', 4).map((c) => dark(c, 0.9)), PT = pal5('clay', 4), G = pal5('gold', 5), LA = pal5('blue', 5), IR = ramp('#4a5259');
+      const HOL = [C('#140f1c'), C('#1d0f16'), C('#2a1a20'), C('#3e1c22'), C('#662b2c')];
+      const breathe = idle ? sin(t) * 0.25 : 0;
+      const lean = run ? sin(t) * 0.6 : hurt ? 1.2 : 0;
+      const sink = wind ? -1.2 : hit ? 1.4 : run ? Math.abs(sin(t)) * 0.4 : 0;
+      const X = (x, y = 0) => ox + (x + lean * Math.max(0, y - 4) / 22) * u, Y = (y) => oy - (y + (y > 3 ? breathe - sink : 0)) * u;
+      const L = layer(F);
+      // ---- the sand-sea mound he rises from (ripples run outward)
+      const Md = layer(F);
+      blob(Md, [[X(0), Y(1.4), 14.5 * u, 3.6 * u], [X(-7), Y(2.6), 6.5 * u, 2.6 * u], [X(6), Y(2.8), 7.5 * u, 2.6 * u], [X(run ? 9 : 0), Y(2), 5 * u, 3 * u]], SD, { tex: 3, clipY: oy });
+      for (let k = 0; k < 3; k++) {
+        const f = ((k + t * (run ? 2 : 1)) % 3) / 3, rx = (5 + f * 9) * u, ry = (1.4 + f * 1.6) * u;
+        for (let a = 3.3; a < 6.1; a += 0.02) over(Md, X(0) + Math.cos(a) * rx, Y(2.8) + Math.sin(a) * ry + ry * 0.3, SD[k === 1 ? 4 : 2]);
+      }
+      put(L, Md, false);
+      // ---- arms: the whole one and the broken one
+      const shL = [X(-9.4, 13.6), Y(13.6)], shR = [X(9.4, 13.6), Y(13.6)];
+      const fistL = wind ? [X(-7, 27), Y(27)] : hit ? [X(-9, 2.2), Y(2.2) + sink * u] : hurt ? [X(-13.4, 7), Y(7)] : run ? [X(-12 + sin(t) * 1.5, 4.6), Y(4.6)] : [X(-12, 3.8), Y(3.8)];
+      const elL = ik(shL, fistL, 6 * u, 6.2 * u, wind ? -1 : 1);
+      const stumpR = wind ? [X(11.4, 19.6), Y(19.6)] : hit ? [X(12, 9.4), Y(9.4)] : [X(12.4, 8.6), Y(8.6)];
+      const fl = idle ? sin(t) * 0.3 * u : 0;
+      const foreR = wind ? [[X(10.4, 23.4), Y(23.4)], [X(8.4, 27.2), Y(27.2)]] : hit ? [[X(11.4, 6.2), Y(6.2)], [X(9.4, 2.2), Y(2.2) + sink * u]] : hurt ? [[X(14.6, 6.6), Y(6.6)], [X(15.2, 3), Y(3)]] : run ? [[X(13.2, 6.6 - cos(t)), Y(6.6 - cos(t))], [X(13 - sin(t) * 1.2, 3.4), Y(3.4)]] : [[X(13.4, 6.8), Y(6.8) + fl], [X(13, 3.4), Y(3.4) + fl]];
+      const A = layer(F);
+      tube(A, [shL, elL], [2.3 * u, 2 * u], ST, { matte: true });
+      tube(A, [elL, fistL], [2 * u, 1.8 * u], ST, { matte: true });
+      blob(A, [[fistL[0], fistL[1], 2.5 * u, 2.2 * u]], ST, { matte: true });
+      for (let k = -1; k <= 1; k++) A.line(fistL[0] + k * 0.9 * u, fistL[1] + 0.3 * u, fistL[0] + k * 0.9 * u, fistL[1] + 1.8 * u, ST[1]);
+      const am = [lerp(shL[0], elL[0], 0.5), lerp(shL[1], elL[1], 0.5)];
+      tube(A, [[am[0], am[1] - 0.6 * u], [am[0], am[1] + 0.6 * u]], 2.4 * u, G);
+      tube(A, [shR, stumpR], [2.3 * u, 2.1 * u], ST, { matte: true });
+      A.ellipse(stumpR[0], stumpR[1] + 1.2 * u, 1.7 * u, 0.8 * u, C(HOL[2]));
+      for (let k = -2; k <= 2; k++) A.set(R(stumpR[0] + k * 0.8 * u), R(stumpR[1] + 1.9 * u + (k % 2 ? 0.5 * u : 0)), ST[1]);
+      tube(A, foreR, [2 * u, 1.8 * u], STd, { matte: true });
+      blob(A, [[foreR[1][0], foreR[1][1], 2.4 * u, 2.1 * u]], STd, { matte: true });
+      A.ellipse(foreR[0][0], foreR[0][1] - 1.1 * u, 1.5 * u, 0.6 * u, STd[1]);
+      put(L, A, true);
+      sandStream(L, stumpR[0], stumpR[1] + 1.6 * u, foreR[0][1] - 1 * u, 1.6 * u, t * 2, SD, 0.3 * u);
+      // ---- the torso: a chiselled block, chest planes lit on the left
+      const T = layer(F);
+      blob(T, [[X(0, 11.4), Y(11.4), 8.6 * u, 4.8 * u], [X(0, 6), Y(6), 5.4 * u, 3.8 * u], [X(-8.8, 13.6), Y(13.6), 2.9 * u, 2.5 * u], [X(8.8, 13.6), Y(13.6), 2.9 * u, 2.5 * u], [X(0, 14.6), Y(14.6), 6.6 * u, 1.8 * u]], ST, { matte: true });
+      // carved pectoral and abdominal lines
+      for (const side of [-1, 1]) for (let a = 0.15; a < 1.45; a += 0.03) over(T, X(side * 0.3, 10) + Math.sin(a) * 7 * u * side, Y(10.1) - Math.cos(a) * 1.6 * u + 1.6 * u, ST[1]);
+      T.line(X(0, 12), Y(14.6), X(0, 3), Y(3), ST[1], 2);
+      for (const y of [7.6, 5.4]) { T.line(X(-3.8, y), Y(y), X(-0.6, y), Y(y + 0.2), ST[1]); T.line(X(0.6, y), Y(y + 0.2), X(3.8, y), Y(y), ST[1]); }
+      // a lit pectoral plane on the left
+      facetOn(T, [[X(-7.2, 13.6), Y(13.6)], [X(-0.6, 14.4), Y(14.4)], [X(-0.6, 10.6), Y(10.6)], [X(-6.4, 10.8), Y(10.8)]], ST[4], ST[3]);
+      // cracks
+      crack(T, X(-2, 13), Y(13), 1.9, 6 * u, ST[0], 4);
+      // the empty heart: a heart-shaped hole, broken chains hanging from its rim
+      const hcx = X(3.6, 9.6), hcy = Y(9.6);
+      const heart = (k, c) => { T.disc(hcx - 1.3 * k * u, hcy - 0.5 * k * u, 1.6 * k * u, c); T.disc(hcx + 1.3 * k * u, hcy - 0.5 * k * u, 1.6 * k * u, c); T.poly([[hcx - 2.9 * k * u, hcy - 0.1 * k * u], [hcx + 2.9 * k * u, hcy - 0.1 * k * u], [hcx, hcy + 3.2 * k * u]], c); };
+      heart(1.14, ST[1]); heart(0.96, HOL[1]);
+      put(L, T, true);
+      for (const Lr of [L, F.e]) { Lr.ellipse(hcx, hcy + 1.5 * u, 1.8 * u, 0.8 * u, C(HOT[1])); Lr.ellipse(hcx, hcy + 1.5 * u, 0.9 * u, 0.4 * u, C(HOT[3])); }
+      for (const d of [-1, 1]) chain(L, [[hcx + d * 2.2 * u, hcy - 0.6 * u], [hcx + d * 2.6 * u, hcy + 1.6 * u], [hcx + d * 2.2 * u + (idle ? sin(t + d * 0.2) * 0.3 * u : 0), hcy + 3.8 * u - d * 0.8 * u]], 0.9 * u, IR);
+      // ---- the head: striped nemes, the face half fallen away
+      const hx = X(0, 20) + (hurt ? 1.2 * u : wind ? -0.3 * u : 0), hy = Y(20.4) + (wind ? -0.8 * u : hit ? 0.5 * u : 0);
+      const Hd = layer(F);
+      for (const side of [-1, 1]) slab(Hd, [[hx + side * 4.4 * u, hy - 0.2 * u], [hx + side * 7.6 * u, hy + 0.8 * u], [hx + side * 7 * u, hy + 7.4 * u], [hx + side * 4.4 * u, hy + 7.4 * u]], G, { wide: true });
+      slab(Hd, [[hx - 5 * u, hy - 6.6 * u], [hx + 5 * u, hy - 6.6 * u], [hx + 8 * u, hy + 0.8 * u], [hx + 4.4 * u, hy + 1.2 * u], [hx - 4.4 * u, hy + 1.2 * u], [hx - 8 * u, hy + 0.8 * u]], G, { wide: true });
+      for (let y = R(hy - 6.6 * u); y < hy + 7.4 * u; y++) if (((y - R(hy - 6.6 * u)) % R(1.4 * u)) < R(0.65 * u)) for (let x = R(hx - 8.2 * u); x <= hx + 8.2 * u; x++) {
+        if (!Hd.a(x, y)) continue;
+        const i = (y * Hd.w + x) * 4;
+        let ti = 3; for (let q = 0; q < 5; q++) if (Hd.d[i] === G[q][0] && Hd.d[i + 1] === G[q][1]) ti = q;
+        Hd.set(x, y, LA[ti]);
+      }
+      // the face
+      blob(Hd, [[hx, hy + 0.2 * u, 4 * u, 4.8 * u]], ST, { matte: true });
+      facetOn(Hd, [[hx - 4 * u, hy - 4.6 * u], [hx, hy - 4.6 * u], [hx - 0.2 * u, hy + 5 * u], [hx - 4 * u, hy + 5 * u]], ST[4], ST[3]);
+      // carved features on the surviving half: brow, kohl-lined eye, nose, a sneering lip
+      Hd.line(hx - 3.4 * u, hy - 2.2 * u, hx - 0.4 * u, hy - 1.8 * u, ST[1], Math.max(1, R(0.45 * u)));
+      Hd.ellipse(hx - 1.8 * u, hy - 0.7 * u, 1.4 * u, 0.65 * u, HOL[2]);
+      Hd.line(hx - 3.2 * u, hy - 0.7 * u, hx - 4 * u, hy - 0.3 * u, HOL[2], Math.max(1, R(0.35 * u)));
+      Hd.line(hx + 0.1 * u, hy - 1 * u, hx - 0.5 * u, hy + 1.6 * u, ST[1], Math.max(1, R(0.35 * u)));
+      Hd.line(hx - 0.5 * u, hy + 1.6 * u, hx + 0.4 * u, hy + 1.9 * u, ST[1], 2);
+      Hd.line(hx - 2.2 * u, hy + 3.1 * u, hx - 0.1 * u, hy + 2.8 * u, PT[1], Math.max(1, R(0.4 * u)));
+      Hd.line(hx - 2.2 * u, hy + 3.1 * u, hx - 2.7 * u, hy + 2.5 * u, PT[1], Math.max(1, R(0.35 * u)));
+      // the uraeus, snapped to a stump
+      blob(Hd, [[hx - 0.6 * u, hy - 6.6 * u, 1.1 * u, 1 * u]], G);
+      // the break: right of a jagged line the face is hollow; the corner of the headcloth is gone
+      const jag = [[-7, 0.2], [-4.6, 1], [-2.8, 0.3], [-1, 1.2], [0.8, 0.6], [2.6, 1.8], [4.4, 1.4], [5.6, 3.6]];
+      const jagX = (y) => { const yy = (y - hy) / u; for (let k = 1; k < jag.length; k++) if (yy <= jag[k][0]) { const f = (yy - jag[k - 1][0]) / (jag[k][0] - jag[k - 1][0]); return hx + lerp(jag[k - 1][1], jag[k][1], clamp(f, 0, 1)) * u; } return hx + 3.6 * u; };
+      for (let y = R(hy - 5 * u); y <= hy + 5.2 * u; y++) for (let x = R(hx - 4.2 * u); x <= hx + 4.4 * u; x++) {
+        if (((x + 0.5 - hx) / (4 * u)) ** 2 + ((y + 0.5 - hy - 0.2 * u) / (4.8 * u)) ** 2 > 1) continue;
+        const jx = jagX(y);
+        if (x < jx - 0.7 * u) continue;
+        Hd.set(x, y, x < jx ? ST[4] : x < jx + 0.8 * u || y < hy - 3.6 * u ? HOL[2] : HOL[1]);
+      }
+      // the top corner of the nemes snapped off along a jagged edge
+      for (let y = R(hy - 7 * u); y < hy + 0.4 * u; y++) for (let x = R(hx + 1.2 * u); x < hx + 8.6 * u; x++) {
+        const edge = (x - hx - 1.2 * u) * 0.95 - (y - hy + 7 * u) - hash2(x >> 2, y >> 2, 3) * 1.4 * u;
+        if (edge > 0.6 * u && (((x + 0.5 - hx) / (4 * u)) ** 2 + ((y + 0.5 - hy - 0.2 * u) / (4.8 * u)) ** 2 > 1 || x > jagX(y) + 1.4 * u)) Hd.clear(x, y);
+        else if (edge > -0.2 * u && Hd.a(x, y) && x > jagX(y) + 0.6 * u) Hd.set(x, y, G[1]);
+      }
+      // braided false beard, its tip snapped
+      tube(Hd, [[hx - 0.5 * u, hy + 4.6 * u], [hx - 0.4 * u, hy + 8.2 * u]], [1.2 * u, 1 * u], LA, { rings: Math.max(3, R(1.1 * u)), ringC: G[3] });
+      put(L, Hd, true);
+      put(F.p, L, false);
+      // ---- the furnace eye in the hollow, flames licking out of the break
+      const fx = hx + 2.4 * u, fy = hy - 0.8 * u;
+      const fk = hurt ? 0.5 : wind ? 1.5 : hit ? 1.3 : 1;
+      glow(F, fx, fy, (wind ? 2 : 1.6) * u, hurt ? hurtC : HOT[2], { core: HOT[4], halo: true });
+      flame(F, fx + 1.2 * u, fy - 1.8 * u, 4.4 * fk * u, 2.6 * u, t, {});
+      flame(F, fx + 2.6 * u, fy - 3.8 * u, 2.8 * fk * u, 1.8 * u, t + 0.5, {});
+      for (let k = 0; k < 3; k++) crack(F.p, fx - 1 * u, fy + (k - 1) * 0.6 * u, Math.PI + (k - 1) * 0.5, 2 * u, HOT[3], 20 + k, F.e);
+      // the cold eye on the whole side: a dull gold glint
+      eyeGlow(F, hx - 2.3 * u, hy - 1 * u, 1 * u, 0.7 * u, hurt ? '#9a6424' : '#e8c35a');
+      // sand trickling from the broken face over the shoulder
+      sandStream(F.p, hx + 4.2 * u, hy + 5.4 * u, Y(13), 1.1 * u, t * 2 + 0.3, SD);
+      if (hit) { plume(F, fistL[0] + 1 * u, Y(1.6), 6 * u, 3 * u, 0.2, SD, -0.3); plume(F, foreR[1][0] - 1 * u, Y(1.6), 6 * u, 3 * u, 0.6, SD, 0.3); }
+      if (hurt) for (let j = 0; j < 4; j++) rock(F.p, hx + (5 + j * 1.6) * u, hy - (2 - j * 1.4) * u, 0.9 * u, 0.7 * u, ST, 90 + j);
+      F.mouth = [fx, fy];
     },
   },
 };

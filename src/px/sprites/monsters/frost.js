@@ -1,6 +1,6 @@
 // Hand-built monster designs: the Frostreach. See kit.js for the design format and
 // docs/BESTIARY.md for the concepts.
-import { C, R, ramp, pal5, layer, put, blob, tube, horn, slab, facet, shard, wing, drape, ik, stride, sin, cos, lerp, clamp, bez, glow, eyeGlow, eyeBead, eyeBall, teeth, maw, crack, spots, over, rimLight, tint, light, dark, mixc, hash2, bayer, cyl, blank, underside, WHITE, VOID, BONE, BONE_D, MAW, MAW_D, TONGUE, EYE_DARK, CREAM } from './kit.js';
+import { C, R, fillGaps, ramp, pal5, layer, put, blob, tube, horn, slab, facet, shard, wing, drape, ik, stride, sin, cos, lerp, clamp, bez, glow, eyeGlow, eyeBead, eyeBall, teeth, maw, crack, spots, over, rimLight, tint, light, dark, mixc, hash2, bayer, cyl, blank, underside, WHITE, VOID, BONE, BONE_D, MAW, MAW_D, TONGUE, EYE_DARK, CREAM } from './kit.js';
 
 // ------------------------------------------------------------------ local helpers
 const TAU = Math.PI * 2;
@@ -75,6 +75,39 @@ function limb(L, a, b, l1, l2, r0, r1, r2, Rm, bend, o) {
   tube(L, [j, b], [r1, r2], Rm, o);
   return j;
 }
+// A broad rounded owl wing from the shoulder S: leading edge along angle a, the feather fan
+// sweeping to a + spread; scalloped trailing edge, pale coverts, dark chevron bars, dark tips.
+function owlWing(L, S, a, len, spread, Rm, o = {}) {
+  const n = o.n ?? 7, T = blank(L), sg = Math.sign(spread) || 1;
+  const at = (ang, r) => [S[0] + Math.cos(ang) * r, S[1] + Math.sin(ang) * r];
+  const pts = [S, at(a - 0.1 * sg, len * 0.46)], notches = [];
+  for (let k = 0; k < n; k++) {
+    const f = k / (n - 1), ang = a + spread * f, r = len * lerp(1, 0.48, f ** 1.3);
+    pts.push(at(ang, r));
+    if (k < n - 1) { const nn = at(ang + spread / (n - 1) * 0.5, r * 0.84); pts.push(nn); notches.push([nn, ang]); }
+  }
+  pts.push(at(a + spread * 1.2, len * 0.22));
+  T.poly(pts, Rm[3]);
+  fillGaps(T, Rm[3]);
+  cyl(T, Rm, { wide: len > 18 });
+  // coverts: a lighter band along the leading edge
+  const cv = blank(L);
+  cv.poly([S, at(a - 0.1 * sg, len * 0.46), at(a + spread * 0.3, len * 0.5), at(a + spread * 0.8, len * 0.3)], Rm[4]);
+  for (let i = 3; i < cv.d.length; i += 4) if (cv.d[i] && !T.d[i]) cv.d[i] = 0;
+  // feather separation lines
+  for (const [q, ang] of notches) T.line(q[0], q[1], q[0] - Math.cos(ang) * len * 0.22, q[1] - Math.sin(ang) * len * 0.22, Rm[1]);
+  put(T, cv, false);
+  // chevron bars in rows across the fan
+  if (o.bar) {
+    const bc = C(o.bar);
+    for (const rf of [0.42, 0.6, 0.78]) for (let k = 0; k <= 10; k++) {
+      const ang = a + spread * (k / 10), q = at(ang, len * rf * lerp(1, 0.6, k / 10));
+      if ((k + R(rf * 10)) % 2) continue;
+      for (const [dx, dy] of [[0, 0], [1, 0], [-1, 1], [2, 1]]) if (T.a(R(q[0]) + dx, R(q[1]) + dy) > 100) T.set(R(q[0]) + dx, R(q[1]) + dy, bc);
+    }
+  }
+  return put(L, T, o.contour ?? true);
+}
 // a point on a body tilted by pitch (radians) about (cx, cy); dx, dy in pixels
 const lerpP = (a, b, t) => [lerp(a[0], b[0], t), lerp(a[1], b[1], t)];
 const tilt = (cx, cy, a) => (dx, dy) => [cx + dx * Math.cos(a) - dy * Math.sin(a), cy + dx * Math.sin(a) + dy * Math.cos(a)];
@@ -96,6 +129,11 @@ export const assign = {
   frost_wolf: { design: 'aurora_fox', name: 'Aurora Fox' },
   ice_wraith: { design: 'rime_banshee', name: 'Rime Banshee' },
   frost_troll: { design: 'snowdrift_troll', name: 'Snowdrift Troll' },
+  frozen_knight: { design: 'encased_knight', name: 'Encased Knight' },
+  snow_harpy: { design: 'strix', name: 'Strix' },
+  ice_golem: { design: 'glacier_golem', name: 'Glacier Golem' },
+  crystal_spider: { design: 'geode_spider', name: 'Geode Spider' },
+  mine_horror: { design: 'mine_horror', name: 'The Mine Horror' },
 };
 
 export default {
@@ -358,14 +396,13 @@ export default {
       const B = tilt(bx, by + 4 * u, lean), U = (dx, dy) => B(dx * u, (dy - 4) * u);
       const L = layer(F);
       // ---- club: the hand grips the thin end, the root ball rests on the snow or swings
-      const clen = 14 * u, grounded = (h) => Math.asin(clamp((oy - 3 * u - h[1]) / clen, -1, 1));
+      const clen = 12 * u, grounded = (h) => Math.asin(clamp((oy - 3 * u - h[1]) / clen, -1, 1));
       let hand, ang;
       if (wind) { hand = U(1.5, -9.5); ang = -2.3; }
-      else if (strike) { hand = U(9.5, -2.5); ang = grounded(hand); }
+      else if (strike) { hand = U(10.4, 0.6); ang = grounded(hand); }
       else if (hurt) { hand = U(7, 0); ang = 1.1; }
       else if (run) { hand = U(6.5, -2 + sin(t) * 0.3); ang = -2.35 + sin(t) * 0.08; }
-      else { hand = U(9.2, -3.6 + sin(t) * 0.2); ang = grounded(hand); }
-      if (!wind && !run && !hurt) { /* the trunk leans forward onto its root ball */ }
+      else { hand = U(9.6, 0.2 + sin(t) * 0.2); ang = grounded(hand); }
       const ball = [hand[0] + Math.cos(ang) * clen, hand[1] + Math.sin(ang) * clen];
       const club = (Ld) => {
         const Cl = layer(F);
@@ -450,7 +487,7 @@ export default {
       if (wind) farArm();
       club(L);
       const A = layer(F), sh = U(3.4, -5);
-      limb(A, sh, hand, 5 * u, 5.4 * u, 2.6 * u, 2.9 * u, 2.4 * u, skin, 1, { tex: 6 });
+      limb(A, sh, hand, 5 * u, 5.6 * u, 2.6 * u, 2.9 * u, 2.4 * u, skin, 1, { tex: 6 });
       blob(A, [[hand[0], hand[1], 2.3 * u, 2 * u]], skin);
       A.line(hand[0] - 1 * u, hand[1] - 0.6 * u, hand[0] + 0.8 * u, hand[1] - 0.8 * u, skin[1]);
       put(L, A, true);
@@ -461,6 +498,552 @@ export default {
       else { eyeGlow(F, hx + 0.7 * u, hy - 1 * u, Math.max(2, R(1.2 * u)), Math.max(1, R(0.8 * u)), '#a8d0ec'); F.p.line(hx - 0.4 * u, hy - 1.8 * u, hx + 2.6 * u, hy - (wind || strike ? 1 : 1.4) * u, skin[0]); }
       // the slam: snow and ice thrown up where the root ball lands
       if (strike) for (let k = 0; k < 7; k++) { const a = -Math.PI / 2 + (k - 3) * 0.4, d = (3.4 + (k % 2) * 2) * u; const x = ball[0] + Math.cos(a) * d, y = oy - 1 * u + Math.sin(a) * d * 0.7; F.p.rect(R(x), R(y), Math.max(1, R(0.9 * u)), Math.max(1, R(0.9 * u)), k % 2 ? SNOW[4] : ICE[3]); }
+    },
+  },
+  // Encased Knight (frozen_knight): a knight of a drowned order who froze in the pass with his
+  // shield arm raised. The ice never let go: his left side is sealed in a coffin-shaped block that
+  // moves with him and serves as his shield; you can see his own gauntlet inside it. The free arm
+  // still swings the greatsword. Crimson tabard, rime plume, a visor that glows like a cold lamp.
+  encased_knight: {
+    view: 'side', box: [40, 34], pivot: 0.42, idle: 4, run: 4, idleFps: 3,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const steel = cols('#1a1f2c', '#2a3240', '#3e4a5a', '#5a6680', '#8a96b0'), steelD = steel.map((c) => dark(c, 0.8));
+      const cloth = cols('#2a0e18', '#4a1420', '#60282c', '#8a3434', '#b04a3e'), clothD = cloth.map((c) => dark(c, 0.82));
+      const blade = cols('#3e4a5a', '#6e7a9a', '#96a2bc', '#c4cce0', '#eef0f6');
+      const t = P.t, run = P.act === 'run', idle = P.act === 'idle', wind = P.atk === 1, strike = P.atk === 2, hurt = P.hurt;
+      let bx = ox, by = oy - 9.5 * u, lean = 0;
+      if (idle) by += sin(t) * 0.25 * u;
+      if (run) { by -= Math.abs(sin(t)) * 0.7 * u; lean = 0.06; }
+      if (wind) { bx -= 1 * u; lean = -0.1; }
+      if (strike) { bx += 1.8 * u; by += 0.8 * u; lean = 0.18; }
+      if (hurt) { bx -= 1.4 * u; lean = -0.15; }
+      const B = tilt(bx, by, lean), U = (dx, dy) => B(dx * u, dy * u);
+      const L = layer(F);
+      // ---- cape: frozen stiff, swinging only at the ragged hem
+      const capeTop = U(-1.8, -7.6);
+      drape(L, capeTop[0] - 1 * u, capeTop[1], 3.4 * u, 6.4 * u, 9.6 * u, clothD, { lean: (run ? 3.4 : strike ? 2 : 1.2) * u + sin(t) * 0.3 * u, teeth: 4, wave: 0.8 * u, phase: t, ragged: true, folds: 2, trim: '#a8d0ec', seed: 4 });
+      // ---- legs
+      const legs = (far) => {
+        const Lg = layer(F), Rm = far ? steelD : steel;
+        const hip = U(far ? 0.8 : -0.6, 0.4);
+        let foot;
+        if (run) { const [dx, lift] = stride(t + (far ? 0.5 : 0), 5.4 * u, 1.8 * u); foot = [hip[0] + dx, oy - lift]; }
+        else if (strike) foot = [hip[0] + (far ? 3.2 : -2.6) * u, oy];
+        else if (wind) foot = [hip[0] + (far ? 2 : -1.6) * u, oy];
+        else foot = [hip[0] + (far ? 1.4 : -0.9) * u, oy];
+        const knee = limb(Lg, hip, [foot[0], foot[1] - 1 * u], 4.6 * u, 4.4 * u, 1.7 * u, 1.4 * u, 1.3 * u, Rm, -1);
+        blob(Lg, [[knee[0] + 0.3 * u, knee[1], 1.4 * u, 1.2 * u]], Rm);
+        slab(Lg, [[foot[0] - 1.4 * u, foot[1] - 2 * u], [foot[0] + 1 * u, foot[1] - 2 * u], [foot[0] + 2.8 * u, foot[1] - 0.2 * u], [foot[0] - 1.4 * u, foot[1] - 0.2 * u]], Rm);
+        put(L, Lg, !far);
+      };
+      legs(true);
+      // ---- the ice coffin, fused to the far arm, held before him as a shield
+      const cg = wind ? U(6.8, -2.6) : strike ? U(8, -1) : hurt ? U(5.8, -0.6) : U(6.4, -1 + (run ? sin(t) * 0.3 : 0));
+      const ca = wind ? -0.12 : strike ? 0.1 : hurt ? -0.2 : -0.05;
+      const CQ = tilt(cg[0], cg[1], ca), Q = (dx, dy) => CQ(dx * u, dy * u);
+      const coffin = [Q(-1.8, -10.8), Q(1.8, -10.8), Q(4.3, -6.2), Q(2.2, 7), Q(-2, 7), Q(-4.3, -6.2)];
+      const Ci = layer(F);
+      const mid = Q(0, -1.6), inset = coffin.map(([x, y]) => [lerp(x, mid[0], 0.22), lerp(y, mid[1], 0.12)]);
+      Ci.poly(coffin, ICE[3]);
+      // lid bevel: the lit left rim, the shadowed right rim, the recessed lid between
+      facet(Ci, [coffin[0], coffin[1], inset[1], inset[0]], ICE[4]);
+      facet(Ci, [coffin[5], coffin[0], inset[0], inset[5]], ICE[4]);
+      facet(Ci, [coffin[4], coffin[5], inset[5], inset[4]], mixc(ICE[3], ICE[4], 0.5));
+      facet(Ci, [coffin[1], coffin[2], inset[2], inset[1]], ICE[2]);
+      facet(Ci, [coffin[2], coffin[3], inset[3], inset[2]], ICE[1]);
+      facet(Ci, [coffin[3], coffin[4], inset[4], inset[3]], ICE[1]);
+      Ci.poly(inset, mixc(ICE[2], ICE[3], 0.55));
+      // the frozen arm inside: vambrace and fist, seen dim through the ice
+      const ghost = steel.map((c) => mixc(c, ICE[1], 0.3));
+      tube(Ci, [Q(-2.6, -6.4), Q(-0.4, -2.8), Q(1, -5.8)], [1.2 * u, 0.9 * u], ghost);
+      blob(Ci, [[...Q(1.1, -6.4), 1.2 * u, 1.1 * u]], ghost);
+      for (let k = 0; k < 3; k++) over(Ci, ...Q(0.6 + k * 0.5, -7.2), ghost[1]);
+      // a travelling glint and a few trapped bubbles
+      const gl = (P.i + (run ? 2 : 0)) % 4;
+      for (const k of [0, 2]) { const a2 = Q(-2 + gl * 1.1 + k * 0.4, 5 - k * 0.2), b2 = Q(-0.4 + gl * 1.1 + k * 0.4, -2 - k * 0.2); Ci.line(a2[0], a2[1], b2[0], b2[1], ICE[4]); }
+      for (const [dx, dy] of [[-0.6, 2], [0.8, 3.6], [-1.2, 4.6]]) over(Ci, ...Q(dx, dy), ICE[4]);
+      if (hurt) crack(Ci, ...Q(0.4, -9), 1.7, 9 * u, ICE[4], 7);
+      for (let k = 0; k < 2; k++) icicle(Ci, ...Q(-1 + k * 2, 6.8), (1.2 + k * 0.8) * u, 0.5 * u);
+      put(L, Ci, true);
+      // ---- torso: breastplate under a crimson tabard, the left shoulder vanishing into the ice
+      const Tr = layer(F);
+      blob(Tr, [[...U(0.6, -4.6), 3.4 * u, 3.6 * u], [...U(0.2, -0.8), 2.8 * u, 2.4 * u]], steel);
+      slab(Tr, [[...U(-1.8, -6.2)], [...U(2.6, -6.2)], [...U(3, 1.8)], [...U(0.6, 2.8)], [...U(-2.2, 1.6)]], cloth, { wide: true });
+      // a faded sigil on the tabard: a pale snowflake-star
+      const sg = U(0.6, -2.4);
+      Tr.line(sg[0] - 1 * u, sg[1], sg[0] + 1 * u, sg[1], cloth[4]); Tr.line(sg[0], sg[1] - 1.2 * u, sg[0], sg[1] + 1.2 * u, cloth[4]);
+      Tr.set(R(sg[0]), R(sg[1]), '#f3e1b5');
+      // belt
+      Tr.line(...U(-2, 0.4), ...U(3, 0.4), steel[0], Math.max(1, R(0.7 * u)));
+      put(L, Tr, true);
+      // ---- helm: a great helm with a T-visor, crest of frozen plume swept back, one dent
+      const hc = U(1, -9.4), Hd = layer(F);
+      slab(Hd, [[hc[0] - 2.4 * u, hc[1] - 2.6 * u], [hc[0] + 2.2 * u, hc[1] - 2.8 * u], [hc[0] + 2.8 * u, hc[1] + 0.6 * u], [hc[0] + 2 * u, hc[1] + 2.6 * u], [hc[0] - 2.4 * u, hc[1] + 2.4 * u]], steel, { wide: true });
+      Hd.rect(R(hc[0] + 0.4 * u), R(hc[1] - 0.6 * u), Math.max(2, R(2.6 * u)), Math.max(1, R(0.7 * u)), VOID);
+      Hd.rect(R(hc[0] + 1.6 * u), R(hc[1] - 0.6 * u), Math.max(1, R(0.6 * u)), Math.max(2, R(2.4 * u)), VOID);
+      // breaths: little rivets
+      for (let k = 0; k < 3; k++) Hd.set(R(hc[0] + 2.2 * u), R(hc[1] + 0.9 * u + k * 0.6 * u), steel[1]);
+      // rime plume: three swept icicles from the crown
+      for (let k = 0; k < 3; k++) {
+        const r0 = [hc[0] - (0.6 + k * 1.1) * u, hc[1] - 2.6 * u], a = -1.9 - k * 0.32 - (run ? 0.25 : 0) + (idle ? sin(t) * 0.04 : 0);
+        shard(Hd, r0[0], r0[1], a, (4.4 - k * 0.9) * u, 0.75 * u, ICE);
+      }
+      put(L, Hd, true);
+      legs(false);
+      // ---- sword arm and greatsword
+      let hand, sa;
+      if (wind) { hand = U(-1.6, -11); sa = -2.5; }
+      else if (strike) { hand = U(6.4, -3); sa = 0.55; }
+      else if (hurt) { hand = U(3, -1.6); sa = -1.1; }
+      else if (run) { hand = U(1.8, -3.4 + sin(t) * 0.3); sa = -2.35 + sin(t) * 0.05; }
+      else { hand = U(1.8, -3.4 + sin(t) * 0.15); sa = -2.25; }
+      const A = layer(F), sh = U(0.6, -6.6);
+      limb(A, sh, hand, 3.6 * u, 3.6 * u, 1.5 * u, 1.3 * u, 1.2 * u, steel, 1);
+      const S2 = layer(F);
+      const dx = Math.cos(sa), dy = Math.sin(sa), tip = [hand[0] + dx * 15 * u, hand[1] + dy * 15 * u], gx0 = [hand[0] + dx * 1.2 * u, hand[1] + dy * 1.2 * u];
+      // blade with a rime-crusted edge, crossguard, grip, pommel
+      const bw = 1 * u, nx = -dy, ny = dx;
+      slab(S2, [[gx0[0] + nx * bw, gx0[1] + ny * bw], [tip[0] - dx * 2 * u + nx * bw * 0.8, tip[1] - dy * 2 * u + ny * bw * 0.8], tip, [tip[0] - dx * 2 * u - nx * bw * 0.8, tip[1] - dy * 2 * u - ny * bw * 0.8], [gx0[0] - nx * bw, gx0[1] - ny * bw]], blade);
+      S2.line(gx0[0], gx0[1], tip[0] - dx * 1.5 * u, tip[1] - dy * 1.5 * u, blade[2]);
+      for (let k = 2; k < 13; k += 2.5) { const q = [hand[0] + dx * k * u + nx * bw, hand[1] + dy * k * u + ny * bw]; S2.rect(R(q[0]), R(q[1]), 1, 1, ICE[4]); }
+      tube(S2, [[gx0[0] + nx * 2.4 * u, gx0[1] + ny * 2.4 * u], [gx0[0] - nx * 2.4 * u, gx0[1] - ny * 2.4 * u]], 0.6 * u, steel);
+      tube(S2, [[hand[0] - dx * 2.4 * u, hand[1] - dy * 2.4 * u], gx0], 0.55 * u, cloth);
+      blob(S2, [[hand[0] - dx * 2.8 * u, hand[1] - dy * 2.8 * u, 0.8 * u, 0.8 * u]], steel);
+      put(L, S2, true);
+      blob(A, [[hand[0], hand[1], 1.2 * u, 1.1 * u]], steel);
+      blob(A, [[...U(0.4, -6.8), 2 * u, 1.6 * u]], steel);
+      put(L, A, true);
+      put(F.p, L, false);
+      // visor glow: a cold lamp in the slit (gutters when struck)
+      const vc = hurt ? '#3e6aa8' : wind || strike ? '#e6f4fc' : idle && P.i === 2 ? '#e6f4fc' : '#a8d0ec';
+      eyeGlow(F, hc[0] + 0.6 * u, hc[1] - 0.7 * u, Math.max(3, R(2 * u)), Math.max(1, R(0.8 * u)), vc);
+      // the cleave: a frost arc trailing the blade
+      if (strike) for (let k = 0; k <= 40; k++) {
+        const f = k / 40, a = sa - 1.7 + f * 1.6, th = Math.sin(f * Math.PI) * 1.8 * u;
+        for (let r1 = 15 * u - th; r1 <= 15 * u; r1 += 0.5) { const x = hand[0] + Math.cos(a) * r1, y = hand[1] + Math.sin(a) * r1, c = r1 > 15 * u - th * 0.45 ? ICE[4] : ICE[3]; F.p.set(R(x), R(y), c); F.e.set(R(x), R(y), c); }
+      }
+      if (hurt) for (let k = 0; k < 4; k++) F.p.rect(R(cg[0] + (3 + k) * u), R(cg[1] - (6 - k * 2.4) * u), Math.max(1, R(0.8 * u)), Math.max(1, R(0.8 * u)), ICE[3]);
+    },
+  },
+  // Strix (snow_harpy): the Roman night-owl of ill omen. A barred snowy owl that wears a pale
+  // porcelain woman's face; it flies in profile but keeps its head turned to stare at you, two
+  // gold owl eyes burning in the mask's empty holes, painted lips parted round a hooked beak.
+  strix: {
+    view: 'side', box: [44, 40], pivot: 0.55, idle: 4, run: 4, idleFps: 6, flap: 11,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const fth = cols('#5c6088', '#9a9ec2', '#d2d2e8', '#efeef2', '#fff8ec'), fthD = fth.map((c) => dark(c, 0.8));
+      const bar = C('#3e4a5a'), mask = cols('#8a6a6a', '#c49a8a', '#e2c4a8', '#f3e1b5', '#fff4dc');
+      const talon = cols('#140f1c', '#1d0814', '#2a1420', '#3e1c2c', '#55323d');
+      const t = P.t, run = P.act === 'run', idle = P.act === 'idle', wind = P.atk === 1, strike = P.atk === 2, hurt = P.hurt;
+      // wing beat phase: 0 up, 1 level, 2 down, 3 level (run = the flap loop; idle a lazier one)
+      const ph = run || idle ? [0, 1, 2, 1][P.i] : wind ? 0 : strike ? 3 : 2;
+      const bob = [1, 0, -1, 0][run || idle ? P.i : 1] * 0.8 * u;
+      let cx = ox, cy = oy - 13 * u + bob, pitch = 0.18;
+      if (wind) { cx -= 1.5 * u; cy -= 1.5 * u; pitch = -0.1; }
+      if (strike) { cx += 2.5 * u; cy += 1.5 * u; pitch = 0.55; }
+      if (hurt) { cx -= 1.4 * u; pitch = -0.2; }
+      const B = tilt(cx, cy, pitch), U = (dx, dy) => B(dx * u, dy * u);
+      const L = layer(F);
+      // chevron barring: rows of little dark V clusters over a white form
+      const barring = (Ld, x0, y0, x1, y1, seed, n = 2) => {
+        for (let y = y0; y < y1; y += 2 * u) for (let x = x0 + ((y / (2 * u)) & 1) * 1.6 * u; x < x1; x += 3.2 * u) {
+          if (hash2(R(x), R(y), seed) > 0.8) continue;
+          over(Ld, x, y, bar); if (n > 1) { over(Ld, x - 1, y - 1, bar); over(Ld, x + 1, y - 1, bar); }
+        }
+      };
+      const wingA = [[-1.55, -1.35], [-2.85, -0.85], [2.2, 0.75], [-3.0, -0.6]][ph];
+      const sh = U(0.4, -2.4);
+      // far wing
+      const Wf = layer(F);
+      owlWing(Wf, [sh[0] + 1 * u, sh[1] - 0.6 * u], wingA[0] + 0.15, 18 * u, wingA[1], fthD, { bar: '#2a3240', contour: false, n: 8 });
+      put(L, Wf, false);
+      // tail fan
+      const Tl = layer(F);
+      for (let k = 0; k < 4; k++) { const a = Math.PI * 0.62 + pitch + (k - 1.5) * 0.18; const r0 = U(-2.4, 3.4); tube(Tl, [r0, [r0[0] + Math.cos(a) * 5.5 * u, r0[1] + Math.sin(a) * 5.5 * u]], [1.1 * u, 0.8 * u], fth, { matte: true }); }
+      barring(Tl, 0, 0, Tl.w, Tl.h, 7, 1);
+      put(L, Tl, true);
+      // legs: feathered trousers, dark talons; hang in flight, thrust forward on the strike
+      const legs = (far) => {
+        const Lg = layer(F), Rm = far ? fthD : fth;
+        const hip = U(far ? 1.2 : 0.2, 3.6);
+        const reach = strike ? [hip[0] + 6 * u, hip[1] + 3 * u] : wind ? [hip[0] + 1 * u, hip[1] + 2 * u] : [hip[0] - 0.6 * u + (far ? 0.6 * u : 0), hip[1] + 4.2 * u];
+        tube(Lg, [hip, reach], [1.6 * u, 1.2 * u], Rm, { fur: 2 });
+        const open = strike ? 0.9 : 0.35, dir = Math.atan2(reach[1] - hip[1], reach[0] - hip[0]);
+        for (let k = 0; k < 3; k++) {
+          const a = dir + (k - 1) * open, tp = [reach[0] + Math.cos(a) * 2.6 * u, reach[1] + Math.sin(a) * 2.6 * u];
+          horn(Lg, reach, [lerp(reach[0], tp[0], 0.6), lerp(reach[1], tp[1], 0.6) - 0.3 * u], [tp[0] + Math.cos(a + 1.4) * 0.8 * u, tp[1] + Math.sin(a + 1.4) * 0.8 * u], 0.8 * u, talon);
+        }
+        put(L, Lg, !far);
+      };
+      legs(true);
+      // body: a round barred egg, fluffing out jagged when hurt
+      const Bd = layer(F);
+      blob(Bd, [[...U(0, 0.6), 4.6 * u, 5.2 * u], [...U(1.2, -2.6), 3.6 * u, 3 * u]], fth, { fur: 6 });
+      barring(Bd, 0, 0, Bd.w, Bd.h, 2);
+      if (hurt) for (let k = 0; k < 10; k++) { const a = (k / 10) * TAU, q = U(Math.cos(a) * 5.2, 0.6 + Math.sin(a) * 5.8); Bd.poly([[q[0] - 1 * u, q[1]], [q[0] + 1 * u, q[1]], [q[0] + Math.cos(a) * 1.6 * u, q[1] + Math.sin(a) * 1.6 * u]], fth[3]); }
+      put(L, Bd, true);
+      legs(false);
+      // near wing over the body
+      owlWing(L, sh, wingA[0], 20 * u, wingA[1], fth, { bar: '#3e4a5a', n: 8 });
+      put(F.p, L, false);
+      const Wb = layer(F);
+      put(F.p, Wb, false);
+      // ---- head, turned to face us: ear tufts, a ruff, and the mask
+      const tiltH = wind ? 0.32 : hurt ? -0.25 : idle ? sin(t) * 0.06 : 0;
+      const hc = U(2.6, -7.6), Hq = tilt(hc[0], hc[1], tiltH), H = (dx, dy) => Hq(dx * u, dy * u);
+      const Hd = layer(F);
+      for (const sg of [-1, 1]) slab(Hd, [H(sg * 2.2, -2.6), H(sg * 3.8, -6.2 + (sg > 0 ? 0.6 : 0)), H(sg * 0.8, -3.6)], fth);
+      blob(Hd, [[...H(0, 0), 4.6 * u, 4.2 * u]], fth, { fur: 8 });
+      barring(Hd, hc[0] - 5 * u, hc[1] - 5 * u, hc[0] + 5 * u, hc[1] - 2.4 * u, 9, 1);
+      put(L, Hd, true);
+      const Mk = layer(F);
+      // an oval porcelain woman's face, a little too small for the head
+      blob(Mk, [[...H(0, 0.3), 2.9 * u, 3.6 * u]], mask);
+      Mk.line(...H(0.3, -0.4), ...H(0.5, 1.1), mask[2]);
+      Mk.set(...H(0.6, 1.2).map(R), mask[1]);
+      // painted brows (one arched higher), rouge, a crack across the cheek
+      Mk.line(...H(-2.2, -1.9), ...H(-0.6, -2.1), mask[0]); Mk.line(...H(0.6, -2.2), ...H(2.2, -2.6), mask[0]);
+      over(Mk, ...H(-1.8, 1), '#cc6a86'); over(Mk, ...H(1.9, 1), '#cc6a86');
+      if (hurt || P.i % 2 || wind || strike) crack(Mk, ...H(1.2, 0.2), 0.7 + tiltH, 3.4 * u, mask[0], 3);
+      // almond eye holes
+      const eye = (sx) => { const q = H(sx * 1.35, -0.7); Mk.ellipse(q[0], q[1], 1.35 * u, 0.9 * u, VOID); return q; };
+      const e1 = eye(-1), e2 = eye(1);
+      // parted painted lips with the beak hooking through
+      const mq = H(0, 2.3), op = strike || wind ? 0.8 * u : 0.3 * u;
+      Mk.ellipse(mq[0], mq[1], 1.3 * u, op + 0.35 * u, C('#a94a68'));
+      Mk.ellipse(mq[0], mq[1], 0.8 * u, op * 0.7, MAW_D);
+      Mk.poly([[mq[0] - 0.6 * u, mq[1] - op - 0.5 * u], [mq[0] + 0.6 * u, mq[1] - op - 0.5 * u], [mq[0] + 0.1 * u, mq[1] + 0.3 * u + op * 0.4]], C('#cfa978'));
+      put(L, Mk, true);
+      put(F.p, L, false);
+      // the owl's own eyes behind the holes: huge, gold, unblinking (shut when hurt)
+      for (const q of [e1, e2]) {
+        if (hurt) { F.p.line(q[0] - 1 * u, q[1], q[0] + 1 * u, q[1], C('#8a6a6a')); continue; }
+        for (const Ld of [F.p, F.e]) { Ld.ellipse(q[0], q[1], 1.1 * u, 0.7 * u, C('#e8c35a')); Ld.set(R(q[0] - 0.5 * u), R(q[1] - 0.3 * u), C('#f6e39a')); }
+        F.p.rect(R(q[0]), R(q[1] - 0.4 * u), 1, Math.max(1, R(0.8 * u)), VOID);
+      }
+      F.mouth = [mq[0], mq[1]];
+    },
+  },
+  // Glacier Golem (ice_golem): a calved block of the old glacier that got up and walked. It has no
+  // head: its top is a ridge of séracs under a snow cap. Deep in the blue ice a whole woolly
+  // mammoth is frozen mid-stride, a dark shape with one eye still lit; its two great tusks have
+  // broken out through the front of the ice and the golem gores with them.
+  glacier_golem: {
+    view: 'side', box: [46, 40], pivot: 0.44, idle: 4, run: 4, idleFps: 2.5, scale: 0.74,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const ice = ICE, iceD = ICE.map((c) => dark(c, 0.8)), shadowM = cols('#140f2c', '#1d1a3e', '#2a2850', '#383862', '#4a4a78');
+      const tusk = cols('#6a5a5a', '#a08a78', '#cfa978', '#f3e1b5', '#fff4dc'), rock = cols('#1f1d26', '#2f2c38', '#4e4b53', '#66626a', '#827d82');
+      const t = P.t, run = P.act === 'run', idle = P.act === 'idle', wind = P.atk === 1, strike = P.atk === 2, hurt = P.hurt;
+      let bx = ox, by = oy - 7 * u, lean = 0;
+      if (idle) by += sin(t) * 0.25 * u;
+      if (run) { by -= Math.abs(sin(t)) * 0.8 * u; lean = sin(t) * 0.05; }
+      if (wind) { bx -= 1.2 * u; lean = -0.14; by -= 0.6 * u; }
+      if (strike) { bx += 2.2 * u; lean = 0.2; by += 0.6 * u; }
+      if (hurt) { bx -= 1.2 * u; lean = -0.1; }
+      const B = tilt(bx, by, lean), U = (dx, dy) => B(dx * u, dy * u);
+      const L = layer(F);
+      // ---- arms of stacked ice blocks hanging at the flanks, moraine-stone fists
+      const arm = (far) => {
+        const A = layer(F), Rm = far ? iceD : ice, sh = U(far ? 2 : -5.4, -14);
+        let hd;
+        if (wind) hd = U(far ? 4 : -3, -28);
+        else if (strike) hd = [U(far ? 13 : 11, 0)[0], oy - 2.4 * u];
+        else if (run) hd = U((far ? 4 : -5.5) + sin(t + (far ? 0.5 : 0)) * 2.6, -2.6);
+        else hd = U(far ? 4.5 : -6.4, -2.6 + (idle ? sin(t) * 0.2 : 0));
+        const el = ik(sh, hd, 6.5 * u, 6.5 * u, wind ? -1 : 1);
+        const blk = (a2, b2, w) => { const dx = b2[0] - a2[0], dy = b2[1] - a2[1], l = Math.hypot(dx, dy) || 1, nx = -dy / l * w, ny = dx / l * w; slab(A, [[a2[0] + nx, a2[1] + ny], [b2[0] + nx * 0.9, b2[1] + ny * 0.9], [b2[0] - nx * 0.9, b2[1] - ny * 0.9], [a2[0] - nx, a2[1] - ny]], Rm, { wide: true }); };
+        blk(sh, el, 2.5 * u); blk(el, hd, 2.2 * u);
+        blob(A, [[hd[0], hd[1], 3 * u, 2.8 * u]], Rm);
+        spots(A, hd[0], hd[1], 2.4 * u, 2.2 * u, 4, 1 * u, far ? rock[2] : rock[3], far ? 3 : 8);
+        frostTop(A, SNOW[3], 1, 0, A.w, 4);
+        put(L, A, true);
+      };
+      arm(true);
+      const legs = (far) => {
+        const Lg = layer(F), Rm = far ? iceD : ice, hip = U(far ? 3 : -3, -1);
+        let foot = [hip[0], oy];
+        if (run) { const [dx, lift] = stride(t + (far ? 0.5 : 0), 4.5 * u, 1.6 * u); foot = [hip[0] + dx, oy - lift]; }
+        else if (strike) foot = [hip[0] + (far ? 2 : -2) * u, oy];
+        slab(Lg, [[hip[0] - 2.6 * u, hip[1]], [hip[0] + 2.6 * u, hip[1]], [foot[0] + 3 * u, foot[1]], [foot[0] - 2.8 * u, foot[1]]], Rm, { wide: true });
+        Lg.line(foot[0] - 2.4 * u, foot[1] - 1, foot[0] + 2.6 * u, foot[1] - 1, SNOW[3]);
+        put(L, Lg, !far);
+      };
+      legs(true);
+      // ---- the glacier block: a sérac ridge on top, a sheer front face
+      const Bd = layer(F);
+      const top = [U(-9, -15), U(-7.4, -21.5), U(-5.6, -18.6), U(-3, -25.4), U(-0.6, -20.4), U(1.8, -26.6), U(3.8, -20.6), U(6.2, -23.6), U(8.2, -18.4), U(10.4, -17)];
+      if (hurt) top.splice(5, 1, U(2, -21.6));
+      Bd.poly([...top, U(11, -6), U(9.8, 0.4), U(-9, 0.4), U(-10.4, -8)], ice[3]);
+      facet(Bd, [U(-10.4, -8), U(-9, -15), U(-6.8, -14), U(-7.6, 0.4), U(-9, 0.4)], ice[2]);
+      facet(Bd, [U(8.2, -18.4), U(10.4, -17), U(11, -6), U(9.8, 0.4), U(7.4, 0.4), U(8.4, -10)], ice[2]);
+      // blue strata and a moraine band of grit near the foot
+      for (const [y, c] of [[-16, ice[2]], [-3.4, ice[1]], [-1.6, rock[2]]]) for (let x = -10; x <= 11; x += 0.5) { const q = U(x, y + Math.sin(x * 0.7) * 0.5); over(Bd, q[0], q[1], c); }
+      // the mammoth inside, mid-stride, facing the same way: hump, domed brow, curled trunk
+      const M = layer(F);
+      for (const [lx, ph] of [[-5.2, 0.5], [-2.8, 0], [2.2, 0.5], [4.4, 0]]) tube(M, [U(lx, -8), U(lx + (ph ? -0.6 : 0.6), -4.6)], [1.5 * u, 1.2 * u], shadowM, { matte: true });
+      blob(M, [[...U(-0.8, -10.2), 6.4 * u, 4 * u], [...U(-2.6, -12.6), 3.8 * u, 3 * u], [...U(4.8, -12), 2.9 * u, 3 * u], [...U(5.4, -14.4), 1.8 * u, 1.6 * u]], shadowM, { matte: true });
+      tube(M, [U(7, -11), U(8.2, -8), U(7.4, -5.6), U(6.2, -6)], [1.3 * u, 0.6 * u], shadowM);
+      // shaggy fringe along the belly
+      for (let k = 0; k < 7; k++) { const q = U(-6 + k * 1.6, -6.6); M.poly([[q[0] - 0.7 * u, q[1] - 0.6 * u], [q[0] + 0.7 * u, q[1] - 0.6 * u], [q[0], q[1] + 1.1 * u]], shadowM[2]); }
+      rimLight(M, mixc(shadowM[4], ice[2], 0.5));
+      put(Bd, M, false);
+      // glints sweeping across the face, and a crevasse
+      const gl = (P.i + (run ? 1 : 0)) % 4;
+      for (const k of [0, 1.2]) { const a2 = U(-7 + gl * 3 + k, -2), b2 = U(-4.4 + gl * 3 + k, -15); Bd.line(a2[0], a2[1], b2[0], b2[1], ice[4]); }
+      crack(Bd, ...U(-4.6, -22), 1.4, 6 * u, ice[1], 4);
+      if (hurt) crack(Bd, ...U(8.4, -17), 2.2, 12 * u, ice[4], 11);
+      // snow lying on the sérac slopes
+      frostTop(Bd, SNOW[3], 2, 0, Bd.w, 5);
+      frostTop(Bd, SNOW[4], 1, 0, Bd.w, 6);
+      put(L, Bd, true);
+      // ---- the tusks: two great ivory sweeps broken out of the front face (the far one snapped)
+      const tw = wind ? -0.35 : strike ? 0.3 : idle ? sin(t) * 0.03 : 0;
+      const Tf = layer(F);
+      horn(Tf, U(9.8, -12.4), U(15, -11.6 + tw * 8), U(15.4, -16.4 + tw * 10), 2.8 * u, tusk.map((c) => dark(c, 0.78)), { pow: 0.35 });
+      put(L, Tf, true);
+      const Tn = layer(F);
+      horn(Tn, U(9.6, -9.6), U(18.6, -8 + tw * 8), U(16.4, -18.6 + tw * 11), 3.4 * u, tusk, { pow: 0.6 });
+      blob(Tn, [[...U(10, -9.8), 2 * u, 2.2 * u], [...U(10.2, -12.4), 1.6 * u, 1.6 * u]], ice);
+      put(L, Tn, true);
+      legs(false);
+      arm(false);
+      put(F.p, L, false);
+      // the mammoth's eye, lit through the ice; it gutters when the golem is struck
+      const eq = U(5.6, -13);
+      eyeGlow(F, eq[0] - 0.6 * u, eq[1] - 0.4 * u, Math.max(2, R(1.4 * u)), Math.max(1, R(0.9 * u)), hurt ? '#3e6aa8' : wind || strike ? '#e6f4fc' : idle && P.i === 2 ? '#e6f4fc' : '#a8d0ec');
+      if (idle || run) for (let k = 0; k < 5; k++) { const q = U(-7 + k * 3.4 - t * 4, -27 + ((k * 3 + P.i) % 4) * 0.8); F.e.set(R(q[0]), R(q[1]), [236, 240, 250, 170]); }
+      if (strike) for (let k = 0; k < 8; k++) { const a2 = -Math.PI / 2 + (k - 3.5) * 0.36, d = (3 + (k % 3) * 1.6) * u; shard(F.p, U(12, 0)[0] + Math.cos(a2) * d * 0.4, oy - 1 * u, a2, d, 0.7 * u, ice); }
+    },
+  },
+  // Geode Spider (crystal_spider): the miners' tale of the rock that bites. Its abdomen is a
+  // geode: a rough grey stone egg split open along the top, packed with amethyst-to-frost crystal
+  // spires that catch the light as it scuttles. Stone legs with crystal tips, a cluster of gem eyes.
+  geode_spider: {
+    view: 'side', box: [40, 28], pivot: 0.5, idle: 4, run: 4, idleFps: 3, scale: 1.1,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const rockR = cols('#1f1a2c', '#3e3650', '#5a5070', '#7a7090', '#9a92ac'), rockD = rockR.map((c) => dark(c, 0.8));
+      const am = cols('#2f0d48', '#4a1664', '#7a3ab0', '#a060d0', '#d4b4ec'), fr = cols('#243e7b', '#3e6aa8', '#4f86c4', '#a8d0ec', '#e6f4fc');
+      const t = P.t, run = P.act === 'run', idle = P.act === 'idle', wind = P.atk === 1, strike = P.atk === 2, hurt = P.hurt;
+      let bx = ox, by = oy - 6.6 * u, pitch = 0;
+      if (idle) by += sin(t) * 0.2 * u;
+      if (run) by -= Math.abs(sin(t * 2)) * 0.5 * u;
+      if (wind) { bx -= 1.4 * u; by -= 1.2 * u; pitch = -0.28; }
+      if (strike) { bx += 2.4 * u; by += 0.6 * u; pitch = 0.12; }
+      if (hurt) { bx -= 1.2 * u; pitch = -0.12; }
+      const B = tilt(bx, by, pitch), U = (dx, dy) => B(dx * u, dy * u);
+      const L = layer(F);
+      // ---- legs: 4 a side, knees high, crystal-tipped feet
+      const legs = (far) => {
+        const Lg = layer(F), Rm = far ? rockD : rockR;
+        for (let k = 0; k < 4; k++) {
+          const hip = U(3.4 - k * 0.9 + (far ? 0.6 : 0), 0.2);
+          const spread = [10, 5.2, -1.6, -8][k] + (far ? 1.2 : 0);
+          let foot = [bx + spread * u, oy];
+          if (run) { const [dx, lift] = stride(t * 2 + (k % 2 ? 0.5 : 0) + (far ? 0.5 : 0), 3 * u, 1.6 * u); foot = [foot[0] + dx, oy - lift]; }
+          if (idle && k === 0 && !far && P.i === 1) foot = [foot[0] + 0.6 * u, oy - 1.4 * u];
+          if (wind && k < 2) foot = [U(spread * 0.6 + 4, -6 - (1 - k) * 2)[0], U(0, -6 - (1 - k) * 2)[1]];
+          if (strike && k < 2) foot = [bx + (spread + 3) * u, oy - (k ? 0 : 0.4) * u];
+          if (hurt) foot = [lerp(foot[0], hip[0], 0.3), oy - (k % 2) * 0.8 * u];
+          const kn = [lerp(hip[0], foot[0], 0.42), Math.min(hip[1], foot[1]) - (3.4 - Math.abs(k - 1.5) * 0.5 + (far ? 0.4 : 0)) * u];
+          tube(Lg, [hip, kn], [0.9 * u, 0.75 * u], Rm, { rings: R(2.2 * u) });
+          tube(Lg, [kn, foot], [0.75 * u, 0.4 * u], Rm);
+          // the crystal tip of each foot
+          const dx = foot[0] - kn[0], dy = foot[1] - kn[1], l = Math.hypot(dx, dy) || 1;
+          shard(Lg, foot[0] - dx / l * 1.4 * u, foot[1] - dy / l * 1.4 * u, Math.atan2(dy, dx), 1.8 * u, 0.5 * u, far ? am : fr);
+          Lg.set(R(kn[0]), R(kn[1] - 0.6 * u), Rm[4]);
+        }
+        put(L, Lg, !far);
+      };
+      legs(true);
+      // ---- the geode abdomen: rough stone, split along the top
+      const Ab = layer(F), ac = U(-4.4, -2.6);
+      blob(Ab, [[ac[0], ac[1], 6.4 * u, 5.4 * u], [ac[0] - 1 * u, ac[1] + 1 * u, 5.6 * u, 4.6 * u]], rockR, { tex: 3 });
+      spots(Ab, ac[0] - 1 * u, ac[1] + 1.4 * u, 5 * u, 3.6 * u, 7, 0.9 * u, rockR[2], 9);
+      spots(Ab, ac[0] - 2 * u, ac[1] - 1 * u, 3.6 * u, 2.4 * u, 4, 0.7 * u, rockR[4], 3);
+      // the split: a jagged lens of dark cavity, lined with a pale chalcedony rind
+      const cav = [];
+      for (let k = 0; k <= 10; k++) { const f = k / 10, x = ac[0] + (f - 0.5) * 10.4 * u, top = ac[1] - 5.6 * u + Math.abs(f - 0.5) * 3.4 * u; cav.push([x, top - (k % 2 ? 0.6 * u : 0)]); }
+      for (let k = 10; k >= 0; k--) { const f = k / 10, x = ac[0] + (f - 0.5) * 9 * u; cav.push([x, ac[1] - 1.4 * u + Math.abs(f - 0.5) * 2.2 * u + (k % 2 ? 0.5 * u : 0)]); }
+      const Cv = layer(F);
+      Cv.poly(cav, am[0]);
+      for (const Ld of [Cv]) for (let y = 0; y < Ld.h; y++) for (let x = 0; x < Ld.w; x++) if (Ld.a(x, y) && (!Ld.a(x, y + 1) || !Ld.a(x - 1, y) || !Ld.a(x + 1, y))) Ld.set(x, y, '#c4cce0');
+      for (let i = 3; i < Cv.d.length; i += 4) if (Cv.d[i] && !Ab.d[i]) Cv.d[i] = 0;
+      put(Ab, Cv, false);
+      // inner glow on the cavity floor
+      for (let k = 0; k < 4; k++) { const q = U(-7 + k * 2, -4.4); F.e.rect(R(q[0]), R(q[1]), Math.max(1, R(1.2 * u)), 1, [160, 120, 220, 120]); }
+      put(L, Ab, true);
+      // ---- crystal spires rising out of the split: violet at the root, frost-pale at the tips
+      const Cr = layer(F), flare = wind ? 1.2 : hurt ? 0.7 : 1;
+      const spires = [[-8.2, -2.1, 3.2, 1], [-6.6, -1.7, 4.6, 0], [-5, -1.3, 6.4, 1], [-3.6, -1.5, 5.2, 0], [-2.4, -1.15, 7.2, 1], [-1, -0.8, 4.6, 0], [0.2, -0.5, 3, 1]];
+      spires.forEach(([dx, a, len, kind], i) => {
+        if (hurt && i === 4) len = 2.4;
+        const q = U(dx, -4.6 - (Math.abs(dx + 4) < 2 ? 1 : 0)), Rm = kind ? am : fr;
+        shard(Cr, q[0], q[1], a + pitch, len * u * flare, (0.9 + len * 0.08) * u, Rm, { ridge: '#e6f4fc' });
+      });
+      put(L, Cr, true);
+      // ---- cephalothorax + head with mandibles of crystal
+      const Th = layer(F);
+      blob(Th, [[...U(3.2, -1), 3.2 * u, 2.5 * u], [...U(6.4, -1.4), 2.3 * u, 2 * u]], rockR, { tex: 5 });
+      put(L, Th, true);
+      const jaw = strike ? 0.7 : wind ? 0.5 : 0;
+      const Mn = layer(F);
+      for (const sg of [-1, 1]) {
+        const r0 = U(7.8, 0.2 + sg * 0.3);
+        horn(Mn, r0, [r0[0] + 1.6 * u, r0[1] + (0.6 + sg * jaw) * u], [r0[0] + 1.2 * u + jaw * u, r0[1] + (2.4 + sg * jaw * 1.6) * u], 1.2 * u, sg > 0 ? fr : am);
+      }
+      put(L, Mn, true);
+      legs(false);
+      put(F.p, L, false);
+      // the gem eyes: a cluster of little lit crystals, the two front ones bigger
+      const ey = U(7, -2.6), ec = hurt ? '#4a3266' : wind || strike ? '#e6f4fc' : '#a87cc0';
+      eyeGlow(F, ey[0], ey[1], Math.max(2, R(1.1 * u)), Math.max(1, R(1 * u)), ec);
+      eyeGlow(F, ey[0] - 1.6 * u, ey[1] - 0.6 * u, Math.max(1, R(0.8 * u)), Math.max(1, R(0.8 * u)), ec);
+      for (const [dx, dy] of [[-0.6, -1.4], [-2.6, -0.2], [0.8, -1]]) { const q = U(7 + dx, -2.6 + dy); for (const Ld of [F.p, F.e]) Ld.set(R(q[0]), R(q[1]), C('#a8d0ec')); }
+      // a glint that hops between spires; crystal shards spray when hit
+      const sp = spires[(P.i * 3 + (run ? 1 : 0)) % spires.length], gq = U(sp[0] + Math.cos(sp[1]) * sp[3] * 0 + Math.cos(sp[1] + pitch) * sp[2] * 0.7, -4.6 + Math.sin(sp[1] + pitch) * sp[2] * 0.7);
+      for (const Ld of [F.p, F.e]) { Ld.set(R(gq[0]), R(gq[1]), WHITE); Ld.set(R(gq[0]) - 1, R(gq[1]), C('#e6f4fc')); Ld.set(R(gq[0]), R(gq[1]) - 1, C('#e6f4fc')); }
+      if (hurt) for (let k = 0; k < 5; k++) { const q = U(-2.4 + k * 1.2 - 2, -12 + (k % 2) * 2); shard(F.p, q[0], q[1], -1 - k * 0.5, 1.6 * u, 0.5 * u, k % 2 ? am : fr); }
+    },
+  },
+  // The Mine Horror (mine_horror): what the miners woke. The front of a giant star-nosed mole
+  // (velvet fur, shovel hands, a squint, two yellow incisors) grown onto a long armoured centipede.
+  // Its nose is a spiralled drill ringed by a corona of fleshy star-fingers. Along its back it
+  // carries the lanterns of the crews it ate, staked into its plates like trophies; they swing as
+  // it moves and they are its weak points.
+  mine_horror: {
+    view: 'side', box: [70, 40], pivot: 0.6, idle: 6, run: 4, idleFps: 5, scale: 0.78,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const fur = cols('#140f1c', '#1d1426', '#2e2238', '#433452', '#5e4c6e'), furD = fur.map((c) => dark(c, 0.85));
+      const plate = cols('#1a1f2c', '#2a3240', '#3e4a5a', '#525c83', '#6e7a9a'), plateD = plate.map((c) => dark(c, 0.8));
+      const flesh = cols('#4a1a30', '#7a2f4a', '#a94a68', '#cc6a86', '#e48fb0'), claw = cols('#6a5a5a', '#a08a78', '#cfa978', '#f3e1b5', '#fff4dc');
+      const iron = cols('#140f1c', '#22262e', '#3a4048', '#4a5259', '#6a7276'), rust = C('#8a4238'), brass = cols('#3e2418', '#6a3e1c', '#9a6424', '#c99a3a', '#e8c35a');
+      const t = P.t, run = P.act === 'run', idle = P.act === 'idle', wind = P.atk === 1, strike = P.atk === 2, hurt = P.hurt;
+      let bx = ox, by = oy, rear = 0;
+      if (wind) { bx -= 2 * u; rear = 4; }
+      if (strike) { bx += 4 * u; rear = -3.4; }
+      if (hurt) { bx -= 2 * u; rear = 1.6; }
+      const U = (dx, dy) => [bx + dx * u, by + dy * u];
+      const L = layer(F);
+      // ---- centipede spine: neck -> tail, undulating
+      const N = 9, wave = (i) => (idle ? sin(t + i * 0.12) * 0.5 : run ? sin(t * 2 + i * 0.25) * 0.9 : 0);
+      const spine = bez([U(3, -11 - rear * 0.5), U(-7, -6.6), U(-20, -5.6), U(-31, -9.6)], N - 1).map(([x, y], i) => [x, y + wave(i) * u]);
+      const rad = (i) => (4.6 - i * 0.32) * u;
+      // far legs, all segments
+      const segLegs = (far) => {
+        const Lg = layer(F), Rm = far ? iron.map((c) => dark(c, 0.8)) : iron;
+        for (let i = 0; i < N; i++) {
+          const [cx, cy] = spine[i], r = rad(i), hip = [cx + (far ? 1 : -0.4) * u, cy + r * 0.6];
+          let foot = [cx + (far ? 1.6 : -0.8) * u + 1.4 * u, oy];
+          if (run) { const [dx, lift] = stride(t * 2 + i * 0.22 + (far ? 0.5 : 0), 3 * u, 1.2 * u); foot = [foot[0] + dx, oy - lift]; }
+          else if (idle) foot = [foot[0] + sin(t + i * 0.3) * 0.4 * u, oy];
+          const kn = [lerp(hip[0], foot[0], 0.3) + 1.4 * u, Math.min(hip[1], foot[1]) - 0.4 * u + (foot[1] - hip[1]) * 0.3];
+          tube(Lg, [hip, kn], [0.8 * u, 0.6 * u], Rm);
+          tube(Lg, [kn, foot], [0.6 * u, 0.3 * u], Rm);
+        }
+        put(L, Lg, !far);
+      };
+      segLegs(true);
+      // segments, tail first: chitin plates with a rusted rim and a ridge
+      for (let i = N - 1; i >= 0; i--) {
+        const [cx, cy] = spine[i], r = rad(i), Sg = layer(F);
+        blob(Sg, [[cx, cy, r * 1.05, r * 0.86]], plate, { tex: 11 + i });
+        // rusted rim along the back edge, a pale ridge on top
+        for (let a = 1.9; a < 4.3; a += 0.04) over(Sg, cx + Math.cos(a) * r * 0.98, cy + Math.sin(a) * r * 0.82, rust);
+        for (let a = 3.9; a < 5.2; a += 0.05) over(Sg, cx + Math.cos(a) * r * 0.62, cy + Math.sin(a) * r * 0.5, plate[4]);
+        put(L, Sg, true);
+      }
+      // tail spike
+      const tl = spine[N - 1];
+      horn(L, tl, [tl[0] - 3 * u, tl[1] - 1 * u], [tl[0] - 4.6 * u, tl[1] - 4.4 * u + wave(N) * u], 2 * u, plate);
+      // ---- trophies: a pickaxe driven into a plate, lanterns staked along the back
+      const pk = spine[5], Pk = layer(F);
+      tube(Pk, [[pk[0] - 0.6 * u, pk[1] - 1.6 * u], [pk[0] - 4 * u, pk[1] - 8 * u]], 0.55 * u, cols('#2a1a1c', '#3f2622', '#5a3628', '#77492f', '#94603c'));
+      horn(Pk, [pk[0] - 4 * u, pk[1] - 8 * u], [pk[0] - 2 * u, pk[1] - 9.4 * u], [pk[0] - 0.4 * u, pk[1] - 8.6 * u], 1.2 * u, iron);
+      horn(Pk, [pk[0] - 4 * u, pk[1] - 8 * u], [pk[0] - 5.6 * u, pk[1] - 7.6 * u], [pk[0] - 6.6 * u, pk[1] - 6 * u], 1.2 * u, iron);
+      put(L, Pk, true);
+      const lamps = [];
+      [1, 3, 7].forEach((i, k) => {
+        const [cx, cy] = spine[i], r = rad(i), base = [cx + 0.4 * u, cy - r * 0.8];
+        const top = [base[0] - 1.2 * u + k * 0.4 * u, base[1] - (4.6 - k * 0.6) * u];
+        const Lp = layer(F);
+        tube(Lp, [base, top], 0.45 * u, iron);
+        Lp.line(top[0], top[1], top[0] + 1.6 * u, top[1] - 0.4 * u, iron[3]);
+        const sw = (idle ? sin(t + k * 0.33) * 0.35 : run ? sin(t * 2 + k * 0.3) * 0.5 : wind ? -0.4 : strike ? 0.6 : 0.2);
+        const hook = [top[0] + 1.6 * u, top[1] - 0.4 * u], lc = [hook[0] + Math.sin(sw) * 2.2 * u, hook[1] + Math.cos(sw) * 2.2 * u];
+        Lp.line(hook[0], hook[1], lc[0], lc[1] - 1.2 * u, iron[2]);
+        // the lantern: brass cap, iron cage, glowing glass
+        Lp.rect(R(lc[0] - 1.1 * u), R(lc[1] - 1.4 * u), R(2.2 * u), R(0.6 * u), brass[3]);
+        Lp.rect(R(lc[0] - 1 * u), R(lc[1] - 0.9 * u), R(2 * u), R(2.6 * u), iron[2]);
+        Lp.rect(R(lc[0] - 1.1 * u), R(lc[1] + 1.6 * u), R(2.2 * u), R(0.5 * u), brass[2]);
+        put(L, Lp, true);
+        lamps.push(lc);
+      });
+      segLegs(false);
+      // ---- the mole: shoulders and neck in velvet fur
+      const hx = U(12.4, -17.4 - rear)[0], hy = U(12.4, -17.4 - rear)[1];
+      const farArm = () => {
+        const A = layer(F), sh = U(6.4, -11 - rear * 0.6);
+        const palm = wind ? U(13, -24) : strike ? U(19, -4) : hurt ? U(9, -6) : U(11 + (run ? sin(t * 2) * 1.6 : 0), -1.6 - (run ? Math.max(0, sin(t * 2)) * 1.6 : 0));
+        const el = ik(sh, palm, 5.6 * u, 6 * u, 1);
+        tube(A, [sh, el, palm], [2.6 * u, 1.8 * u], furD, { fur: 3 });
+        blob(A, [[palm[0] + 0.6 * u, palm[1] - 0.4 * u, 2.4 * u, 1.6 * u]], flesh.map((c) => dark(c, 0.8)));
+        for (let k = 0; k < 4; k++) { const r0 = [palm[0] + 2 * u, palm[1] - 1.2 * u + k * 0.8 * u]; horn(A, r0, [r0[0] + 1.8 * u, r0[1] - 0.2 * u], [r0[0] + 3 * u, r0[1] + 1.2 * u], 0.9 * u, claw.map((c) => dark(c, 0.8))); }
+        put(L, A, true);
+      };
+      farArm();
+      const Bd = layer(F);
+      blob(Bd, [[...U(3.4, -11 - rear * 0.5), 6.2 * u, 5.8 * u], [...U(7.6, -14.6 - rear * 0.8), 4.6 * u, 4.6 * u]], fur, { fur: 5 });
+      // velvet sheen: a soft lit crescent across the shoulders
+      for (let a = 3.6; a < 4.9; a += 0.03) over(Bd, U(3.4, -11 - rear * 0.5)[0] + Math.cos(a) * 4.8 * u, U(3.4, -11 - rear * 0.5)[1] + Math.sin(a) * 4.4 * u, fur[4]);
+      put(L, Bd, true);
+      // head: wedge-shaped skull, a tiny squinting eye, the incisors
+      const Hd = layer(F);
+      blob(Hd, [[hx, hy, 4.6 * u, 3.8 * u], [hx + 2.6 * u, hy + 0.6 * u, 3 * u, 2.6 * u]], fur, { fur: 9 });
+      const jaw = strike ? 1.6 * u : wind ? 1 * u : 0;
+      Hd.ellipse(hx + 3 * u, hy + 3 * u + jaw * 0.3, 2.2 * u, 0.6 * u + jaw * 0.6, MAW_D);
+      for (const dx of [2.6, 3.6]) Hd.rect(R(hx + dx * u), R(hy + 2.4 * u), Math.max(2, R(0.9 * u)), R(1.6 * u + jaw * 0.4), dx > 3 ? claw[2] : claw[3]);
+      put(L, Hd, true);
+      // the star-nose: a corona of fleshy fingers around a spiralled drill
+      const nb = [hx + 5.4 * u, hy + 0.2 * u], spin = (idle || run ? P.i : 0) * 0.25 + (wind ? 0.5 : 0);
+      const Ns = layer(F);
+      for (let k = 0; k < 11; k++) {
+        const a = -1.75 + (k / 10) * 3.5, wr = sin(t * 2 + k * 0.37) * (hurt ? 0.5 : 0.18), l = (2.4 + (k % 2) * 0.7) * u * (hurt ? 1.25 : 1);
+        horn(Ns, nb, [nb[0] + Math.cos(a + wr) * l * 0.6, nb[1] + Math.sin(a + wr) * l * 0.6], [nb[0] + Math.cos(a + wr * 2) * l, nb[1] + Math.sin(a + wr * 2) * l], 1.1 * u, flesh, { pow: 0.4 });
+      }
+      put(L, Ns, true);
+      const Dr = layer(F), dl = (strike ? 8.4 : 6.4) * u, dw = 2.2 * u;
+      Dr.poly([[nb[0], nb[1] - dw], [nb[0] + dl, nb[1]], [nb[0], nb[1] + dw]], flesh[3]);
+      for (let k = 0; k < 6; k++) {
+        const f = ((k + spin * 2) % 6) / 6, x0 = nb[0] + f * dl * 0.92;
+        const hw = dw * (1 - f);
+        Dr.line(x0, nb[1] - hw, x0 + 1.4 * u * (1 - f), nb[1] + hw, flesh[1]);
+        Dr.line(x0 + 1, nb[1] - hw, x0 + 1 + 1.4 * u * (1 - f), nb[1] + hw * 0.2, flesh[4]);
+      }
+      put(L, Dr, true);
+      // near arm: a shovel hand with long cream claws
+      const A = layer(F), sh = U(5, -9.6 - rear * 0.6);
+      const palm = wind ? U(11, -25) : strike ? U(20.4, -2.6) : hurt ? U(8, -4) : U(9.4 + (run ? -sin(t * 2) * 1.6 : 0), -1.6 - (run ? Math.max(0, -sin(t * 2)) * 1.6 : 0));
+      const el = ik(sh, palm, 5.6 * u, 6 * u, 1);
+      tube(A, [sh, el, palm], [2.9 * u, 2 * u], fur, { fur: 4 });
+      blob(A, [[palm[0] + 0.6 * u, palm[1] - 0.4 * u, 2.6 * u, 1.8 * u]], flesh);
+      for (let k = 0; k < 4; k++) { const r0 = [palm[0] + 2.2 * u, palm[1] - 1.3 * u + k * 0.85 * u]; horn(A, r0, [r0[0] + 2 * u, r0[1] - 0.2 * u], [r0[0] + 3.4 * u, r0[1] + 1.3 * u], 1 * u, claw); }
+      put(L, A, true);
+      put(F.p, L, false);
+      // the squint: nearly blind, a slit of dim gold
+      const ex = hx + 1.6 * u, ey = hy - 1 * u;
+      if (hurt) F.p.line(ex - 0.6 * u, ey - 0.4 * u, ex + 1 * u, ey + 0.4 * u, fur[4]);
+      else { eyeGlow(F, ex - 0.4 * u, ey, Math.max(2, R(1.2 * u)), Math.max(1, R(0.5 * u)), wind || strike ? '#f8b848' : '#c99a3a'); F.p.line(ex - 1 * u, ey - 0.8 * u, ex + 1.2 * u, ey - 0.3 * u, fur[0]); }
+      // the lanterns' glass: warm light, the weak points (they gutter when it is hurt)
+      lamps.forEach((lc, k) => {
+        const flick = hurt ? 0 : (idle ? P.i + k : 0) % 3 === 0 ? 1 : 0;
+        glow(F, lc[0], lc[1] + 0.4 * u, 0.85 * u, hurt ? '#c2401c' : '#f8b848', { core: flick ? '#fff4dc' : '#fff0b0', halo: !hurt });
+      });
+      F.mouth = [nb[0] + dl, nb[1]];
     },
   },
 };

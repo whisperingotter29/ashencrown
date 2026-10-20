@@ -1,7 +1,7 @@
 // Hand-built monster designs: the Maw and the Hollow Deep. See kit.js for the design format and
 // docs/BESTIARY.md for the concepts. These live on dark plum / violet cave floors, so every body
 // sits a clear step brighter than the ground and carries one glow (aether, lantern gold, ember, teal).
-import { C, R, ramp, pal5, layer, bez, cyl, underside, put, blob, tube, horn, slab, facet, shard, ik, stride, sin, cos, lerp, clamp, glow, flame, eyeGlow, eyeBead, teeth, maw, spots, stripes, crack, over, rimLight, tint, light, dark, mixc, hash2, srand, WHITE, VOID, BONE, BONE_D, MAW_D, PAL } from './kit.js';
+import { C, R, ramp, pal5, layer, bez, cyl, underside, rune, drape, put, blob, tube, horn, slab, facet, shard, ik, stride, sin, cos, lerp, clamp, glow, flame, eyeGlow, eyeBead, teeth, maw, spots, stripes, crack, over, rimLight, tint, light, dark, mixc, hash2, srand, WHITE, VOID, BONE, BONE_D, MAW_D, PAL } from './kit.js';
 
 // ------------------------------------------------------------------ local helpers
 const TAU = Math.PI * 2;
@@ -71,6 +71,26 @@ function lantern(F, x, y, k, t, dim = false, rampG = null) {
   return [x, top + h * 0.5];
 }
 
+// brick coursing over a layer: mortar lines (dark) and a lit top edge on every brick, only over
+// opaque pixels; rows of bh px, bricks bw px wide, staggered every other row
+function bricks(L, x0, y0, x1, y1, bw, bh, mortar, hi, seed = 1) {
+  const mc = C(mortar), hc = C(hi);
+  x0 = Math.floor(x0); y0 = Math.floor(y0); bw = Math.round(bw); bh = Math.round(bh);
+  for (let y = y0; y <= y1; y++) for (let x = x0; x <= x1; x++) {
+    if (L.a(x, y) < 100) continue;
+    const ry = Math.floor((y - y0) / bh), ly = (y - y0) - ry * bh, off = (ry & 1) * Math.floor(bw / 2) + Math.floor(hash2(ry, 0, seed) * 2);
+    const lx = ((x - x0 + off) % bw + bw) % bw;
+    if (ly === Math.floor(bh) - 1 || lx === 0) L.set(x, y, mc);
+    else if (ly === 0 && lx > 1) L.set(x, y, hc);
+  }
+  return L;
+}
+// a smoke puff: a small lumpy cloud
+function puff(L, x, y, r, Rm) { blob(L, [[x, y, r, r * 0.8], [x - r * 0.7, y + r * 0.3, r * 0.6, r * 0.5], [x + r * 0.6, y + r * 0.2, r * 0.65, r * 0.55]], Rm, { matte: true }); return L; }
+
+// a broken dashed pattern for sound rings / fading magic
+const bayerLike = (x, y, k) => ((R(x) + R(y) * 3 + k) % 4) !== 0;
+
 // enemy id -> { design, name, body? }: folded into src/data/enemies.js at integration
 export const assign = {
   void_wretch: { design: 'star_wretch', name: 'Star-Eaten Wretch' },
@@ -78,6 +98,11 @@ export const assign = {
   void_eye: { design: 'ophan', name: 'Ophan' },
   deep_crawler: { design: 'cart_crawler', name: 'Cart Crawler' },
   lantern_lurker: { design: 'lantern_toad', name: 'Lantern Lurker' },
+  stone_golem: { design: 'kiln_golem', name: 'Kiln Golem' },
+  cave_troll: { design: 'olm_troll', name: 'Blind Cave Troll' },
+  hollow_priest: { design: 'bell_priest', name: 'Bell Priest' },
+  magma_golem: { design: 'crucible_golem', name: 'Crucible Golem' },
+  rift_spawn: { design: 'rift_spawn', name: 'Rift Spawn' },
 };
 
 export default {
@@ -537,7 +562,7 @@ export default {
       hind(true);
       // body: a low wide sack, the head merged into it, a pale belly
       const B = layer(F);
-      blob(B, [[bx - 1.5 * u, by, 7.4 * u * squash, 4.6 * u / squash], [bx + 3.6 * u, by - 0.8 * u, 5.2 * u, 4 * u / squash]], T, { tex: 6 });
+      blob(B, [[bx - 1.5 * u, by, 7.4 * u * squash, 4.6 * u / squash], [bx + 3.8 * u, by - 1 * u, 5.6 * u, 4.2 * u / squash], [bx + 7.6 * u, by - 0.4 * u, 2.4 * u, 2.3 * u]], T, { tex: 6 });
       underside(B, [BEL[3], BEL[3], BEL[2], BEL[4]], bx - 6 * u, bx + 8 * u);
       // warts: lighter clusters on the back, a couple of glowing ones near the brow
       spots(B, bx - 2 * u, by - 2.6 * u, 6 * u, 1.6 * u, 9, 0.6 * u, WART, 12);
@@ -546,7 +571,7 @@ export default {
       // throat sac: a pale balloon that pulses under the jaw
       const sac = idle ? 0.7 + (sin(t) * 0.5 + 0.5) * 0.9 : a1 ? 1.5 : 0.6;
       const Sa = layer(F);
-      blob(Sa, [[bx + 5.4 * u, by + 2.6 * u, 2.4 * u * sac, 1.6 * u * sac]], BEL);
+      blob(Sa, [[bx + 6 * u, by + 2.6 * u + 0.4 * u * sac, 2.4 * u * sac, 1.5 * u * sac]], BEL);
       put(L, Sa, true);
       // front arm: a stubby splayed hand
       const Fa = layer(F), sh = [bx + 3.4 * u, by + 2 * u], hand = [bx + 5 * u + (a2 ? 1 * u : 0), oy - 0.5 * u];
@@ -555,7 +580,7 @@ export default {
       put(L, Fa, true);
       hind(false);
       // the mouth: a long downturned lip line, gaping into a maw on the strike
-      const mx0 = bx + 0.6 * u, mx1 = bx + 8.6 * u, my = by + 0.8 * u;
+      const mx0 = bx + 1.2 * u, mx1 = bx + 9.9 * u, my = by - 0.2 * u;
       if (a2 || a1) {
         const gape = a2 ? 3.2 * u : 1.2 * u;
         const M = layer(F);
@@ -599,6 +624,577 @@ export default {
         put(F.p, tg, true);
       }
       F.mouth = [mx1, my];
+    },
+  },
+  // Kiln Golem (stone_golem): the dwarves' answer to the clay golem of legend: instead of a holy word
+  // on the brow, a fire in the belly. A walking brick furnace on stumpy pillar legs, the firebox door
+  // its grated mouth, a chimney stack for a head with two vent-slit eyes, and one arm forged into a
+  // pickaxe. It puffs smoke as it idles and belches a black cloud when it swings.
+  kiln_golem: {
+    view: 'side', box: [30, 28], pivot: 0.45, idleFps: 3, scale: 0.78,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const S = pal5('stone', 5), Sd = S.map((c) => dark(c, 0.8)), BR = ramp('#a07a72'), IR = pal5('steel', 4), PK = pal5('steel', 6), SM = ramp('#5e5468');
+      const t = P.t, run = P.act === 'run', idle = P.act === 'idle', a1 = P.atk === 1, a2 = P.atk === 2, hurt = P.hurt;
+      const step = run ? sin(t) : 0, bob = run ? Math.abs(sin(t)) * -0.6 * u : idle ? sin(t) * 0.2 * u : 0;
+      const lean = a1 ? -0.8 * u : a2 ? 1.4 * u : hurt ? -1 * u : 0;
+      const bx = ox + lean, hipY = oy - 6 * u + bob, topY = oy - 17.5 * u + bob;
+      const heat = a1 ? 1 : a2 ? 1.3 : hurt ? 0.3 : 0.7 + sin(t * 2) * 0.1;
+      const L = layer(F);
+      // legs: short pillars of stacked stone with iron-shod feet
+      const leg = (far, ph) => {
+        const Lg = layer(F), Rl = far ? Sd : S;
+        const hip = [bx + (far ? 1.6 : -1.4) * u, hipY];
+        const [dx, lift] = run ? stride(ph, 4 * u, 1.4 * u) : [a2 && !far ? 1.2 * u : 0, 0];
+        const foot = [hip[0] + dx, oy - lift - 1 * u];
+        tube(Lg, [hip, foot], [2 * u, 1.7 * u], Rl, { tex: 9 });
+        slab(Lg, [[foot[0] - 2.2 * u, foot[1] - 0.4 * u], [foot[0] + 2.8 * u, foot[1] - 0.4 * u], [foot[0] + 3 * u, foot[1] + 1 * u], [foot[0] - 2.2 * u, foot[1] + 1 * u]], far ? IR.map((c) => dark(c, 0.8)) : IR);
+        put(L, Lg, !far);
+      };
+      // far arm: a stone mitt
+      const shY = topY + 3.6 * u;
+      const farArm = () => {
+        const Lg = layer(F), sh = [bx + 3 * u, shY];
+        const hand = a1 ? [sh[0] - 3 * u, sh[1] - 4 * u] : a2 ? [sh[0] + 4 * u, sh[1] + 5 * u] : [sh[0] + 1 * u + step * 1.5 * u, sh[1] + 7.5 * u];
+        const el = ik(sh, hand, 4 * u, 4 * u, -1);
+        tube(Lg, [sh, el, hand], [1.8 * u, 1.5 * u], Sd, { tex: 5 });
+        blob(Lg, [[hand[0], hand[1], 1.9 * u, 1.7 * u]], Sd);
+        put(L, Lg, false);
+      };
+      farArm();
+      leg(true, t + 0.5);
+      // the kiln body: a squat beehive of brick on a stone plinth
+      const K = layer(F), kw = 6.6 * u;
+      const body = [[bx - kw, hipY + 0.6 * u], [bx + kw, hipY + 0.6 * u], [bx + kw, topY + 4 * u]];
+      for (let k = 0; k <= 12; k++) { const a = k / 12 * Math.PI; body.push([bx + Math.cos(a) * kw, topY + 4 * u - Math.sin(a) * 4 * u]); }
+      body.push([bx - kw, topY + 4 * u]);
+      slab(K, body, BR, { wide: true });
+      // round-shade the dome: darker toward the back-bottom, lit top-left
+      for (let y = 0; y < K.h; y++) for (let x = 0; x < K.w; x++) if (K.a(x, y)) { const nx = (x - bx) / kw, ny = (y - (topY + 6 * u)) / (8 * u); if (nx > 0.62 || ny > 0.75) over(K, x, y, BR[2]); else if (nx < -0.55 && ny < 0.1) over(K, x, y, BR[4]); }
+      bricks(K, bx - kw, topY - 1 * u, bx + kw, hipY, Math.max(5, R(3.6 * u)), Math.max(3, R(2 * u)), BR[1], BR[4], 3);
+      // stone plinth band at the base
+      slab(K, [[bx - kw - 0.4 * u, hipY - 1 * u], [bx + kw + 0.4 * u, hipY - 1 * u], [bx + kw + 0.2 * u, hipY + 1 * u], [bx - kw - 0.2 * u, hipY + 1 * u]], S);
+      put(L, K, true);
+      // the firebox door: an iron frame and a grate of bars across the glow (its mouth)
+      const dx0 = bx - 3.2 * u, dy0 = hipY - 6.6 * u, dw = 5.4 * u, dh = 4.8 * u;
+      const D = layer(F);
+      slab(D, [[dx0, dy0], [dx0 + dw, dy0 - 0.4 * u], [dx0 + dw, dy0 + dh], [dx0, dy0 + dh]], IR, { wide: true });
+      put(L, D, true);
+      leg(false, t);
+      // chimney head: a brick stack leaning with the body, a cap, and two vent-slit eyes
+      const tilt = hurt ? -1.2 * u : a1 ? -0.6 * u : a2 ? 1 * u : 0;
+      const cx0 = bx + 0.2 * u, cTop = topY - 6.8 * u;
+      const Ch = layer(F);
+      slab(Ch, [[cx0 - 2 * u, topY + 0.4 * u], [cx0 + 2.4 * u, topY + 0.4 * u], [cx0 + 2.2 * u + tilt, cTop], [cx0 - 1.8 * u + tilt, cTop]], BR, { wide: true });
+      bricks(Ch, cx0 - 2.4 * u, cTop, cx0 + 3.6 * u, topY, Math.max(5, R(2.8 * u)), Math.max(3, R(1.8 * u)), BR[1], BR[4], 5);
+      slab(Ch, [[cx0 - 2.6 * u + tilt, cTop + 0.2 * u], [cx0 + 3 * u + tilt, cTop + 0.2 * u], [cx0 + 2.6 * u + tilt, cTop - 1.4 * u], [cx0 - 2.2 * u + tilt, cTop - 1.4 * u]], S);
+      // an iron brow band across the face of the stack
+      slab(Ch, [[cx0 - 2.1 * u + tilt * 0.7, cTop + 2.4 * u], [cx0 + 2.5 * u + tilt * 0.7, cTop + 1.6 * u], [cx0 + 2.5 * u + tilt * 0.7, cTop + 2.6 * u], [cx0 - 2.1 * u + tilt * 0.7, cTop + 3.4 * u]], IR);
+      put(L, Ch, true);
+      // near arm: stacked stones ending in a pickaxe head fused at the wrist
+      const Ar = layer(F), sh = [bx + 4.8 * u, shY];
+      let hand;
+      if (a1) hand = [sh[0] - 3.4 * u, sh[1] - 6.6 * u];
+      else if (a2) hand = [sh[0] + 7 * u, sh[1] + 5 * u];
+      else if (hurt) hand = [sh[0] - 0.4 * u, sh[1] + 6.6 * u];
+      else hand = [sh[0] + 1.6 * u - step * 1.6 * u, sh[1] + 7 * u];
+      const el = ik(sh, hand, 4.4 * u, 4.4 * u, a1 ? -1 : 1);
+      blob(Ar, [[sh[0], sh[1], 2.6 * u, 2.4 * u]], S, { tex: 5 });
+      tube(Ar, [sh, el], [2 * u, 1.7 * u], S, { tex: 5 });
+      tube(Ar, [el, hand], [1.7 * u, 1.5 * u], S, { tex: 5 });
+      // the pick: an iron crescent across the end of the forearm
+      const fa = Math.atan2(hand[1] - el[1], hand[0] - el[0]), sg = a1 ? -1 : 1, px2 = Math.cos(fa - sg * Math.PI / 2), py2 = Math.sin(fa - sg * Math.PI / 2);
+      const head = [hand[0] + Math.cos(fa) * 1.2 * u, hand[1] + Math.sin(fa) * 1.2 * u];
+      const pl = 5.2 * u, back = 2.6 * u, curve = 1.6 * u;
+      const tipA = [head[0] + px2 * pl + Math.cos(fa) * curve, head[1] + py2 * pl + Math.sin(fa) * curve];
+      const tipB = [head[0] - px2 * back + Math.cos(fa) * curve * 0.6, head[1] - py2 * back + Math.sin(fa) * curve * 0.6];
+      horn(Ar, head, [head[0] + px2 * pl * 0.5 - Math.cos(fa) * 0.2 * u, head[1] + py2 * pl * 0.5 - Math.sin(fa) * 0.2 * u], tipA, 2.4 * u, PK);
+      horn(Ar, head, [head[0] - px2 * back * 0.5, head[1] - py2 * back * 0.5], tipB, 2.2 * u, PK);
+      blob(Ar, [[head[0], head[1], 1.3 * u, 1.3 * u]], IR);
+      put(L, Ar, true);
+      // smoke: puffs rising from the chimney (a black belch on the swing)
+      const Sm = layer(F);
+      const n = a2 ? 3 : 2;
+      for (let k = 0; k < n; k++) {
+        const f = ((idle || run ? t : 0) + k / n) % 1, big = a2 ? 1.5 : a1 ? 1.2 : 1;
+        puff(Sm, cx0 + tilt + (f * 3 - 1) * u - (run ? f * 3 * u : 0), cTop - 2.6 * u - f * 6 * u, (1 + f * 1.2) * u * big, a2 ? ramp('#3e3448') : SM);
+      }
+      put(F.p, Sm, false);
+      put(F.p, L, false);
+      // fire: the grate glows between the bars; the vents in the stack are its eyes; a rune plate
+      const gx0 = R(dx0 + 0.8 * u), gy0 = R(dy0 + 0.8 * u), gw = R(dw - 1.6 * u), gh = R(dh - 1.6 * u);
+      const fireC = hurt ? ['#7a1e14', '#c2401c'] : heat > 1 ? ['#f8b848', '#fff0b0'] : ['#c2401c', '#ec7a2a'];
+      for (let y = gy0; y < gy0 + gh; y++) for (let x = gx0; x < gx0 + gw; x++) { const c = y > gy0 + gh * 0.55 ? fireC[1] : fireC[0]; F.p.set(x, y, C(c)); F.e.set(x, y, C(c)); }
+      for (let x = gx0 + 1; x < gx0 + gw; x += Math.max(2, R(1.2 * u))) F.p.line(x, gy0, x, gy0 + gh - 1, IR[0]);   // grate bars: teeth
+      if (a2 || a1) flame(F, dx0 + dw * 0.5, gy0, 2 * u * heat, 2 * u, t + 0.3);
+      const ey = cTop + 3.8 * u;
+      for (const exx of [cx0 - 0.6 * u + tilt * 0.6, cx0 + 1.4 * u + tilt * 0.6]) {
+        if (hurt) F.p.line(exx - 1, ey, exx + 1, ey, C('#7a1e14'));
+        else eyeGlow(F, exx - 0.6 * u, ey - 0.3 * u, Math.max(2, R(1.2 * u)), Math.max(1, R((a1 || a2 ? 0.8 : 0.5) * u)), fireC[1]);
+      }
+      // dwarven rune plate above the door
+      const rx = R(dx0 + dw * 0.3), ry = R(dy0 - 2.2 * u);
+      F.p.rect(rx - 1, ry - 1, R(1.6 * u) + 2, R(1.6 * u) + 2, C('#9a6424'));
+      { const rc = heat > 0.9 ? '#f8b848' : '#ec7a2a', n = Math.max(2, R(1.6 * u)), h2 = n >> 1;   // an othala-like rune: a diamond on two legs
+        for (const [a2x, a2y, b2x, b2y] of [[h2, 0, 0, h2], [h2, 0, n, h2], [0, h2, n, n], [n, h2, 0, n]]) { F.p.line(rx + a2x, ry + a2y, rx + b2x, ry + b2y, C(rc)); F.e.line(rx + a2x, ry + a2y, rx + b2x, ry + b2y, C(rc)); } }
+      // the slam: sparks off the pick tip
+      if (a2) for (let k = 0; k < 5; k++) { const a = -2.6 + k * 0.45; lit(F, tipA[0] + Math.cos(a) * 2.4 * u, tipA[1] + Math.sin(a) * 1.8 * u, k % 2 ? '#f8b848' : '#fff0b0'); }
+      if (hurt) crack(F.p, bx - 2 * u, topY + 2 * u, 1.1, 6 * u, BR[0], 4);
+    },
+  },
+  // Blind Cave Troll (cave_troll): a mountain troll that never saw the sun, crossed with the olm, the
+  // pale blind "human fish" of the karst caves. Pallid, eyeless, it smells its way with flaring pink
+  // gill-plumes on a tiny head. A slab of cave ceiling has grown onto its hunched back and a colony of
+  // glow-worms lives under it, dangling beaded threads of light. It clubs with a broken stalagmite.
+  olm_troll: {
+    view: 'side', box: [32, 26], pivot: 0.48, idleFps: 3, scale: 0.84,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const SK = ramp('#cbb8c0'), SKd = SK.map((c) => dark(c, 0.8)), RK = pal5('stone', 4), MO = pal5('moss', 5), GI = pal5('rose', 4), HD = pal5('wood', 5);
+      const t = P.t, run = P.act === 'run', idle = P.act === 'idle', a1 = P.atk === 1, a2 = P.atk === 2, hurt = P.hurt;
+      const bob = run ? Math.abs(sin(t)) * -0.8 * u : idle ? sin(t) * 0.35 * u : 0;
+      const lean = a1 ? -1.4 * u : a2 ? 2 * u : hurt ? -1.4 * u : 0;
+      const bx = ox + lean, hipY = oy - 7.2 * u + bob;
+      const sh = [bx + 2.2 * u, oy - 14.6 * u + bob + (a2 ? 1.6 * u : 0)];       // the near shoulder, high and huge
+      const L = layer(F);
+      // legs: short, bowed, splayed toes
+      const leg = (far, ph) => {
+        const Lg = layer(F), Rl = far ? SKd : SK;
+        const hip = [bx - (far ? 0 : 2) * u, hipY];
+        const [dx, lift] = run ? stride(ph, 5 * u, 1.8 * u) : [a2 && !far ? 1.5 * u : 0, 0];
+        const foot = [hip[0] + 0.6 * u + dx, oy - lift - 0.8 * u];
+        const knee = ik(hip, foot, 3.8 * u, 3.8 * u, -1);
+        tube(Lg, [hip, knee], [2.4 * u, 1.8 * u], Rl);
+        tube(Lg, [knee, foot], [1.7 * u, 1.3 * u], Rl);
+        blob(Lg, [[foot[0] + 1 * u, foot[1] + 0.1 * u, 2.2 * u, 1 * u]], Rl);
+        put(L, Lg, !far);
+      };
+      // arms: enormous, knuckles to the ground; far one bare
+      const arm = (far) => {
+        const Lg = layer(F), Rl = far ? SKd : SK;
+        const s0 = far ? [sh[0] + 1.6 * u, sh[1] + 0.6 * u] : sh;
+        let hand;
+        if (far) hand = a1 ? [s0[0] - 2 * u, s0[1] - 6 * u] : a2 ? [s0[0] + 7 * u, s0[1] + 5 * u] : [s0[0] + 3 * u + (run ? sin(t + 0.5) * 2 * u : 0), oy - 1.4 * u];
+        else if (a1) hand = [s0[0] - 3 * u, s0[1] - 7 * u];
+        else if (a2) hand = [s0[0] + 7.5 * u, s0[1] + 6 * u];
+        else if (hurt) hand = [s0[0] + 1.6 * u, s0[1] + 6 * u];
+        else hand = [s0[0] + 2.6 * u + (run ? sin(t) * 1.2 * u : 0), s0[1] + 6.4 * u + (idle ? sin(t) * 0.3 * u : 0)];
+        const el = ik(s0, hand, 6 * u, 6.2 * u, far ? -1 : a1 ? 1 : 1);
+        tube(Lg, [s0, el], [2.6 * u, 1.9 * u], Rl, { tex: 3 });
+        tube(Lg, [el, hand], (q) => (2 + Math.sin(q * Math.PI) * 1.1) * u, Rl, { tex: 3 });   // the forearm swells
+        blob(Lg, [[hand[0], hand[1], 2.5 * u, 2.2 * u]], Rl);                     // a huge mitt
+        for (let k = 0; k < 3; k++) Lg.set(R(hand[0] + (k - 1) * 0.9 * u + 0.6 * u), R(hand[1] + 1.6 * u), Rl[1]);
+        put(L, Lg, !far);
+        return [el, hand];
+      };
+      arm(true);
+      leg(true, t + 0.5);
+      // body: a pear-shaped hulk, belly sagging, the hump high
+      const B = layer(F);
+      blob(B, [[bx - 2 * u, hipY - 2 * u, 5 * u, 4.4 * u], [bx - 0.6 * u, sh[1] + 2.4 * u, 5.8 * u, 4.6 * u], [bx + 2.6 * u, hipY - 1.4 * u, 3.4 * u, 3.4 * u]], SK, { tex: 8 });
+      spots(B, bx, hipY - 4 * u, 5 * u, 4 * u, 6, 0.6 * u, SK[2], 31);     // mottling, like an olm's
+      put(L, B, true);
+      // the cave-ceiling crust on the back: a shelf of rock with moss on top
+      const Rk = layer(F), cy0 = sh[1] - 2.2 * u;
+      const crust = [[bx - 7.4 * u, cy0 + 4.6 * u], [bx - 6.6 * u, cy0 + 0.6 * u], [bx - 3.6 * u, cy0 - 1.8 * u], [bx - 0.2 * u, cy0 - 2.6 * u], [bx + 2.6 * u, cy0 - 1.6 * u], [bx + 3.2 * u, cy0], [bx + 0.4 * u, cy0 + 0.4 * u], [bx - 3.6 * u, cy0 + 1.6 * u], [bx - 6 * u, cy0 + 4.8 * u]];
+      slab(Rk, crust, RK, { wide: true });
+      spots(Rk, bx - 2 * u, cy0 - 1.2 * u, 4.4 * u, 1 * u, 7, 0.9 * u, MO[3], 4);
+      spots(Rk, bx - 2 * u, cy0 - 1.8 * u, 3.6 * u, 0.6 * u, 4, 0.6 * u, MO[4], 5);
+      put(L, Rk, true);
+      leg(false, t);
+      // a ragged hide wrap round the hips, belted with rope
+      drape(L, bx - 0.6 * u, hipY - 2.6 * u, 10 * u, 10.6 * u, 3.8 * u, HD, { ragged: true, seed: 5, wave: 0.6 * u, phase: t, folds: 2 });
+      L.line(bx - 5.2 * u, hipY - 2.4 * u, bx + 4.6 * u, hipY - 2.8 * u, C('#b07e52'));
+      // near arm with the stalagmite club: held by its thin end, the heavy base swinging
+      const [el, hand] = arm(false);
+      // the tiny head, low and forward on the chest: no eyes, a wide underbite, two stub tusks
+      const hx = sh[0] + 4.6 * u + (a2 ? 1 * u : 0), hy = sh[1] + 0.6 * u + (a1 ? -0.8 * u : 0) + (idle ? sin(t + 0.25) * 0.4 * u : 0);
+      const H = layer(F);
+      // gill plumes: three frilly pink fronds each side, fluttering
+      const flut = idle ? sin(t * 2) * 0.5 : run ? sin(t * 2) * 0.7 : a1 ? -0.8 : hurt ? 0.9 : 0.2;
+      const gills = (far) => {
+        const G2 = layer(F), Rg = far ? GI.map((c) => dark(c, 0.8)) : GI;
+        for (let k = 0; k < 3; k++) {
+          const root = [hx - 1.6 * u + (far ? 0.6 * u : 0), hy - 0.2 * u + k * 0.7 * u];
+          const a = -2.1 - k * 0.45 + flut * 0.25 + (far ? 0.3 : 0), l = (2.8 - k * 0.3) * u;
+          const tip = [root[0] + Math.cos(a) * l, root[1] + Math.sin(a) * l];
+          tube(G2, [root, [lerp(root[0], tip[0], 0.5) - 0.3 * u, lerp(root[1], tip[1], 0.5) - 0.3 * u], tip], [0.6 * u, 0.35 * u], Rg);
+          for (let f = 0.35; f < 1; f += 0.22) { const fx = lerp(root[0], tip[0], f), fy = lerp(root[1], tip[1], f); G2.set(R(fx + Math.cos(a + 1.6) * 0.8 * u), R(fy + Math.sin(a + 1.6) * 0.8 * u), Rg[4]); G2.set(R(fx + Math.cos(a - 1.6) * 0.8 * u), R(fy + Math.sin(a - 1.6) * 0.8 * u), Rg[2]); }
+        }
+        put(H, G2, !far);
+      };
+      gills(true);
+      blob(H, [[hx, hy, 2.3 * u, 2 * u], [hx + 1.7 * u, hy + 0.5 * u, 1.5 * u, 1.3 * u]], SK);
+      // blind: a heavy frowning brow fold sealed over smooth skin where the eyes should be
+      for (let k = 0; k < R(2.2 * u); k++) { H.set(R(hx - 0.2 * u) + k, R(hy - 0.9 * u + k * 0.25), SK[1]); H.set(R(hx - 0.2 * u) + k, R(hy - 1.5 * u + k * 0.25), SK[4]); }
+      over(H, hx + 0.9 * u, hy - 0.1 * u, SK[2]);
+      // nostrils, big, sniffing
+      over(H, hx + 2.6 * u, hy - 0.1 * u, SK[0]); over(H, hx + 2.6 * u, hy + 0.3 * u, SK[1]);
+      // mouth: an underbite with two tusks; it bellows on the swing and on the hurt frame
+      const open = a2 || hurt ? 1.2 * u : 0;
+      facet(H, [[hx - 0.2 * u, hy + 1 * u], [hx + 2.8 * u, hy + 1.2 * u], [hx + 2.6 * u, hy + 1.6 * u + open], [hx, hy + 1.4 * u + open * 0.5]], MAW_D);
+      horn(H, [hx + 2.2 * u, hy + 1.8 * u + open], [hx + 2.4 * u, hy + 1 * u + open], [hx + 2.1 * u, hy + 0.2 * u + open * 0.5], 0.8 * u, ramp(BONE));
+      horn(H, [hx + 0.8 * u, hy + 1.7 * u + open], [hx + 0.9 * u, hy + 1.1 * u + open], [hx + 0.7 * u, hy + 0.5 * u + open * 0.5], 0.7 * u, ramp(BONE_D));
+      gills(false);
+      put(L, H, true);
+      put(F.p, L, false);
+      const Cl = layer(F);
+      const ca = a1 ? -2.2 : a2 ? 0.55 : hurt ? 1.4 : 1.25 + (run ? sin(t) * 0.2 : idle ? sin(t) * 0.05 : 0);
+      const cl = 9.5 * u, base = [hand[0] + Math.cos(ca) * cl, hand[1] + Math.sin(ca) * cl];
+      const LS = ramp('#a8805a');   // limestone: warm tan with darker drip rings
+      tube(Cl, [hand, base], (q) => lerp(0.9, 2.6, q) * u, LS, { rings: Math.max(3, R(1.8 * u)) });
+      blob(Cl, [[base[0], base[1], 2.7 * u, 2.3 * u]], LS, { tex: 2 });
+      over(Cl, base[0] - 1 * u, base[1] - 1.2 * u, '#efdab4'); over(Cl, base[0] - 0.6 * u, base[1] - 1.2 * u, '#efdab4');
+      put(F.p, Cl, true);
+      // redraw the fist over the club's handle
+      const Fi = layer(F); blob(Fi, [[hand[0], hand[1], 2.3 * u, 2 * u]], SK); for (let k = 0; k < 3; k++) Fi.set(R(hand[0] + 1.4 * u), R(hand[1] + (k - 1) * 0.9 * u), SK[1]); put(F.p, Fi, true);
+      // glow-worm threads hanging from under the crust: beaded with light, swaying with the body
+      const sw = idle ? sin(t) * 0.6 * u : run ? -1.2 * u + sin(t * 2) * 0.6 * u : a1 ? 1.2 * u : a2 ? -1.6 * u : hurt ? 1 * u : 0;
+      const threads = [[-7.2, 4.6], [-6.2, 6.8], [-5, 3.6], [-3.8, 2.6]];
+      threads.forEach(([tx, tl], k) => {
+        const x0 = bx + tx * u, y0 = cy0 + (4.6 + (tx + 7.2) * -0.9) * u, len = tl * u;
+        const x1 = x0 + sw * (tl / 5), y1 = y0 + len;
+        F.p.line(x0, y0, x1, y1, C('#4a9488'));
+        for (let f = 0.25; f <= 1.01; f += 0.25) { const gx = lerp(x0, x1, f), gy = lerp(y0, y1, f); lit(F, gx, gy, f > 0.9 ? '#e6f4fc' : '#7cbca8'); if (f > 0.9) lit(F, gx, gy + 1, '#a8d0ec'); }
+        if ((k + Math.floor(t * 4)) % 3 === 0) { lit(F, x1, y1 + 1, '#e6f4fc'); lit(F, x1 + 1, y1, '#a8d0ec'); }
+      });
+      for (let k = 0; k < 4; k++) lit(F, bx + (-5.6 + k * 2.2) * u, cy0 + (3.2 - k * 0.9) * u + 1, (k + Math.floor(t * 4)) % 2 ? '#7cbca8' : '#e6f4fc');
+      // dust kicked up by the club on the strike
+      if (a2) for (let k = 0; k < 5; k++) { const dx = (k - 2) * 1.6 * u; F.p.disc(base[0] + dx, oy - 1 * u - Math.abs(k - 2) * 0.6 * u, 1.1 * u, C('#7b6a74')); }
+    },
+  },
+  // Bell Priest (hollow_priest): church bells were rung to drive the demons off; this one was rung
+  // too long in the drowned chapels of the Quiet Halls and the demon moved in. Its body is a bronze
+  // bell crusted with verdigris, hollow and full of void; a priest's stole hangs over its shoulder,
+  // a cracked choir mask singing one endless "O" sits where the crown loop should be, and its only
+  // leg is the clapper, swinging. When it casts, the bell tolls in rings of violet sound.
+  bell_priest: {
+    view: 'front', box: [26, 30], pivot: 0.5, idleFps: 4, hover: true, scale: 0.84,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const BZ = [C('#3e2418'), C('#5e3a22'), C('#8a5a2c'), C('#ad7a3a'), C('#d4a85a')], VG = pal5('teal', 5), ST = pal5('lavender', 5), CW = pal5('plum', 4), MK = ramp('#e2d4b8'), IRN = pal5('steel', 4);
+      const t = P.t, run = P.act === 'run', idle = P.act === 'idle', a1 = P.atk === 1, a2 = P.atk === 2, hurt = P.hurt;
+      const rockA = idle ? sin(t) * 0.05 : run ? -0.1 + sin(t) * 0.04 : a1 ? -0.08 : a2 ? 0.1 : hurt ? 0.16 : 0;
+      const cx = ox, top = oy - 25 * u + (idle ? sin(t) * 0.4 * u : 0), lipY = top + 15 * u;
+      const piv = [cx, top + 2 * u];
+      const rp = (x, y) => rotP([cx + x * u, top + y * u], piv, rockA);
+      // the clapper: an iron rod and ball hanging out of the bell mouth, swinging as a pendulum
+      const swing = idle ? sin(t) * 0.25 : run ? 0.35 + sin(t * 2) * 0.1 : a1 ? -0.35 : a2 ? 0.5 : hurt ? -0.55 : 0;
+      const c0 = rp(0, 12.5), cl = 8.5 * u, cb = [c0[0] - Math.sin(swing) * cl, c0[1] + Math.cos(swing) * cl];
+      const Cl = layer(F);
+      tube(Cl, [c0, cb], [0.8 * u, 0.6 * u], IRN);
+      blob(Cl, [[cb[0], cb[1], 1.8 * u, 2 * u]], IRN);
+      put(F.p, Cl, false);
+      // the bell's open mouth: an ellipse of void seen from below the lip, faintly lit violet inside
+      const mouthC = rp(0, 15);
+      const M = layer(F);
+      M.ellipse(mouthC[0], mouthC[1], 8.4 * u, 1.9 * u, C('#1a0a2c'));
+      M.ellipse(mouthC[0], mouthC[1] - 0.4 * u, 6.2 * u, 1.1 * u, C('#2f0d48'));
+      put(F.p, M, false);
+      // sleeves: thin dark arms from slits at the shoulder, bony hands; folded in prayer at rest
+      const arm = (sd) => {
+        const A = layer(F), s0 = rp(sd * 3.4, 2.4);
+        let hand;
+        if (a1) hand = rp(sd * 7.5, -1.5);
+        else if (a2) hand = rp(sd * 9.5, 5.5);
+        else if (hurt) hand = rp(sd * 6, 7.5);
+        else hand = rp(sd * 0.8, 4.4 + (idle ? sin(t) * 0.2 : 0));
+        const el = [lerp(s0[0], hand[0], 0.5) + sd * (a1 || a2 ? 1.8 : 0.8) * u, lerp(s0[1], hand[1], 0.5) + (a1 || a2 ? 0.8 : 1) * u];
+        tube(A, [s0, el, hand], [0.8 * u, 0.55 * u], CW);
+        blob(A, [[hand[0], hand[1], 0.8 * u, 0.9 * u]], MK);
+        if (a2) for (let k = -1; k <= 1; k++) A.line(hand[0], hand[1], hand[0] + sd * 1.6 * u, hand[1] + k * 0.8 * u, MK[3]);
+        put(F.p, A, true);
+        return hand;
+      };
+      // the bell: a flared bronze silhouette, ring bands, verdigris crust, a thick lip
+      const B = layer(F);
+      const prof = [[0.4, 2.2], [0.9, 3.8], [1.8, 4.8], [3.2, 5.3], [6, 5.4], [9, 5.8], [11.3, 6.7], [13.2, 8.2], [14.4, 9.2], [15, 9.4]];
+      const pts = prof.map(([y, w]) => rp(-w, y)).concat(prof.slice().reverse().map(([y, w]) => rp(w, y)));
+      B.poly(pts, BZ[3]);
+      // shade as a cylinder: lit band left of centre, shadow at the right edge
+      for (let y = 0; y < B.h; y++) for (let x = 0; x < B.w; x++) {
+        if (!B.a(x, y)) continue;
+        let w = 1; for (let k = 1; k < 40; k++) if (!B.a(x - k, y) || !B.a(x + k, y)) { w = k; break; }
+        let l0 = x - 1, r0 = x + 1; while (B.a(l0, y)) l0--; while (B.a(r0, y)) r0++;
+        const f = (x - l0) / Math.max(1, r0 - l0);
+        B.set(x, y, f < 0.1 ? BZ[2] : f < 0.2 ? BZ[3] : f < 0.32 ? BZ[4] : f < 0.62 ? BZ[3] : f < 0.84 ? BZ[2] : BZ[1]);
+        void w;
+      }
+      // ring bands and the heavy lip
+      for (const yy of [3.4, 4, 13.2]) { const a = rp(-9, yy), b = rp(9, yy); for (let x = Math.floor(Math.min(a[0], b[0])); x <= Math.max(a[0], b[0]); x++) { const y = lerp(a[1], b[1], (x - a[0]) / (b[0] - a[0] || 1)); over(B, x, y, BZ[1]); over(B, x, y + 1, BZ[4]); } }
+      // verdigris crust in clusters, heavier toward the bottom
+      spots(B, cx - 1 * u, top + 11.6 * u, 7 * u, 2.4 * u, 14, 0.9 * u, VG[3], 8);
+      spots(B, cx - 1 * u, top + 12.2 * u, 7 * u, 1.8 * u, 7, 0.6 * u, VG[4], 9);
+      spots(B, cx + 2.5 * u, top + 6 * u, 2.6 * u, 3 * u, 5, 0.7 * u, VG[2], 10);
+      spots(B, cx - 3 * u, top + 2 * u, 2 * u, 1 * u, 3, 0.6 * u, VG[3], 11);
+      // a cast relief band of little bells / crosses round the waist
+      for (let k = -2; k <= 2; k++) { const q = rp(k * 1.9, 8.6); over(B, q[0], q[1], BZ[4]); over(B, q[0], q[1] + 1, BZ[1]); over(B, q[0] - 1, q[1], BZ[4]); over(B, q[0] + 1, q[1], BZ[2]); }
+      put(F.p, B, true);
+      // the stole: two lavender strips over the shoulder, cream trim, a gold sun on each end
+      const S2 = layer(F);
+      for (const sd of [-1, 1]) {
+        const flap = idle ? sin(t + (sd > 0 ? 0.3 : 0)) * 0.3 : run ? -0.6 : 0;
+        const a = rp(sd * 3.2, 1.2), b = rp(sd * 4.6 + flap, 14.2);
+        const w0 = 0.7 * u, w1 = 0.9 * u;
+        slab(S2, [[a[0] - w0, a[1]], [a[0] + w0, a[1]], [b[0] + w1, b[1]], [b[0] - w1, b[1]]], ST);
+        S2.line(b[0] - w1, b[1], b[0] + w1, b[1], C('#f3e1b5'));
+        S2.line(b[0] - w1, b[1] + 1, b[0] + w1, b[1] + 1, C('#f3e1b5'));
+        const sun = rp(sd * 4.5 + flap * 0.8, 12.4);
+        S2.disc(sun[0], sun[1], Math.max(1, 0.6 * u), C('#e8c35a'));
+      }
+      put(F.p, S2, true);
+      const hands = [arm(-1), arm(1)];
+      // the mask: a cracked ivory choir mask on a dark cowl, at the crown of the bell
+      const mc = rp(0, -1.2);
+      const H = layer(F);
+      blob(H, [[mc[0], mc[1] + 0.4 * u, 3.5 * u, 3.7 * u]], CW, {});                  // cowl
+      slab(H, [[mc[0] - 1.2 * u, mc[1] - 3.6 * u], [mc[0] + 1.4 * u, mc[1] - 3.6 * u], [mc[0] + 0.6 * u, mc[1] - 5.2 * u]], CW);
+
+      put(F.p, H, true);
+      const Mk = layer(F);
+      blob(Mk, [[mc[0], mc[1] + 0.4 * u, 2.7 * u, 3.2 * u]], MK);
+      put(F.p, Mk, true);
+      // hollow eyes: dark sockets with gold embers deep inside; the O mouth sings, wider on the toll
+      const eo = 1.1 * u, ey = mc[1] - 0.3 * u;
+      for (const sd of [-1, 1]) {
+        F.p.ellipse(mc[0] + sd * eo, ey, Math.max(1, 0.75 * u), Math.max(1, 0.9 * u), VOID);
+        if (hurt) F.p.line(mc[0] + sd * eo - 1, ey, mc[0] + sd * eo + 1, ey, C('#7a1e14'));
+        else { const ec = a1 || a2 ? '#fff0b0' : '#f8b848'; lit(F, mc[0] + sd * eo, ey, ec); if (u > 1.6) lit(F, mc[0] + sd * eo, ey + 1, ec); }
+      }
+      const mo = a2 ? 1.4 : a1 ? 1.1 : idle ? 0.8 + sin(t) * 0.1 : 0.85;
+      F.p.ellipse(mc[0], mc[1] + 1.9 * u, 0.8 * u * mo, 1.1 * u * mo, VOID);
+      if (a1 || a2) { glow(F, mc[0], mc[1] + 1.9 * u, Math.max(1, 0.6 * u * mo), '#c860f0'); }
+      // the crack across the mask (wider when hurt) and a chip off the brow
+      crack(F.p, mc[0] + 1.6 * u, mc[1] - 2.6 * u, 1.9, hurt ? 6 * u : 3.2 * u, MK[1], 5);
+      F.p.set(R(mc[0] - 2 * u), R(mc[1] - 1.8 * u), ST[1]);
+      // the toll: rings of violet sound spreading from the bell lip on the wind-up and the strike
+      if (a1 || a2) {
+        const rr = a2 ? 3 : 1.6;
+        for (let k = 0; k < (a2 ? 2 : 1); k++) {
+          const rx = (9 + k * rr * 1.6) * u, ry = (2.4 + k * 0.9) * u;
+          for (let aa = 0; aa < TAU; aa += 0.05) {
+            if (Math.sin(aa) < -0.2) continue;
+            const x = mouthC[0] + Math.cos(aa) * rx, y = mouthC[1] + Math.sin(aa) * ry;
+            if (bayerLike(x, y, k)) lit(F, x, y, k ? '#a026ef' : '#c860f0');
+          }
+        }
+      }
+      F.mouth = [mc[0], mc[1] + 1.9 * u];
+      void hands;
+    },
+  },
+  // Crucible Golem (magma_golem): Talos, the bronze guardian whose life was one vein of molten ichor,
+  // reimagined by dwarven smelters: the vein is the whole body. A fired-clay crucible brimming with
+  // molten metal, walking on tall iron stilt legs, a grim face cast into its side and lit from within,
+  // two blacksmith's tongs for arms. It tips itself forward to pour a glowing stream on you.
+  crucible_golem: {
+    view: 'side', box: [30, 24], pivot: 0.45, idleFps: 4, scale: 0.92,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const CL = pal5('clay', 6), IRN = pal5('steel', 4), IRd = IRN.map((c) => dark(c, 0.8)), HOT = PAL.ember.map((c) => C(c));
+      const t = P.t, run = P.act === 'run', idle = P.act === 'idle', a1 = P.atk === 1, a2 = P.atk === 2, hurt = P.hurt;
+      const bob = run ? Math.abs(sin(t)) * -0.7 * u : idle ? sin(t) * 0.25 * u : 0;
+      const tilt = a1 ? -0.32 : a2 ? 0.62 : hurt ? -0.2 : run ? sin(t) * 0.05 : 0;
+      const px0 = ox + (a2 ? 1.2 * u : a1 ? -0.8 * u : 0), base = oy - 9 * u + bob;      // pot base centre
+      const piv = [px0, base];
+      const rp = (x, y) => rotP([px0 + x * u, base + y * u], piv, tilt);
+      const L = layer(F);
+      // stilt legs: long iron rods, reverse knee like a wading bird, three-toed feet
+      const leg = (far, ph) => {
+        const Lg = layer(F), Rl = far ? IRd : IRN;
+        const hip = [px0 + (far ? 1.6 : -1.4) * u, base - 0.6 * u];
+        const [dx, lift] = run ? stride(ph, 5.5 * u, 2 * u) : [0, 0];
+        const foot = [hip[0] + dx + (far ? 1 * u : -0.6 * u), oy - lift - 0.5 * u];
+        const knee = ik(hip, foot, 4.9 * u, 4.9 * u, 1);                         // knee points back
+        tube(Lg, [hip, knee], [0.8 * u, 0.6 * u], Rl);
+        tube(Lg, [knee, foot], [0.6 * u, 0.5 * u], Rl);
+        Lg.disc(knee[0], knee[1], Math.max(1, 0.9 * u), Rl[3]); Lg.set(R(knee[0] - 0.4 * u), R(knee[1] - 0.4 * u), Rl[4]);
+        for (const a of [-0.3, 0.2, 2.9]) tube(Lg, [foot, [foot[0] + Math.cos(a) * 1.8 * u, foot[1] + 0.3 * u]], [0.5 * u, 0.3 * u], Rl);
+        put(L, Lg, !far);
+      };
+      // tong arms: a long jointed rod ending in pincers, held off the pot's shoulder
+      const tong = (far) => {
+        const Lg = layer(F), Rl = far ? IRd : IRN;
+        const sh = rp(far ? 3.4 : 5.2, far ? -6.4 : -4.4);
+        let hand;
+        if (a1) hand = [sh[0] + (far ? 0.5 : 2) * u, sh[1] - 5.5 * u];
+        else if (a2) hand = [sh[0] + (far ? 4 : 6) * u, sh[1] + 4 * u];
+        else if (hurt) hand = [sh[0] - 2 * u, sh[1] + 5 * u];
+        else hand = [sh[0] + (far ? 5.4 : 5) * u + (run ? sin(t + (far ? 0.5 : 0)) * 1.2 * u : 0), sh[1] + (far ? 1.4 : 3.6) * u + (idle ? sin(t + (far ? 0.3 : 0)) * 0.5 * u : 0)];
+        const el = ik(sh, hand, 4 * u, 4.2 * u, 1);
+        tube(Lg, [sh, el, hand], [0.6 * u, 0.45 * u], Rl);
+        Lg.disc(el[0], el[1], Math.max(1, 0.7 * u), Rl[3]);
+        const fa = Math.atan2(hand[1] - el[1], hand[0] - el[0]), open = a1 ? 0.6 : a2 ? 0.15 : 0.32;
+        for (const sg of [-1, 1]) horn(Lg, hand, [hand[0] + Math.cos(fa + sg * open) * 1.6 * u, hand[1] + Math.sin(fa + sg * open) * 1.6 * u], [hand[0] + Math.cos(fa + sg * open * 0.2) * 2.8 * u, hand[1] + Math.sin(fa + sg * open * 0.2) * 2.8 * u], 0.9 * u, Rl);
+        put(L, Lg, !far);
+      };
+      tong(true);
+      leg(true, t + 0.5);
+      // the crucible: a fired-clay tub, wider at the brim, a pouring spout at the front, soot at the foot
+      const Pt = layer(F);
+      const prof = [[0, 3.6], [-1, 4.6], [-3, 5.2], [-6, 5.7], [-9, 6.1], [-9.8, 6.3]];
+      const pts = prof.map(([y, w]) => rp(-w, y)).concat(prof.slice().reverse().map(([y, w]) => rp(w, y)));
+      pts.splice(prof.length + 1, 0, rp(8, -10.4), rp(6.6, -8.8));       // the spout lip, at the front rim
+      slab(Pt, pts, CL, { wide: true });
+      // round shading: a lit band on the left, soot toward the base
+      for (let y = 0; y < Pt.h; y++) for (let x = 0; x < Pt.w; x++) {
+        if (!Pt.a(x, y)) continue;
+        const [lx, ly] = rotP([x, y], piv, -tilt); const fx = (lx - px0) / (6 * u), fy = (ly - base) / u;
+        if (fy > -1.6 && Pt.get(x, y)[0] > 60) over(Pt, x, y, fy > -0.6 ? '#2a1420' : '#55323d');
+        else if (fx < -0.55 && fx > -0.82 && fy < -2) over(Pt, x, y, CL[4]);
+        else if (fx > 0.62 && fy < -1) over(Pt, x, y, CL[1]);
+      }
+      // a thick rim band
+      { const a = rp(-6.4, -9.5), b = rp(6.4, -9.5); tube(Pt, [a, b], 0.9 * u, CL); }
+      // the cast face: a heavy brow and a frowning mouth slit (glowing from within, painted later)
+      put(L, Pt, true);
+      // a heavy scowling brow, cast in relief and soot-dark
+      const Bw = layer(F);
+      const br0 = rp(-0.2, -8), br1 = rp(4.8, -6.6);
+      tube(Bw, [br0, [lerp(br0[0], br1[0], 0.45), lerp(br0[1], br1[1], 0.45) - 0.3 * u], br1], [0.9 * u, 0.7 * u], CL.map((c) => dark(c, 0.78)));
+      put(L, Bw, true);
+      leg(false, t);
+      tong(false);
+      put(F.p, L, false);
+      // molten metal: the brimming surface with a cooling crust, a bubble that swells and pops
+      const m0 = rp(-5.6, -10), m1 = rp(5.8, -10);
+      const heat = hurt ? 0 : a1 || a2 ? 2 : 1;
+      for (const Lx of [F.p, F.e]) { Lx.line(m0[0], m0[1], m1[0], m1[1], HOT[heat >= 1 ? 3 : 2], 2); Lx.line(m0[0] + 1, m0[1] + 1, m1[0] - 1, m1[1] + 1, HOT[2]); }
+      for (let k = 0; k < 3; k++) { const q = rp(-3.6 + k * 3.2, -10.2); F.p.rect(R(q[0]), R(q[1]), 2, 1, C('#4a1420')); F.e.clear(R(q[0]), R(q[1])); F.e.clear(R(q[0]) + 1, R(q[1])); }
+      if (idle || run) { const bp = t * 2 % 1, q = rp(-1 + bp * 2, -10.1 - bp * 0.5); if (bp < 0.75) glow(F, q[0], q[1], Math.max(0.8, (0.3 + bp * 0.5) * u), HOT[4]); else { lit(F, q[0] - 1, q[1] - 2, HOT[4]); lit(F, q[0] + 1, q[1] - 3, HOT[5]); } }
+      // face glow: eyes and mouth slit, the hot interior seen through the clay
+      const eyeC = hurt ? HOT[1] : heat > 1 ? HOT[5] : HOT[4];
+      for (const [ex, ey] of [[0.6, -6.6], [3.4, -5.8]]) { const q = rp(ex, ey); F.p.rrect(R(q[0] - 0.9 * u), R(q[1] - 0.7 * u), R(2.2 * u), R(1.6 * u), C('#2a1420'), 1); eyeGlow(F, q[0] - 0.6 * u, q[1] - 0.4 * u, Math.max(2, R(1.5 * u)), Math.max(1, R((a1 || a2 ? 1.1 : 0.8) * u)), eyeC); }
+      const mq0 = rp(0.2, -3.2), mq1 = rp(4.6, -3), mmid = rp(2.4, a2 ? -3 : -4.2);
+      for (const Lx of [F.p, F.e]) { Lx.line(mq0[0], mq0[1] + 1, mmid[0], mmid[1], C(eyeC)); Lx.line(mmid[0], mmid[1], mq1[0], mq1[1] + 1, C(eyeC)); }
+      // glowing heat-cracks through the clay
+      if (!hurt) { crack(F.p, rp(-4.2, -8.6)[0], rp(-4.2, -8.6)[1], 1.4 + tilt, 3.4 * u, HOT[3], 3, F.e); crack(F.p, rp(5.2, -8.8)[0], rp(5.2, -8.8)[1], 1.9 + tilt, 2.4 * u, HOT[3], 8, F.e); }
+      else crack(F.p, rp(-1, -8)[0], rp(-1, -8)[1], 1.2, 6 * u, '#2a1420', 6);
+      // the pour: a bright stream from the spout arcing to the ground, a splash where it lands
+      const sp = rp(8, -10.4);
+      if (a2) {
+        const land = [sp[0] + 5 * u, oy - 0.5 * u];
+        const st = bez([sp, [sp[0] + 4 * u, sp[1]], land], 14);
+        const S2 = layer(F); tube(S2, st, (q) => lerp(1.3, 0.9, q) * u, HOT.slice(1, 6)); put(F.p, S2, false);
+        for (let i = 0; i < S2.d.length; i += 4) if (S2.d[i + 3]) F.e.d.set([S2.d[i], S2.d[i + 1], S2.d[i + 2], 255], i);
+        for (let k = 0; k < 5; k++) { const a = -Math.PI + k * 0.5 + 0.4; lit(F, land[0] + Math.cos(a) * 2.4 * u, land[1] + Math.sin(a) * 1.6 * u, k % 2 ? HOT[4] : HOT[5]); }
+        F.p.ellipse(land[0], land[1], 2.6 * u, 0.7 * u, HOT[3]); F.e.ellipse(land[0], land[1], 2.6 * u, 0.7 * u, HOT[3]);
+      } else if (!hurt) {
+        // a slow drip from the spout lip
+        const dp = (t * 2) % 1;
+        lit(F, sp[0] + 0.3 * u, sp[1] + 0.8 * u, HOT[4]);
+        lit(F, sp[0] + 0.3 * u, sp[1] + (1.6 + dp * 3) * u, dp > 0.5 ? HOT[3] : HOT[4]);
+      }
+      if (a1) for (let k = 0; k < 3; k++) { const q = rp(-4 + k * 3, -11.6 - k * 0.6); lit(F, q[0], q[1], HOT[4]); }   // sloshing as it rocks back
+      F.mouth = sp;
+    },
+  },
+  // Rift Spawn (rift_spawn, boss): Ginnungagap, the yawning gap before the world, still hungry. The
+  // set piece is the wound itself: a tall torn slit of light hanging in the air, its ragged edges
+  // glowing pink-white, and through it something is squeezing into the world: a lumpy void-plum mass
+  // of many mouths, two tendrils hooked over the edges of the tear to haul itself through, two more
+  // groping along the floor. Deep in its central maw a star-core pulses: the weak point.
+  rift_spawn: {
+    view: 'front', box: [40, 38], pivot: 0.5, idleFps: 5, idle: 6,
+    draw(F, o, P) {
+      const { u, ox, oy } = F;
+      const VB = [C('#2a1030'), C('#4a1a48'), C('#6a2a5e'), C('#8e4282'), C('#b46aa4')];
+      const RE = layer(F), FR = layer(F);   // the rift's glow (applied only where nothing covers it) and a mask of the front parts
+      const t = P.t, run = P.act === 'run', idle = P.act === 'idle', a1 = P.atk === 1, a2 = P.atk === 2, hurt = P.hurt;
+      const cx = ox, swell = a1 ? 1.08 : a2 ? 1.02 : hurt ? 0.9 : 1 + (idle ? sin(t) * 0.025 : 0);
+      const by = oy - 11 * u + (run ? sin(t) * 0.6 * u : 0) + (hurt ? -1 * u : 0);
+      // ------------------------------------------------ the rift: a jagged lens of torn light
+      const rTop = oy - 36 * u, rBot = oy - 3 * u, rW = (a1 ? 8 : hurt ? 9.5 : 7) * u;
+      const rr = srand(77), edgeL = [], edgeR = [];
+      const N = 18;
+      for (let k = 0; k <= N; k++) {
+        const f = k / N, y = lerp(rTop, rBot, f), w = rW * Math.pow(Math.sin(f * Math.PI), 0.8);
+        const jl = (rr() - 0.5) * 2.2 * u * Math.sin(f * Math.PI), jr = (rr() - 0.5) * 2.2 * u * Math.sin(f * Math.PI);
+        const sway = sin(t + f * 0.7) * 0.5 * u * Math.sin(f * Math.PI);
+        edgeL.push([cx - w + jl + sway, y]); edgeR.push([cx + w + jr + sway, y]);
+      }
+      const grow = (pts, side, e) => pts.map(([x, y], k) => [x + side * e * Math.sin((k / N) * Math.PI) + side * 0.3 * e, y + (k === 0 ? -e : k === N ? e : 0)]);
+      const lens = (e) => grow(edgeL, -1, e).concat(grow(edgeR, 1, e).reverse());
+      const flick = idle ? (P.i % 2) * 0.4 : 0;
+      for (const Lx of [F.p, RE]) { Lx.poly(lens((2.6 + flick) * u * 0.6), C('#a026ef')); Lx.poly(lens(1.1 * u * 0.6), C('#f5afd6')); }
+      F.p.poly(lens(0), C('#140818')); RE.poly(lens(0), C('#2f0d48'));
+      // inner swirl and the far stars inside the tear
+      const In = layer(F); In.poly(lens(0), C('#140818'));
+      for (let s2 = 0; s2 < 1; s2 += 0.02) { const a = s2 * 9 + t * TAU * 0.5, rad = s2 * rW * 0.8; over(In, cx + Math.cos(a) * rad, by - 12 * u + Math.sin(a) * rad * 2, '#4a1664'); over(In, cx + Math.cos(a) * rad + 1, by - 12 * u + Math.sin(a) * rad * 2, '#2f0d48'); }
+      put(F.p, In, false);
+      starfield({ p: F.p, e: RE }, cx, by - 13 * u, rW * 0.7, 13 * u, 16, 5, t, In, ['#f5afd6', '#c860f0', '#e6f4fc']);
+      // torn flaps curling out of the edges
+      for (const [k, side] of [[4, -1], [7, 1], [12, -1], [14, 1]]) {
+        const [x, y] = side < 0 ? edgeL[k] : edgeR[k];
+        const tip = [x + side * 2.4 * u, y - 1.6 * u + sin(t + k * 0.1) * 0.4 * u];
+        for (const Lx of [F.p, RE]) Lx.poly([[x, y - 1 * u], tip, [x, y + 1.2 * u]], C(k % 2 ? '#f5afd6' : '#c860f0'));
+      }
+      // ------------------------------------------------ tendrils (behind the body)
+      const tend = (root, tip, ctrl, r0, far) => {
+        const Lt = layer(F), Rm = far ? VB.map((c) => dark(c, 0.8)) : VB;
+        const pts = bez([root, ctrl, tip], 22);
+        tube(Lt, pts, (q) => lerp(r0, 0.35, q) * u, Rm);
+        // suckers: pale dots along the underside
+        for (let k = 4; k < pts.length - 3; k += 3) { const [x, y] = pts[k]; over(Lt, x + 0.5, y + lerp(r0, 0.35, k / pts.length) * u * 0.6, '#f5afd6'); }
+        put(F.p, Lt, true); put(FR, Lt, false);
+      };
+      const lift = a1 ? -3 * u : a2 ? 0 : hurt ? -1 * u : sin(t) * 0.6 * u;
+      const lash = a2 ? 6 * u : a1 ? -2 * u : 0;
+      // upper pair: hooked over the edges of the tear, hauling
+      const gl = edgeL[6], gr = edgeR[5];
+      tend([cx - 4 * u, by - 4 * u], [gl[0] - 1.2 * u, gl[1] - 0.6 * u], [cx - 10 * u, by - 6 * u], 1.8, false);
+      tend([cx + 4 * u, by - 4.5 * u], [gr[0] + 1.2 * u, gr[1] - 0.6 * u], [cx + 10 * u, by - 7 * u], 1.8, false);
+      // hooked tips curling over the rim
+      for (const [g, sd] of [[gl, -1], [gr, 1]]) { const H2 = layer(F); horn(H2, [g[0] + sd * 1.2 * u, g[1] - 0.6 * u], [g[0] + sd * 0.6 * u, g[1] - 2.4 * u], [g[0] - sd * 1.4 * u, g[1] - 1.8 * u], 1.2 * u, VB); put(F.p, H2, true); put(FR, H2, false); }
+      // ------------------------------------------------ the body: a lumpy mass squeezing out
+      const B = layer(F), sw = swell;
+      blob(B, [[cx, by, 9 * u * sw, 7.4 * u * sw], [cx - 5.6 * u, by + 3.4 * u, 5 * u * sw, 4.6 * u], [cx + 5.8 * u, by + 3 * u, 5.2 * u * sw, 5 * u], [cx - 2.6 * u, by - 5.4 * u, 5 * u * sw, 4 * u], [cx + 3.4 * u, by - 6 * u, 4.2 * u * sw, 3.6 * u], [cx, by + 7 * u, 7 * u * sw, 3.6 * u]], VB);
+      // oily magenta sheen: two curved streaks on the lit side
+      for (let a = 3.5; a <= 4.4; a += 0.05) { over(B, cx + Math.cos(a) * 7.4 * u, by + Math.sin(a) * 5.8 * u, '#c860f0'); over(B, cx - 4 * u + Math.cos(a) * 3.6 * u, by + 3 * u + Math.sin(a) * 3 * u, '#a05aa4'); }
+      over(B, cx - 4.6 * u, by - 4.4 * u, '#fff4fb');
+      put(F.p, B, true); put(FR, B, false);
+      // lower pair: groping along the floor, lashing out on the strike
+      tend([cx - 7 * u, by + 5 * u], [cx - 15 * u - lash, oy - 1 * u + lift * 0.5], [cx - 13 * u, by + 2 * u + lift], 2, false);
+      tend([cx + 7 * u, by + 5 * u], [cx + 15 * u + lash, oy - 1 * u + lift * 0.5], [cx + 13 * u, by + 2 * u + lift], 2, false);
+      // the rift's glow, only where the body and tendrils don't cover it
+      for (let i = 3; i < RE.d.length; i += 4) if (RE.d[i] && !FR.d[i]) { F.e.d[i - 3] = RE.d[i - 3]; F.e.d[i - 2] = RE.d[i - 2]; F.e.d[i - 1] = RE.d[i - 1]; F.e.d[i] = RE.d[i]; }
+      // ------------------------------------------------ mouths: they open and shut in turn
+      const mouths = [[0.4, 1.6, 5.4, 0], [-5.4, 4.4, 2.2, 1], [5.6, 4, 2.2, 2], [-2.6, -4.8, 1.8, 3], [3.6, -5.6, 1.6, 4], [-6.4, -1, 1.4, 5]];
+      for (const [mx, my, mw, k] of mouths) {
+        const x = cx + mx * u * sw, y = by + my * u;
+        let open = k === 0 ? (a1 ? 0.75 : a2 ? 1 : hurt ? 0 : 0.35 + sin(t) * 0.1) : (a1 || a2 ? 0.8 : hurt ? 0 : Math.max(0, sin(t + k / 6)) * 0.9);
+        const h = mw * open * 0.75 * u, w = mw * u;
+        if (h < 1) {   // shut: a lip line with fang tips
+          F.p.line(x - w, y, x + w, y, VB[0]); F.p.line(x - w * 0.8, y + 1, x + w * 0.8, y + 1, VB[4]);
+          for (let q = -1; q <= 1; q += 2) F.p.set(R(x + q * w * 0.45), R(y) + 1, C('#f3e1b5'));
+          continue;
+        }
+        F.p.ellipse(x, y, w, h, MAW_D);
+        F.p.ellipse(x, y + h * 0.4, w * 0.6, h * 0.4, C('#7a2f4a'));
+        teeth(F.p, [x - w * 0.85, y - h * 0.8], [x + w * 0.85, y - h * 0.8], Math.max(2, R(mw * 1.6)), Math.max(1, h * 0.45), 1);
+        teeth(F.p, [x - w * 0.7, y + h * 0.85], [x + w * 0.7, y + h * 0.85], Math.max(2, R(mw * 1.2)), Math.max(1, h * 0.35), -1);
+        // lips: a lit upper rim
+        for (let a = 3.3; a < 6.1; a += 0.1) F.p.set(R(x + Math.cos(a) * (w + 0.6)), R(y + Math.sin(a) * (h + 0.6)), VB[4]);
+        if (k === 0) {   // the weak point: a star-core pulsing deep in the central maw
+          const cr = Math.max(1.2, h * (a2 ? 0.55 : 0.4));
+          glow(F, x + 0.3 * u, y + 0.2 * u, cr, a2 ? '#f5afd6' : '#c860f0', { halo: a2 });
+        }
+      }
+      // a face of sorts: three star-eyes, one big, over the central maw; they squeeze shut when hurt
+      for (const [ex, ey, er] of [[-1.6, -1.6, 1.5], [2.6, -2.4, 1], [-4.6, -3.4, 0.8]]) {
+        const x = cx + ex * u * sw, y = by + ey * u;
+        F.p.ellipse(x, y, er * u + 1, er * u * 0.8 + 1, VB[0]);
+        if (hurt) { F.p.line(x - er * u, y, x + er * u, y, C('#f5afd6')); continue; }
+        glow(F, x, y, Math.max(1, er * u * (a1 ? 0.9 : 0.75)), er > 1.2 ? '#f5afd6' : '#c860f0');
+        F.p.set(R(x + (a1 || a2 ? 0 : sin(t) * er * 0.4 * u)), R(y), VOID);
+      }
+      // little star-motes orbiting the mass (the sky it drags along)
+      for (let k = 0; k < 4; k++) { const a = (k / 4 + t * 0.5) * TAU; star(F, cx + Math.cos(a) * 12 * u, by - 2 * u + Math.sin(a) * 4 * u, k === 0, k % 2 ? '#c860f0' : '#f5afd6'); }
+      // the volley charge: motes drawn in on the wind-up; a spray on the strike
+      if (a1) for (let k = 0; k < 10; k++) { const a = k / 10 * TAU; lit(F, cx + Math.cos(a) * 8 * u, by + 1.6 * u + Math.sin(a) * 6 * u, '#f5afd6'); }
+      if (a2) for (let k = 0; k < 8; k++) { const a = k / 8 * TAU + 0.2; glow(F, cx + Math.cos(a) * 11 * u, by + 1.6 * u + Math.sin(a) * 8 * u, Math.max(1, 0.8 * u), '#c860f0'); }
+      if (hurt) tint(F.p, '#f5afd6', 0.12);
+      F.mouth = [cx + 0.4 * u, by + 1.6 * u];
     },
   },
 };
